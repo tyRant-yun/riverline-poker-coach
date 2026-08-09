@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+
+# Node / Next.js (reserved for the future web app)
+node_modules/
+.next/
+out/
+
+# Local configuration and generated reports
+.env
+.env.*
+!.env.example
+dist/
+coverage/
