@@ -126,6 +126,44 @@ def test_known_cards_are_excluded_from_scenario_concrete_ranges():
         ScenarioSpec.model_validate(minimal_scenario(villainRange=range_spec))
 
 
+def test_both_hole_cards_and_board_cannot_repeat_known_cards():
+    with pytest.raises(ValidationError, match="hero, villain, and board cards cannot overlap"):
+        ScenarioSpec.model_validate(
+            minimal_scenario(villainHoleCards=["As", "Qh"])
+        )
+
+    with pytest.raises(ValidationError, match="hero, villain, and board cards cannot overlap"):
+        ScenarioSpec.model_validate(
+            minimal_scenario(board=["As"], villainHoleCards=["Qh", "Jc"])
+        )
+
+
+def test_action_ids_must_be_unique_in_a_replay_history():
+    with pytest.raises(ValidationError, match="action_id values must be unique"):
+        ScenarioSpec.model_validate(
+            minimal_scenario(
+                actionHistory=[
+                    {
+                        "actionId": "same",
+                        "sequence": 1,
+                        "street": "preflop",
+                        "actorSeat": 0,
+                        "actionType": "call",
+                        "amount": 50,
+                        "amountType": "cost",
+                    },
+                    {
+                        "actionId": "same",
+                        "sequence": 2,
+                        "street": "preflop",
+                        "actorSeat": 1,
+                        "actionType": "check",
+                    },
+                ]
+            )
+        )
+
+
 def test_evidence_references_are_checked_against_bundle():
     bundle = EvidenceBundle(
         items=[

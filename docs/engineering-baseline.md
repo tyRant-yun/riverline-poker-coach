@@ -1,6 +1,6 @@
 # 工程基线
 
-更新时间：2026-08-09
+更新时间：2026-08-10
 
 ## 审计结论
 
@@ -11,7 +11,7 @@
 - 前端源代码、API、数据库迁移或 Docker 配置；
 - README、LICENSE 或现有启动命令。
 
-目前已建立 Python 领域核心和 PokerKit 适配层；前端、API 和持久化仍未实现。当前依赖及许可证见 [`docs/dependency-inventory.md`](dependency-inventory.md)。
+目前已建立 Python 领域核心、PokerKit 适配层、分析核心、FastAPI、SQLite 持久化和 Next.js 前端切片；当前依赖及许可证见 [`docs/dependency-inventory.md`](dependency-inventory.md)。
 
 ## 已确认的工程约束
 
@@ -24,18 +24,23 @@
 
 ## 当前限制
 
-1. 还没有 FastAPI、Next.js、数据库和 Redis 启动链路。
-2. PokerKit 适配层当前覆盖人工输入的盲注、常规动作、公共牌事件和全下状态；摊牌胜负需要双方具体底牌，而当前 ScenarioSpec 只保存 Hero 底牌，因此不能伪造 showdown 结果。
-3. 金标牌谱还需要继续补充 split pot、具体牌型比较和非法重复动作案例。
+1. 当前本地默认使用 SQLite；PostgreSQL、Redis 和轻量异步任务队列尚未接入生产部署链路。
+2. `villainHoleCards` 可以缺省以支持未摊牌场景；只有双方具体底牌都存在时才会完成摊牌比较和派奖，系统不会为未知底牌伪造赢家。
+3. `rakeConfig` 已进入领域合同，但 MVP 规则适配层明确拒绝启用抽水；当前结算使用无抽水假设。
+4. 分池和奇数筹码分配由 PokerKit 的 `ChipsPushing` 裁决；领域结果记录规则为底池顺序中第一位有资格获胜者取得余数，适配层不复制派奖算法。
 
-## 已完成的首个可运行切片
+## 已完成的可运行切片
 
-已实现一个无数据库、无 Agent、可独立测试的领域核心：
+已实现一个可在本地独立测试和运行的切片：
 
 1. 版本化 `ScenarioSpec`、`ActionEvent`、`RangeSpec` 和分析证据模型；
-2. PokerKit 事件重放接口与领域错误模型；
-3. PokerKit 适配层和自有状态快照；
-4. 金额、牌面、范围、证据绑定和规则边界测试；
-5. 下一步再接 FastAPI 和 Next.js。
+2. 双方具体底牌、公共牌去重和确定性 JSON 合同；
+3. PokerKit 事件重放、合法动作、错误状态和自有状态快照；
+4. 弃牌直结、自动全下发牌、最佳五张比较、单赢家、分池、派奖和最终筹码；
+5. 金标牌谱、非法动作和回放不变量测试；
+6. 确定性数学、牌力/牌面结构、范围组合和 Equity 证据；
+7. FastAPI 校验、分析、场景管理和 principle-only 教学接口；
+8. SQLite 场景、版本、分析历史和复制/收藏/删除能力；
+9. Next.js 人工场景编辑器和分析结果展示。
 
-这样可以在本地不依赖 PostgreSQL、Redis 或复杂集群的情况下验证最重要的规则不变量。
+这样可以在本地不依赖 PostgreSQL、Redis 或复杂集群的情况下验证规则、分析和证据边界；生产数据库和异步执行仍需后续阶段补齐。

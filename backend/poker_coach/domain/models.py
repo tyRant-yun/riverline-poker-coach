@@ -354,6 +354,7 @@ class ScenarioSpec(DomainModel):
     hero_seat: SeatNumber = 0
     seats: tuple[SeatSpec, ...] = Field(min_length=2, max_length=6)
     hero_hole_cards: tuple[Card, Card]
+    villain_hole_cards: tuple[Card, Card] | None = None
     board: tuple[Card, ...] = Field(default=(), max_length=5)
     action_history: tuple[ActionEvent, ...] = ()
     decision_point: DecisionPoint = Field(
@@ -371,6 +372,17 @@ class ScenarioSpec(DomainModel):
     def validate_hole_cards(cls, cards: tuple[str, str]) -> tuple[str, str]:
         if cards[0] == cards[1]:
             raise ValueError("hero_hole_cards cannot contain duplicates")
+        return tuple(sorted(cards, key=_card_sort_key))  # type: ignore[return-value]
+
+    @field_validator("villain_hole_cards")
+    @classmethod
+    def validate_villain_hole_cards(
+        cls, cards: tuple[str, str] | None
+    ) -> tuple[str, str] | None:
+        if cards is None:
+            return None
+        if cards[0] == cards[1]:
+            raise ValueError("villain_hole_cards cannot contain duplicates")
         return tuple(sorted(cards, key=_card_sort_key))  # type: ignore[return-value]
 
     @field_validator("board")
@@ -415,10 +427,18 @@ class ScenarioSpec(DomainModel):
         sequences = [event.sequence for event in self.action_history]
         if sequences != list(range(1, len(sequences) + 1)):
             raise ValueError("action_history sequence must be contiguous and start at 1")
+        action_ids = [event.action_id for event in self.action_history]
+        if len(action_ids) != len(set(action_ids)):
+            raise ValueError("action_history action_id values must be unique")
         if self.decision_point.after_sequence > len(self.action_history):
             raise ValueError("decision_point.after_sequence exceeds action_history")
 
-        known_cards = set(self.hero_hole_cards).union(self.board)
+        all_known_cards = list(self.hero_hole_cards) + list(self.board)
+        if self.villain_hole_cards is not None:
+            all_known_cards.extend(self.villain_hole_cards)
+        if len(all_known_cards) != len(set(all_known_cards)):
+            raise ValueError("hero, villain, and board cards cannot overlap")
+        known_cards = set(all_known_cards)
         for range_name, range_spec in (
             ("hero_range", self.hero_range),
             ("villain_range", self.villain_range),
@@ -564,11 +584,22 @@ class LegalActions(DomainModel):
 class StateSnapshot(DomainModel):
     street: Street
     actor_seat: SeatNumber | None = None
+    board: tuple[Card, ...] = ()
     pot: ChipAmount
     stacks: dict[SeatNumber, ChipAmount]
     bets: dict[SeatNumber, ChipAmount]
+    folded_seats: tuple[SeatNumber, ...] = ()
     hand_in_progress: bool
     legal_actions: LegalActions = Field(default_factory=LegalActions)
+
+
+class SettlementResult(DomainModel):
+    completed: bool
+    reason: str | None = None
+    winner_seats: tuple[SeatNumber, ...] = ()
+    payouts: dict[SeatNumber, ChipAmount] = Field(default_factory=dict)
+    total_awarded: ChipAmount = 0
+    odd_chip_rule: str = "first_eligible_winner_in_pot_order"
 
 
 class ReplayResult(DomainModel):
@@ -576,6 +607,7 @@ class ReplayResult(DomainModel):
     rules_engine_version: str
     snapshots: tuple[StateSnapshot, ...]
     final_state: StateSnapshot
+    settlement: SettlementResult = Field(default_factory=lambda: SettlementResult(completed=False))
 
 
 class DomainIssue(DomainModel):

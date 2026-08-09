@@ -15,5 +15,6 @@ out/
 .env
 .env.*
 !.env.example
+.data/
 dist/
 coverage/
