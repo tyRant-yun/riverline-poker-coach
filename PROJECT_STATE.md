@@ -21,6 +21,7 @@
 | 79bff76 | street 派生修复（按已发牌面而非 street_index） | 79bff76 |
 | UX | 52 张选牌器、复盘模式（只填自己手牌）、提亮 token、使用说明 | a56e5db |
 | Fresh | **全新一把**默认起点：0 输入/0 行动/只有盲注（POT 150）+ 测试基建加固 | 6ea3498 |
+| Closure | 收口轮：multiway MC 无偏采样（Exact↔MC parity）、fresh-hand 前端 null 契约+E2E、solver rangesBySeat 桥、seat-based 前端状态、domain 校验收紧、CI vitest | e0c2908 … 79a8437 |
 
 分支：`main`（单分支工作流），`origin/main` 与本地同步（ahead 0 / behind 0）。
 
@@ -28,12 +29,12 @@
 
 | 门 | 结果 |
 |---|---|
-| Backend pytest（仓库根，unset PYTHONPATH） | **236 passed + 8 skipped**（live-PG 需 POKER_COACH_TEST_PG_URL 才跑） |
+| Backend pytest（仓库根，unset PYTHONPATH） | **250 passed + 8 skipped**（live-PG 需 POKER_COACH_TEST_PG_URL 才跑） |
 | compileall / pip check | OK |
-| vitest（frontend） | **53/53**（10 文件） |
+| vitest（frontend） | **75/75**（15 文件，含 fresh-hand/multiway/seat-based 回归） |
 | tsc --noEmit | 0 错误 |
 | next build | ✓ |
-| Playwright E2E | **5/5**（hermetic webServer） |
+| Playwright E2E | **6/6**（含 fresh-hand 无 Hero 手牌 Analyze 回归；hermetic webServer） |
 | hermes verify --json | ok: True（build + test；start/readiness 依赖 compose） |
 
 ## 4. 关键架构约束（不可违背）
@@ -45,6 +46,8 @@
 - **版本锁**：vitest 3.x ↔ vite@^6 ↔ @vitejs/plugin-react@^5；vitest 需 globals:true。
 - **pydantic validator 禁原地赋值**：validate_assignment=True 下必须 `model_copy(update=...)` 末尾返回（防无限递归）。
 - **复盘/空场景诚实降级**：hero/villain 手牌缺失时 equity 不计算（显式警告），不伪造对手信息；策略匹配与教学（原则性）不受影响。
+- **Equity MC 采样契约**：range weights 只在 proposal 中用一次；multiway/pair 必须整元组独立抽样+整体 rejection（接受样本即精确联合分布），禁止逐 seat conditional rejection 或对结果再乘权重。
+- **seat 契约**：seat IDs 必须连续 0..table_size-1；knownHoleCardsBySeat 每个 seat 恰 2 张（空数组=缺失）；solver 的 range 真相源是 rangesBySeat（按两个 active seat 解析），Hero/Villain 仅是 Coach 视角。
 
 ## 5. PokerKit 地面真值（8B 探针实测）
 
