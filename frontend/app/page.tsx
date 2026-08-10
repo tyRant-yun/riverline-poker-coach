@@ -27,6 +27,7 @@ import type {
   Scenario,
   ScenarioRevision,
 } from "../types/scenario";
+import type { BeliefMode, RangeBeliefView } from "../types/rangeBelief";
 import type { SeatViewModel } from "../types/poker";
 
 import {
@@ -98,6 +99,9 @@ export default function Home() {
   const [rangeMatrix, setRangeMatrix] = useState<Record<string, string>>({});
   const [rangeSummary, setRangeSummary] = useState<RangeSummary | null>(null);
   const [rangeCombos, setRangeCombos] = useState<RangeCombo[]>([]);
+  const [rangeBelief, setRangeBelief] = useState<RangeBeliefView | null>(null);
+  const [rangeBeliefLoading, setRangeBeliefLoading] = useState(false);
+  const [beliefMode, setBeliefMode] = useState<BeliefMode>("prior");
   const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
   const [activeRevisionNo, setActiveRevisionNo] = useState<number | null>(null);
@@ -189,6 +193,7 @@ export default function Home() {
     setTeaching(null);
     setPractice(null);
     setPracticeOutcome(null);
+    setRangeBelief(null);
   }
 
   function undo() {
@@ -261,6 +266,40 @@ export default function Home() {
     setRangeMatrix(selected?.matrix169 ?? {});
     setRangeSummary(null);
     setRangeCombos([]);
+    // The belief view follows the selected seat; refetch when a solver
+    // result exists, otherwise clear (prior-only / unavailable).
+    if (solveJob?.result) {
+      void fetchRangeBelief(side);
+    } else {
+      setRangeBelief(null);
+    }
+  }
+
+  function beliefSeatForSide(side: RangeSide): number | null {
+    if (side === "heroRange") return scenario.heroSeat;
+    const other = scenario.seats.find((seat) => seat.seatId !== scenario.heroSeat);
+    return other?.seatId ?? null;
+  }
+
+  async function fetchRangeBelief(side: RangeSide = rangeSide) {
+    const seatId = beliefSeatForSide(side);
+    if (seatId == null) {
+      setRangeBelief(null);
+      return;
+    }
+    const policy = solveJob?.result
+      ? { source: "solver" as const, result: solveJob.result }
+      : undefined;
+    setRangeBeliefLoading(true);
+    try {
+      const payload = await rangesApi.belief({ scenario, seatId, policy });
+      setRangeBelief(payload);
+    } catch (error) {
+      setRangeBelief(null);
+      setMessage(error instanceof Error ? error.message : "range belief 计算失败");
+    } finally {
+      setRangeBeliefLoading(false);
+    }
   }
 
   function syncRangeEditor(nextScenario: Scenario) {
@@ -707,6 +746,9 @@ export default function Home() {
               ? "求解完成；策略频率可作为 solver_backed 证据引用。"
               : `求解${payload.status}${payload.error ? `：${payload.error}` : ""}`,
           );
+          if (payload.status === "solved") {
+            void fetchRangeBelief();
+          }
           return;
         }
       } catch {
@@ -857,11 +899,15 @@ export default function Home() {
             rangeMatrix={rangeMatrix}
             rangeSummary={rangeSummary}
             rangeCombos={rangeCombos}
+            belief={rangeBelief}
+            beliefLoading={rangeBeliefLoading}
+            beliefMode={beliefMode}
             onRangeSideChange={selectRangeSide}
             onRangeTextChange={setCurrentRangeText}
             onApplyDefault={(key) => void applyDefaultRange(key)}
             onParse={() => void parseRange()}
             onCycleCell={(cell) => void cycleRangeCell(cell)}
+            onBeliefModeChange={setBeliefMode}
           />
 
           <AnalyzeActions
