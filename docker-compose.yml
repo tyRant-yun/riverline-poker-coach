@@ -1,0 +1,52 @@
+name: poker-coach
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: coach
+      POSTGRES_PASSWORD: coach
+      POSTGRES_DB: coach
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coach"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    environment:
+      POKER_COACH_DATABASE_URL: postgresql://coach:coach@postgres:5432/coach
+      POKER_COACH_REDIS_URL: redis://redis:6379/0
+      POKER_COACH_REDIS_WORKER_IN_PROCESS: "0"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+    command: ["python", "-m", "poker_coach.jobs", "--redis-url", "redis://redis:6379/0"]
+    environment:
+      POKER_COACH_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
