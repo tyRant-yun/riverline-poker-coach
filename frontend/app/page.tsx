@@ -2,10 +2,19 @@
 
 // Workspace composition root. Scenario state, API orchestration, undo/redo
 // and cross-feature wiring live here; rendering lives in features/components.
+// F2: AppShell + three-column workspace + tabbed result workspace.
 
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 
-import type { SolverNodePayload, SolveJob, StateResponse, TeachingMeta, TeachingResponse, PracticeOutcome, PracticeQuestion, AnalysisResponse } from "../types/api";
+import type {
+  SolveJob,
+  StateResponse,
+  TeachingMeta,
+  TeachingResponse,
+  PracticeOutcome,
+  PracticeQuestion,
+  AnalysisResponse,
+} from "../types/api";
 import type {
   ActionEvent,
   AnalysisComparison,
@@ -13,7 +22,6 @@ import type {
   DefaultRanges,
   RangeCombo,
   RangeSide,
-  RangeSpecPayload,
   RangeSummary,
   SavedScenario,
   Scenario,
@@ -24,7 +32,6 @@ import type { SeatViewModel } from "../types/poker";
 import {
   analysisApi,
   coachApi,
-  errorMessage,
   practiceApi,
   rangesApi,
   scenariosApi,
@@ -34,36 +41,18 @@ import { cardsToViewModels } from "../lib/poker/cards";
 import { notationFromMatrix, notationFromMatrixExplicit } from "../lib/poker/matrix";
 import { positionLabel } from "../lib/poker/positions";
 
+import AppShell, { type WorkspaceView } from "../components/AppShell";
 import PokerTable from "../components/poker/PokerTable";
 import ActionBar from "../components/poker/ActionBar";
 import ScenarioEditor from "../features/scenario/ScenarioEditor";
 import ActionTimeline from "../features/scenario/ActionTimeline";
 import RangeEditor from "../features/range/RangeEditor";
 import ScenarioHistory from "../features/history/ScenarioHistory";
-import AnalysisPanel from "../features/analysis/AnalysisPanel";
+import AnalyzeActions from "../features/workspace/AnalyzeActions";
+import ResultWorkspace, { type ResultTab } from "../features/workspace/ResultWorkspace";
 import TeachingPanel from "../features/coach/TeachingPanel";
 import PracticePanel from "../features/practice/PracticePanel";
-
-function solvePrimary(node?: SolverNodePayload | null): { action: string; frequency: number } | null {
-  if (!node || !node.hands.length) return null;
-  const total = node.hands.reduce((sum, hand) => sum + hand.weight, 0) || 1;
-  const weighted: Record<string, number> = {};
-  for (const hand of node.hands) {
-    for (const [action, frequency] of Object.entries(hand.strategy)) {
-      weighted[action] = (weighted[action] ?? 0) + hand.weight * frequency;
-    }
-  }
-  const action = Object.keys(weighted).sort((a, b) => weighted[b] - weighted[a])[0];
-  return { action, frequency: (weighted[action] ?? 0) / total };
-}
-
-function solveHeroCombo(node: SolverNodePayload | undefined | null, cards: string[]): SolverNodePayload["hands"][number] | null {
-  if (!node || cards.length !== 2) return null;
-  return node.hands.find((hand) => {
-    const comboSet = new Set([hand.combo.slice(0, 2), hand.combo.slice(2, 4)]);
-    return cards.every((card) => comboSet.has(card));
-  }) ?? null;
-}
+import SolvePanel from "../features/solver/SolvePanel";
 
 const initialScenario: Scenario = {
   schemaVersion: 1,
@@ -118,6 +107,8 @@ export default function Home() {
   const [raiseAmount, setRaiseAmount] = useState<number | "">("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("先输入牌面，再使用合法动作按钮推进牌局。");
+  const [activeView, setActiveView] = useState<WorkspaceView>("handlab");
+  const [resultTab, setResultTab] = useState<ResultTab>("evidence");
 
   useEffect(() => {
     void loadSavedScenarios();
@@ -125,6 +116,20 @@ export default function Home() {
     void refreshState(initialScenario);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The result workspace follows newly arrived results.
+  useEffect(() => {
+    if (analysis) setResultTab("evidence");
+  }, [analysis]);
+  useEffect(() => {
+    if (teaching) setResultTab("coach");
+  }, [teaching]);
+  useEffect(() => {
+    if (practice) setResultTab("practice");
+  }, [practice]);
+  useEffect(() => {
+    if (solveJob) setResultTab("solver");
+  }, [solveJob]);
 
   const rangeText = rangeTextBySide[rangeSide];
 
@@ -705,72 +710,26 @@ export default function Home() {
     }
   }
 
-  return (
-    <main className="shell">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">RIVERLINE / HU NLHE</p>
-          <h1>Decision Lab</h1>
-        </div>
-        <div className="status-pill"><span className="pulse" />本地规则核心在线</div>
-      </header>
+  const canSubmitSolve = Boolean(scenario.heroRange && scenario.villainRange) && !busy;
 
-      <div className="workspace-grid">
-        <section className="panel editor-panel">
-          <ScenarioEditor
-            scenario={scenario}
-            boardInput={boardInput}
-            busy={busy}
-            canUndo={pastScenarios.length > 0}
-            canRedo={futureScenarios.length > 0}
-            onReset={() => void resetScenario()}
-            onUndo={undo}
-            onRedo={redo}
-            onUpdateScenario={updateScenario}
-            onUpdateBoard={updateBoard}
-          />
-
-          <div className="table-card">
-            <PokerTable
-              seats={tableSeats}
-              board={scenario.board}
-              pot={state?.pot ?? null}
+  const handLab = (
+    <>
+      <div className="workspace">
+        <aside className="left-rail">
+          <section className="panel editor-panel">
+            <ScenarioEditor
+              scenario={scenario}
+              boardInput={boardInput}
+              busy={busy}
+              canUndo={pastScenarios.length > 0}
+              canRedo={futureScenarios.length > 0}
+              onReset={() => void resetScenario()}
+              onUndo={undo}
+              onRedo={redo}
+              onUpdateScenario={updateScenario}
+              onUpdateBoard={updateBoard}
             />
-          </div>
-
-          <ActionBar
-            legal={legal ?? null}
-            currentStreet={currentStreet}
-            busy={busy}
-            boardLength={scenario.board.length}
-            raiseAmount={raiseAmount}
-            onRaiseAmountChange={setRaiseAmount}
-            onAction={(actionType, requestedAmount) => void appendAction(actionType, requestedAmount)}
-            onDeal={(street) => void deal(street)}
-          />
-
-          <ActionTimeline
-            events={scenario.actionHistory}
-            selectedSequence={scenario.decisionPoint.afterSequence}
-            onSelectNode={(sequence, street) => void selectNode(sequence, street)}
-            onRefresh={() => void refreshState()}
-          />
-        </section>
-
-        <aside className="side-column">
-          <RangeEditor
-            rangeSide={rangeSide}
-            rangeText={rangeText}
-            defaultRanges={defaultRanges}
-            rangeMatrix={rangeMatrix}
-            rangeSummary={rangeSummary}
-            rangeCombos={rangeCombos}
-            onRangeSideChange={selectRangeSide}
-            onRangeTextChange={setCurrentRangeText}
-            onApplyDefault={(key) => void applyDefaultRange(key)}
-            onParse={() => void parseRange()}
-            onCycleCell={(cell) => void cycleRangeCell(cell)}
-          />
+          </section>
 
           <ScenarioHistory
             savedScenarios={savedScenarios}
@@ -794,23 +753,106 @@ export default function Home() {
           />
 
           <section className="panel compact-panel">
-            <div className="panel-heading"><div><p className="eyebrow">03 · ANALYZE</p><h2>输出证据</h2></div><span className="source-tag green">grounded</span></div>
-            <p className="muted">编辑完成后重新分析。没有可靠策略数据时，结果只提供数学与原理层证据。</p>
-            <div className="teaching-controls"><label>教学深度<select aria-label="教学深度" value={teachingDepth} onChange={(event) => setTeachingDepth(event.target.value)}><option value="beginner">新手</option><option value="intermediate">进阶</option><option value="advanced">高级</option></select></label></div>
-            <label className="teaching-question">教学问题<textarea aria-label="教学问题" placeholder="例如：如果对手范围更紧，行动会怎样变化？" value={teachingQuestion} onChange={(event) => setTeachingQuestion(event.target.value)} /></label>
-            <div className="primary-actions"><button onClick={() => refreshState()} disabled={busy}>校验场景</button><button onClick={runAnalysis} disabled={busy}>生成分析</button><button onClick={runTeaching} disabled={busy}>教学解释</button><button onClick={generatePractice} disabled={busy}>生成练习</button><button className="secondary-button" onClick={saveScenario} disabled={busy}>保存场景</button><button className="secondary-button" onClick={exportScenario} disabled={busy}>导出 JSON</button><label className="secondary-button import-button">导入 JSON<input type="file" accept="application/json,.json" aria-label="导入 JSON" onChange={(event) => void importScenarioFile(event)} disabled={busy} /></label></div>
-            <p className="notice">{message}</p>
+            <ActionTimeline
+              events={scenario.actionHistory}
+              selectedSequence={scenario.decisionPoint.afterSequence}
+              onSelectNode={(sequence, street) => void selectNode(sequence, street)}
+              onRefresh={() => void refreshState()}
+            />
           </section>
+        </aside>
+
+        <main className="table-area">
+          <section className="panel table-panel">
+            <PokerTable seats={tableSeats} board={scenario.board} pot={state?.pot ?? null} />
+            <ActionBar
+              legal={legal ?? null}
+              currentStreet={currentStreet}
+              busy={busy}
+              boardLength={scenario.board.length}
+              raiseAmount={raiseAmount}
+              onRaiseAmountChange={setRaiseAmount}
+              onAction={(actionType, requestedAmount) => void appendAction(actionType, requestedAmount)}
+              onDeal={(street) => void deal(street)}
+            />
+          </section>
+        </main>
+
+        <aside className="right-rail">
+          <RangeEditor
+            rangeSide={rangeSide}
+            rangeText={rangeText}
+            defaultRanges={defaultRanges}
+            rangeMatrix={rangeMatrix}
+            rangeSummary={rangeSummary}
+            rangeCombos={rangeCombos}
+            onRangeSideChange={selectRangeSide}
+            onRangeTextChange={setCurrentRangeText}
+            onApplyDefault={(key) => void applyDefaultRange(key)}
+            onParse={() => void parseRange()}
+            onCycleCell={(cell) => void cycleRangeCell(cell)}
+          />
+
+          <AnalyzeActions
+            busy={busy}
+            teachingDepth={teachingDepth}
+            teachingQuestion={teachingQuestion}
+            message={message}
+            onTeachingDepthChange={setTeachingDepth}
+            onTeachingQuestionChange={setTeachingQuestion}
+            onValidate={() => void refreshState()}
+            onAnalyze={() => void runAnalysis()}
+            onTeach={() => void runTeaching()}
+            onPractice={() => void generatePractice()}
+            onSave={() => void saveScenario()}
+            onExport={exportScenario}
+            onImportFile={(event) => void importScenarioFile(event)}
+          />
         </aside>
       </div>
 
-      {analysis && <AnalysisPanel analysis={analysis} analysisStale={analysisStale} />}
+      <ResultWorkspace
+        activeTab={resultTab}
+        onTabChange={setResultTab}
+        analysis={analysis}
+        analysisStale={analysisStale}
+        teaching={teaching}
+        teachingMeta={teachingMeta}
+        practice={practice}
+        practiceOutcome={practiceOutcome}
+        legalActions={state?.legalActions.actions ?? []}
+        busy={busy}
+        solveJob={solveJob}
+        canSubmitSolve={canSubmitSolve}
+        heroHoleCards={scenario.heroHoleCards}
+        onSolveSubmit={() => void submitSolve()}
+        onPracticeAnswer={(action) => void answerPractice(action)}
+      />
+    </>
+  );
 
-      {teaching && <TeachingPanel teaching={teaching} teachingMeta={teachingMeta} />}
+  const solverView = (
+    <div className="focused-view">
+      <section className="panel table-panel">
+        <PokerTable seats={tableSeats} board={scenario.board} pot={state?.pot ?? null} />
+      </section>
+      <SolvePanel
+        solveJob={solveJob}
+        canSubmit={canSubmitSolve}
+        heroHoleCards={scenario.heroHoleCards}
+        onSubmit={() => void submitSolve()}
+      />
+    </div>
+  );
 
-      <section className="panel solve-panel"><div className="panel-heading"><div><p className="eyebrow">06 · SOLVER</p><h2>Solver 策略求解</h2></div><span className="source-tag">solver_backed{solveJob ? ` · ${solveJob.status}` : ""}</span></div>{!solveJob ? <div className="action-buttons"><button onClick={() => void submitSolve()} disabled={busy || !scenario.heroRange || !scenario.villainRange}>提交 Solver 求解（独立容器）</button><p className="muted small">需要 Hero 与 Villain 范围（用上方范围面板选择默认范围或手动输入）。求解约 1–3 分钟。</p></div> : <div>{solveJob.status === "solved" && solveJob.result?.metadata ? <div className="teaching-columns"><div><p className="eyebrow">求解质量</p><p className="result-line"><strong>exploitability</strong> {solveJob.result.metadata.exploitabilityChips.toFixed(3)} chips</p><p className="result-line"><strong>耗时</strong> {(solveJob.result.metadata.solveTimeMs / 1000).toFixed(1)}s</p><p className="result-line"><strong>迭代</strong> {solveJob.result.metadata.maxIterations}</p><p className="result-line"><strong>引擎</strong> {solveJob.result.metadata.solver} {solveJob.result.metadata.version}</p></div><div><p className="eyebrow">OOP 主导动作</p>{(() => { const primary = solvePrimary(solveJob.result?.root); return primary ? <p className="result-line"><strong>{primary.action}</strong> · {primary.frequency.toFixed(3)}</p> : <p className="muted">—</p>; })()}<p className="eyebrow">IP 响应主导动作</p>{(() => { const primary = solvePrimary(solveJob.result?.responseNode); return primary ? <p className="result-line"><strong>{primary.action}</strong> · {primary.frequency.toFixed(3)}</p> : <p className="muted">—</p>; })()}<p className="eyebrow">Hero 手牌（{scenario.heroHoleCards?.join(" ")}）</p>{(() => { const combo = solveHeroCombo(solveJob.result?.root, scenario.heroHoleCards ?? []) ?? solveHeroCombo(solveJob.result?.responseNode, scenario.heroHoleCards ?? []); return combo ? <p className="result-line"><strong>{Object.entries(combo.strategy).sort((a, b) => b[1] - a[1])[0][0]}</strong> · {Object.entries(combo.strategy).sort((a, b) => b[1] - a[1])[0][1].toFixed(3)} · EV {combo.ev.toFixed(1)}</p> : <p className="muted">手牌不在当前求解范围中</p>; })()}</div></div> : ["queued", "running", "cancellation_requested"].includes(solveJob.status) ? <p className="muted">求解进行中（独立 sidecar 容器）…</p> : solveJob.error ? <p className="warning">{solveJob.error}</p> : <p className="muted">状态：{solveJob.status}</p>}</div>}</section>
-
-      {practice && (
+  const trainView = (
+    <div className="focused-view">
+      {teaching ? (
+        <TeachingPanel teaching={teaching} teachingMeta={teachingMeta} />
+      ) : (
+        <p className="muted view-placeholder">先在 Hand Lab 中点击「教学解释」生成教学回答。</p>
+      )}
+      {practice ? (
         <PracticePanel
           practice={practice}
           practiceOutcome={practiceOutcome}
@@ -818,9 +860,47 @@ export default function Home() {
           busy={busy}
           onAnswer={(action) => void answerPractice(action)}
         />
+      ) : (
+        <p className="muted view-placeholder">先在 Hand Lab 中点击「生成练习」创建验证练习。</p>
       )}
+    </div>
+  );
 
-      <footer><span>ScenarioSpec → Replay → EvidenceBundle</span><span>无 Solver 频率 · 无自动行动</span></footer>
-    </main>
+  const libraryView = (
+    <div className="focused-view">
+      <ScenarioHistory
+        savedScenarios={savedScenarios}
+        historyScenarioId={historyScenarioId}
+        savedRevisions={savedRevisions}
+        savedAnalyses={savedAnalyses}
+        compareLeft={compareLeft}
+        compareRight={compareRight}
+        comparison={comparison}
+        onRefresh={() => void loadSavedScenarios()}
+        onLoad={loadSaved}
+        onLoadHistory={(record) => void loadAnalysisHistory(record)}
+        onReanalyze={(record) => void reanalyzeSaved(record)}
+        onDelete={(record) => void deleteSaved(record)}
+        onCopy={(record) => void copySaved(record)}
+        onLoadRevision={loadRevision}
+        onReanalyzeRevision={(revision, title) => void reanalyzeRevision(revision, title)}
+        onCompareLeftChange={setCompareLeft}
+        onCompareRightChange={setCompareRight}
+        onCompare={() => void compareHistory()}
+      />
+    </div>
+  );
+
+  return (
+    <AppShell activeView={activeView} onViewChange={setActiveView}>
+      {activeView === "handlab" && handLab}
+      {activeView === "solver" && solverView}
+      {activeView === "train" && trainView}
+      {activeView === "library" && libraryView}
+      <footer>
+        <span>ScenarioSpec → Replay → EvidenceBundle</span>
+        <span>无 Solver 频率 · 无自动行动</span>
+      </footer>
+    </AppShell>
   );
 }
