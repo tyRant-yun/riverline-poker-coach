@@ -94,11 +94,11 @@ def analyze_scenario(
         villain_seat=villain_seat,
         bet_amount=_last_bet_amount(prefix_scenario),
     )
-    hand = analyze_hand(scenario.hero_hole_cards, snapshot.board)
-    board = analyze_board(snapshot.board)
-    engine = equity_engine or EquityEngine()
     strategy_match = (strategy_catalog or StrategyCatalog()).match(scenario)
     warnings: list[str] = []
+    hand = analyze_hand(scenario.hero_hole_cards, snapshot.board) if scenario.hero_hole_cards else None
+    board = analyze_board(snapshot.board)
+    engine = equity_engine or EquityEngine()
     equity: EquityResult | None = None
     multiway_equity: MultiwayEquityResult | None = None
     range_analysis = None
@@ -125,7 +125,11 @@ def analyze_scenario(
                 "known hole cards or a range"
             )
     else:
-        if scenario.villain_range is not None:
+        if scenario.hero_hole_cards is None:
+            # A fresh hand (no hero cards yet) is a legitimate starting point:
+            # range-vs-range equity still works, hand-based analysis degrades.
+            warnings.append("hero hole cards are missing; hand analysis is unavailable")
+        elif scenario.villain_range is not None:
             range_analysis = analyze_range(
                 scenario.villain_range,
                 snapshot.board,
@@ -148,15 +152,16 @@ def analyze_scenario(
                     cancel_event=cancel_event,
                     timeout_seconds=timeout_seconds,
                 )
-                range_comparison = compare_ranges(
-                    scenario.hero_range,
-                    scenario.villain_range,
-                    snapshot.board,
-                    hero_known_cards=tuple(scenario.hero_hole_cards),
-                    villain_known_cards=tuple(scenario.villain_hole_cards or ()),
-                    hero_equity=equity.hero_equity,
-                )
-            elif scenario.villain_hole_cards is not None:
+                if scenario.hero_hole_cards is not None:
+                    range_comparison = compare_ranges(
+                        scenario.hero_range,
+                        scenario.villain_range,
+                        snapshot.board,
+                        hero_known_cards=tuple(scenario.hero_hole_cards),
+                        villain_known_cards=tuple(scenario.villain_hole_cards or ()),
+                        hero_equity=equity.hero_equity,
+                    )
+            elif scenario.villain_hole_cards is not None and scenario.hero_hole_cards is not None:
                 equity = engine.evaluate_hand_vs_hand(
                     scenario.hero_hole_cards,
                     scenario.villain_hole_cards,
@@ -167,7 +172,7 @@ def analyze_scenario(
                     cancel_event=cancel_event,
                     timeout_seconds=timeout_seconds,
                 )
-            elif scenario.villain_range is not None:
+            elif scenario.villain_range is not None and scenario.hero_hole_cards is not None:
                 equity = engine.evaluate_hand_vs_range(
                     scenario.hero_hole_cards,
                     scenario.villain_range,
@@ -202,53 +207,54 @@ def analyze_scenario(
         description="Actions accepted by the current rules state",
         source_version=replay.rules_engine_version,
     )
-    builder.add(
-        "hand.category",
-        "hand_category",
-        hand.category.value,
-        unit=None,
-        source_level=AnalysisLevel.DETERMINISTIC,
-        description="Hero's current best hand category",
-    )
-    builder.add(
-        "hand.made_hand",
-        "made_hand",
-        hand.made_hand,
-        unit=None,
-        source_level=AnalysisLevel.DETERMINISTIC,
-        description="Hero's made-hand classification",
-    )
-    builder.add(
-        "hand.draws",
-        "draws",
-        [draw.value for draw in hand.draws],
-        unit=None,
-        source_level=AnalysisLevel.DETERMINISTIC,
-        description="Detected one-card and backdoor draw labels",
-    )
-    builder.add(
-        "hand.out_count",
-        "out_count",
-        hand.out_count,
-        unit="cards",
-        source_level=AnalysisLevel.DETERMINISTIC,
-        description="Candidate one-card outs under the current hand model",
-    )
-    for evidence_id, kind, value, description in (
-        ("hand.overcards", "overcards", list(hand.overcards), "Hero hole cards above the current board high card"),
-        ("hand.straight_outs", "straight_outs", list(hand.straight_outs), "Cards that complete a detected straight path"),
-        ("hand.flush_outs", "flush_outs", list(hand.flush_outs), "Cards that complete a detected flush path"),
-        ("hand.out_cards", "out_cards", list(hand.out_cards), "Union of detected straight and flush outs"),
-        ("hand.counterfeit_risk", "counterfeit_risk_cards", list(hand.counterfeit_risk_cards), "Cards that may weaken or counterfeit the current made hand"),
-    ):
+    if hand is not None:
         builder.add(
-            evidence_id,
-            kind,
-            value,
+            "hand.category",
+            "hand_category",
+            hand.category.value,
+            unit=None,
+            source_level=AnalysisLevel.DETERMINISTIC,
+            description="Hero's current best hand category",
+        )
+        builder.add(
+            "hand.made_hand",
+            "made_hand",
+            hand.made_hand,
+            unit=None,
+            source_level=AnalysisLevel.DETERMINISTIC,
+            description="Hero's made-hand classification",
+        )
+        builder.add(
+            "hand.draws",
+            "draws",
+            [draw.value for draw in hand.draws],
+            unit=None,
+            source_level=AnalysisLevel.DETERMINISTIC,
+            description="Detected one-card and backdoor draw labels",
+        )
+        builder.add(
+            "hand.out_count",
+            "out_count",
+            hand.out_count,
             unit="cards",
             source_level=AnalysisLevel.DETERMINISTIC,
-            description=description,
+            description="Candidate one-card outs under the current hand model",
         )
+        for evidence_id, kind, value, description in (
+            ("hand.overcards", "overcards", list(hand.overcards), "Hero hole cards above the current board high card"),
+            ("hand.straight_outs", "straight_outs", list(hand.straight_outs), "Cards that complete a detected straight path"),
+            ("hand.flush_outs", "flush_outs", list(hand.flush_outs), "Cards that complete a detected flush path"),
+            ("hand.out_cards", "out_cards", list(hand.out_cards), "Union of detected straight and flush outs"),
+            ("hand.counterfeit_risk", "counterfeit_risk_cards", list(hand.counterfeit_risk_cards), "Cards that may weaken or counterfeit the current made hand"),
+        ):
+            builder.add(
+                evidence_id,
+                kind,
+                value,
+                unit="cards",
+                source_level=AnalysisLevel.DETERMINISTIC,
+                description=description,
+            )
     builder.add(
         "board.labels",
         "board_texture",

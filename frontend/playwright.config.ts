@@ -36,6 +36,15 @@ export default defineConfig({
             // is covered by backend unit tests; an external call here makes
             // the suite latency-dependent (10-90s per request).
             POKER_COACH_LLM_API_KEY: "",
+            // Blank the DB/Redis URLs so the spawned uvicorn cannot hang on
+            // the repository .env values when no compose stack is running,
+            // and blank PYTHONPATH/PYTHONHOME: the host shell (Hermes) injects
+            // its own venv into PYTHONPATH, which breaks pydantic_core under
+            // the 3.13 interpreter the webServer command uses.
+            POKER_COACH_DATABASE_URL: "",
+            POKER_COACH_REDIS_URL: "",
+            PYTHONPATH: "",
+            PYTHONHOME: "",
           },
         },
         {

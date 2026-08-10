@@ -35,3 +35,11 @@ _APP_CONFIG_VARS = (
 
 for _name in _APP_CONFIG_VARS:
     os.environ[_name] = ""
+
+# The live-PostgreSQL regression reads POKER_COACH_TEST_PG_URL directly and
+# must honor an explicit shell value. But without an explicit shell value the
+# repository .env would populate it (via load_dotenv) and the live tests would
+# hang trying to reach a database that is not running. Blank it unless the
+# shell explicitly set it.
+if "POKER_COACH_TEST_PG_URL" not in os.environ:
+    os.environ["POKER_COACH_TEST_PG_URL"] = ""

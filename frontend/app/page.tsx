@@ -66,8 +66,9 @@ const initialScenario: Scenario = {
     { seatId: 0, startingStack: 10_000, position: "button" },
     { seatId: 1, startingStack: 10_000, position: "big_blind" },
   ],
-  heroHoleCards: ["As", "Kd"],
-  villainHoleCards: ["Qh", "Jc"],
+  // A brand-new hand: no cards, no board, no actions — only the blinds.
+  heroHoleCards: [],
+  villainHoleCards: [],
   board: [],
   actionHistory: [],
   decisionPoint: { street: "preflop", actorSeat: 0, afterSequence: 0 },

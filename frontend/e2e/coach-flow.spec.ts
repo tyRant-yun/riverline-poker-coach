@@ -7,6 +7,10 @@ test("can validate, analyze, and explain the default HU scene", async ({ page })
   await expect(page.getByRole("heading", { name: "构造决策场景" })).toBeVisible();
   await expect(page.getByRole("button", { name: "校验场景" })).toBeVisible();
 
+  // The app now opens on a fresh hand (no cards, blinds only); fill the
+  // hands before acting.
+  await page.getByRole("textbox", { name: /Hero 手牌/ }).fill("As Kd");
+  await page.getByRole("textbox", { name: /Villain 手牌/ }).fill("Qh Jc");
   await page.getByPlaceholder("牌面 1").fill("2c");
   await page.getByPlaceholder("牌面 2").fill("7d");
   await page.getByPlaceholder("牌面 3").fill("Jh");
@@ -51,6 +55,8 @@ test("normalizes a range and keeps the editor evidence-bound", async ({ page }) 
 
 test("saves a scenario and reanalyzes it into history", async ({ page }) => {
   await page.goto("/");
+  await page.getByRole("textbox", { name: /Hero 手牌/ }).fill("As Kd");
+  await page.getByRole("textbox", { name: /Villain 手牌/ }).fill("Qh Jc");
   await page.getByPlaceholder("牌面 1").fill("2c");
   await page.getByPlaceholder("牌面 2").fill("7d");
   await page.getByPlaceholder("牌面 3").fill("Jh");

@@ -196,9 +196,13 @@ class TestSchemaV2:
         with pytest.raises(ValidationError):
             ScenarioSpec.model_validate(payload)
 
-    def test_v2_requires_hero_hole_cards(self):
-        with pytest.raises(ValidationError, match="must include the hero seat"):
-            v2_scenario(2, knownHoleCardsBySeat={1: ["Qh", "Jc"]})
+    def test_v2_hero_cards_are_optional_for_a_fresh_hand(self):
+        # A brand-new hand (0 inputs, blinds only) is a legitimate scenario:
+        # hero hole cards are optional until the user fills them in.
+        scenario = v2_scenario(2, knownHoleCardsBySeat={})
+        assert scenario.hero_hole_cards is None
+        assert scenario.villain_hole_cards is None
+        assert scenario.known_hole_cards_by_seat == {}
 
     def test_known_cards_must_reference_existing_seats(self):
         with pytest.raises(ValidationError, match="must reference existing seats"):

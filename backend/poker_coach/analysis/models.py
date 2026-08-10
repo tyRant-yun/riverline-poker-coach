@@ -187,7 +187,7 @@ class AnalysisResult(DomainModel):
     scenario_hash: str
     rules_engine_version: str
     metrics: BasicMetrics
-    hand: HandAnalysis
+    hand: HandAnalysis | None = None
     board: BoardAnalysis
     equity: EquityResult | None = None
     range_analysis: RangeAnalysis | None = None

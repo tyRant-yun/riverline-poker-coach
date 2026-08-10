@@ -442,6 +442,15 @@ class ScenarioSpec(DomainModel):
     source: ScenarioSource = ScenarioSource.MANUAL
     tags: tuple[str, ...] = ()
 
+    @field_validator("hero_hole_cards", mode="before")
+    @classmethod
+    def empty_hole_cards_to_none(cls, value):
+        # The frontend serializes "no cards yet" as an empty array; treat it
+        # as the same thing as an absent field (None).
+        if value == [] or value == ():
+            return None
+        return value
+
     @field_validator("hero_hole_cards")
     @classmethod
     def validate_hole_cards(
@@ -452,6 +461,15 @@ class ScenarioSpec(DomainModel):
         if cards[0] == cards[1]:
             raise ValueError("hero_hole_cards cannot contain duplicates")
         return tuple(sorted(cards, key=_card_sort_key))  # type: ignore[return-value]
+
+    @field_validator("villain_hole_cards", mode="before")
+    @classmethod
+    def empty_villain_hole_cards_to_none(cls, value):
+        # The frontend serializes "no cards yet" as an empty array; treat it
+        # as the same thing as an absent field (None).
+        if value == [] or value == ():
+            return None
+        return value
 
     @field_validator("villain_hole_cards")
     @classmethod
@@ -521,11 +539,10 @@ class ScenarioSpec(DomainModel):
             if any(seat_id not in seat_ids for seat_id in known_by_seat):
                 raise ValueError("knownHoleCardsBySeat must reference existing seats")
             hero_cards = known_by_seat.get(self.hero_seat)
-            if hero_cards is None:
-                raise ValueError("knownHoleCardsBySeat must include the hero seat")
-            if len(hero_cards) != 2:
-                raise ValueError(f"hero seat {self.hero_seat} must have exactly 2 hole cards")
-            mutations["hero_hole_cards"] = tuple(sorted(hero_cards, key=_card_sort_key))
+            if hero_cards is not None:
+                if len(hero_cards) != 2:
+                    raise ValueError(f"hero seat {self.hero_seat} must have exactly 2 hole cards")
+                mutations["hero_hole_cards"] = tuple(sorted(hero_cards, key=_card_sort_key))
             if self.table_size == 2:
                 opponent_seat = next(seat for seat in seat_ids if seat != self.hero_seat)
                 opponent_cards = known_by_seat.get(opponent_seat)
@@ -536,11 +553,8 @@ class ScenarioSpec(DomainModel):
                         sorted(opponent_cards, key=_card_sort_key)
                     )
         else:
-            if self.hero_hole_cards is None:
-                raise ValueError(
-                    "heroHoleCards (v1) or knownHoleCardsBySeat (v2) is required"
-                )
-            known_by_seat[self.hero_seat] = tuple(self.hero_hole_cards)
+            if self.hero_hole_cards is not None:
+                known_by_seat[self.hero_seat] = tuple(self.hero_hole_cards)
             if self.table_size == 2:
                 opponent_seat = next(seat for seat in seat_ids if seat != self.hero_seat)
                 if self.villain_hole_cards is not None:

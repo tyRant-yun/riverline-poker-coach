@@ -106,7 +106,9 @@ def pg_store():
     """Fresh PostgreSQL database with all public tables dropped."""
     import psycopg
 
-    with psycopg.connect(PG_URL, autocommit=True) as connection:
+    # Short connect timeout: a stale POKER_COACH_TEST_PG_URL must fail fast
+    # instead of hanging the whole suite.
+    with psycopg.connect(PG_URL, autocommit=True, connect_timeout=5) as connection:
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
@@ -326,7 +328,7 @@ def test_live_alembic_migration_upgrade_and_downgrade(pg_store):
 
     import psycopg
 
-    with psycopg.connect(PG_URL) as connection:
+    with psycopg.connect(PG_URL, connect_timeout=5) as connection:
         with connection.cursor() as cursor:
             cursor.execute(
                 "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
