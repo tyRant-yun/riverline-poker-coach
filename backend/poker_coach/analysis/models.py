@@ -54,7 +54,11 @@ class BasicMetrics(DomainModel):
     spr: Decimal | None = Field(default=None, ge=0)
     risk_reward_ratio: Decimal | None = Field(default=None, ge=0)
     bet_to_pot_ratio: Decimal | None = Field(default=None, ge=0)
-    active_player_count: StrictInt | None = Field(default=None, ge=2)
+    # A completed hand legitimately has a single remaining player (everyone
+    # else folded), so the metric may be 1. Equity for a one-player game is
+    # undefined and simply not computed; the equity result models keep their
+    # own ge=2 constraint.
+    active_player_count: StrictInt | None = Field(default=None, ge=1)
 
 
 class HandAnalysis(DomainModel):

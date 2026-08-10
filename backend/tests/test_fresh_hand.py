@@ -82,6 +82,48 @@ class TestFreshHandAnalysis:
         assert result.hand.category == "high_card"
 
 
+class TestReviewModeAnalysis:
+    """Review mode = hero cards known, villain unknown. No villain input is
+    required for analysis or teaching; the hand analysis stays intact and
+    only the equity degrades."""
+
+    def _review_scenario(self, completed: bool):
+        payload = fresh_hand_payload()
+        payload["heroHoleCards"] = ["As", "Kd"]
+        payload["actionHistory"] = [
+            {"actionId": "a1", "sequence": 1, "street": "preflop", "actorSeat": 0, "actionType": "raise_to", "amount": 300, "amountType": "to"},
+            {"actionId": "a2", "sequence": 2, "street": "preflop", "actorSeat": 1, "actionType": "fold"},
+        ]
+        payload["decisionPoint"] = (
+            {"street": "complete", "actorSeat": 0, "afterSequence": 2}
+            if completed
+            else {"street": "preflop", "actorSeat": 1, "afterSequence": 1}
+        )
+        return ScenarioSpec.model_validate(payload)
+
+    def test_analysis_mid_hand_needs_only_hero_cards(self):
+        result = analyze_scenario(self._review_scenario(completed=False))
+        assert result.hand is not None
+        assert result.equity is None
+        assert any(
+            "villain hole cards and villain range are missing" in warning
+            for warning in result.warnings
+        )
+
+    def test_analysis_of_completed_hand_degrades_gracefully(self):
+        # The hand ended with a fold: one player remains. This used to crash
+        # with active_player_count=1 < 2; it must degrade like any other
+        # missing-evidence spot instead of raising.
+        result = analyze_scenario(self._review_scenario(completed=True))
+        assert result.hand is not None
+        assert result.equity is None
+        assert result.metrics.active_player_count == 1
+        assert any(
+            "villain hole cards and villain range are missing" in warning
+            for warning in result.warnings
+        )
+
+
 class TestFreshHandApi:
     def test_state_endpoint_accepts_a_fresh_hand(self):
         client = TestClient(create_app())
@@ -96,3 +138,34 @@ class TestFreshHandApi:
         response = client.post("/v1/scenarios/validate", json=fresh_hand_payload())
         assert response.status_code == 200
         assert response.json()["valid"] is True
+
+
+class TestCompletedHandApi:
+    """A hand that ended with a fold (one active player) must not 422."""
+
+    @staticmethod
+    def _completed_payload():
+        payload = fresh_hand_payload()
+        payload["heroHoleCards"] = ["As", "Kd"]
+        payload["actionHistory"] = [
+            {"actionId": "a1", "sequence": 1, "street": "preflop", "actorSeat": 0, "actionType": "raise_to", "amount": 300, "amountType": "to"},
+            {"actionId": "a2", "sequence": 2, "street": "preflop", "actorSeat": 1, "actionType": "fold"},
+        ]
+        payload["decisionPoint"] = {"street": "complete", "actorSeat": 0, "afterSequence": 2}
+        return payload
+
+    def test_analysis_returns_200_with_hand_analysis(self):
+        client = TestClient(create_app())
+        response = client.post("/v1/analysis", json=self._completed_payload())
+        assert response.status_code == 200, response.text
+        analysis = response.json()["analysis"]
+        assert analysis["hand"] is not None
+        assert analysis["equity"] is None
+
+    def test_teaching_returns_200(self):
+        client = TestClient(create_app())
+        response = client.post(
+            "/v1/teaching",
+            json={"scenario": self._completed_payload(), "depth": "beginner"},
+        )
+        assert response.status_code == 200, response.text
