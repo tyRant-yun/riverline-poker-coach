@@ -2,35 +2,63 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
+import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from os import getenv
+from threading import Event, Lock
 from uuid import uuid4
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from poker_coach.analysis import AnalysisCancelled, AnalysisTimeout, analyze_scenario, range_spec_from_notation
+from poker_coach.analysis import AnalysisCancelled, AnalysisTimeout, analyze_scenario, expand_range, range_spec_from_notation
 from poker_coach.analysis.models import AnalysisResult, InvalidAnalysisInput
 from poker_coach.coach import TeachingService
 from poker_coach.domain.models import ScenarioSpec
-from poker_coach.persistence import SQLiteStore
+from poker_coach.learning import LearningService, PracticeUnavailable
+from poker_coach.persistence import PostgresStore, SQLiteStore
 from poker_coach.persistence.sqlite_store import StoreNotFound
 from poker_coach.rules import PokerKitAdapter, ReplayError
+from poker_coach.strategy.catalog import StrategyCatalog
+from poker_coach.strategy.ranges import default_preflop_ranges
+
+
+audit_logger = logging.getLogger("poker_coach.api")
 
 
 @dataclass(frozen=True)
 class AppConfig:
     app_version: str = "0.1.0"
     analysis_version: str = "analysis-core-0.1"
+    store_user_text: bool = False
+    max_request_bytes: int = 1_000_000
+    max_timeout_seconds: float = 120.0
+    rate_limit_per_minute: int = 120
 
     @classmethod
     def from_environment(cls) -> AppConfig:
         return cls(
             app_version=getenv("POKER_COACH_APP_VERSION", cls.app_version),
             analysis_version=getenv("POKER_COACH_ANALYSIS_VERSION", cls.analysis_version),
+            store_user_text=getenv("POKER_COACH_STORE_USER_TEXT", "0").lower()
+            in {"1", "true", "yes"},
+            max_request_bytes=_env_int(
+                "POKER_COACH_MAX_REQUEST_BYTES", cls.max_request_bytes, minimum=1
+            ),
+            max_timeout_seconds=_env_float(
+                "POKER_COACH_MAX_TIMEOUT_SECONDS", cls.max_timeout_seconds, minimum=0.0
+            ),
+            rate_limit_per_minute=_env_int(
+                "POKER_COACH_RATE_LIMIT_PER_MINUTE", cls.rate_limit_per_minute, minimum=0
+            ),
         )
 
 
@@ -42,24 +70,106 @@ class ApiError(ValueError):
         super().__init__(message)
 
 
-def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None) -> FastAPI:
+def create_app(config: AppConfig | None = None, store: SQLiteStore | PostgresStore | None = None) -> FastAPI:
     config = config or AppConfig.from_environment()
     adapter = PokerKitAdapter()
-    store = store or SQLiteStore(getenv("POKER_COACH_DB_PATH", ".data/poker_coach.sqlite3"))
+    if store is None:
+        database_url = getenv("POKER_COACH_DATABASE_URL")
+        store = PostgresStore(database_url) if database_url else SQLiteStore(getenv("POKER_COACH_DB_PATH", ".data/poker_coach.sqlite3"))
     teacher = TeachingService(adapter)
+    learning = LearningService(adapter)
+    strategy_catalog = StrategyCatalog()
+    store.register_strategy_artifacts(strategy_catalog.artifacts)
+    idempotency_cache: dict[str, tuple[str, dict[str, Any]]] = {}
+    rate_limit_state: dict[str, list[float]] = {}
+    rate_limit_lock = Lock()
+    analysis_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="poker-analysis")
+    analysis_jobs: dict[str, dict[str, Any]] = {}
     app = FastAPI(
         title="Poker Coach API",
         version=config.app_version,
         description="Local HU NLHE validation and evidence analysis API",
+    )
+    cors_origins = tuple(
+        origin.strip()
+        for origin in getenv(
+            "POKER_COACH_CORS_ORIGINS",
+            "http://127.0.0.1:3000,http://localhost:3000",
+        ).split(",")
+        if origin.strip()
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(cors_origins),
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
 
     @app.middleware("http")
     async def request_id_middleware(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID") or str(uuid4())
         request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
+        request.state.scenario_hash = None
+        request.state.cache_hit = False
+        started = time.perf_counter()
+        raw_length = request.headers.get("content-length")
+        status_code = 500
+        try:
+            if (
+                raw_length is not None
+                and raw_length.isdigit()
+                and int(raw_length) > config.max_request_bytes
+            ):
+                status_code = 413
+                response = JSONResponse(
+                    status_code=status_code,
+                    content=_error_payload(
+                        request,
+                        "request_too_large",
+                        f"request body exceeds {config.max_request_bytes} bytes",
+                    ),
+                )
+                response.headers["X-Request-ID"] = request_id
+                return response
+            if config.rate_limit_per_minute and not _allow_request(
+                rate_limit_state,
+                rate_limit_lock,
+                _rate_limit_key(request),
+                limit=config.rate_limit_per_minute,
+            ):
+                status_code = 429
+                response = JSONResponse(
+                    status_code=status_code,
+                    content=_error_payload(
+                        request,
+                        "rate_limit_exceeded",
+                        "anonymous request rate limit exceeded",
+                        {"limitPerMinute": config.rate_limit_per_minute},
+                    ),
+                )
+                response.headers["Retry-After"] = "60"
+                response.headers["X-Request-ID"] = request_id
+                return response
+            response = await call_next(request)
+            status_code = response.status_code
+            response.headers["X-Request-ID"] = request_id
+            return response
+        finally:
+            audit_logger.info(
+                "request_completed",
+                extra={
+                    "request_id": request_id,
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": status_code,
+                    "elapsed_ms": round((time.perf_counter() - started) * 1000, 3),
+                    "scenario_hash": request.state.scenario_hash,
+                    "anonymous_session": request.headers.get("X-Anonymous-Session"),
+                    "cache_hit": request.state.cache_hit,
+                },
+            )
 
     @app.exception_handler(ApiError)
     async def api_error_handler(request: Request, exc: ApiError):
@@ -103,6 +213,18 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None
             content=_error_payload(request, "not_found", f"resource not found: {exc.args[0]}"),
         )
 
+    @app.exception_handler(ValidationError)
+    async def validation_error_handler(request: Request, exc: ValidationError):
+        return JSONResponse(
+            status_code=422,
+            content=_error_payload(
+                request,
+                "invalid_payload",
+                "request payload validation failed",
+                _json_safe(exc.errors()),
+            ),
+        )
+
     @app.get("/health")
     async def health(request: Request):
         return {
@@ -128,7 +250,9 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None
     @app.post("/v1/scenarios/validate")
     async def validate_scenario(request: Request):
         scenario = _scenario_from_request(await request.json())
+        _set_scenario_context(request, scenario)
         replay = adapter.replay(scenario)
+        adapter.replay_to_decision(scenario)
         return {
             "schemaVersion": scenario.schema_version,
             "valid": True,
@@ -142,8 +266,13 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None
     @app.post("/v1/scenarios")
     async def create_scenario(request: Request):
         payload = await request.json()
-        scenario, title, tags = _saved_scenario_from_request(payload)
-        record = store.create_scenario(scenario, title=title, tags=tags)
+        scenario, title, tags, raw_scenario_json = _saved_scenario_from_request(payload)
+        _set_scenario_context(request, scenario)
+        adapter.replay(scenario)
+        adapter.replay_to_decision(scenario)
+        record = store.create_scenario(
+            scenario, title=title, tags=tags, raw_scenario_json=raw_scenario_json
+        )
         return {"schemaVersion": 1, "requestId": request.state.request_id, "scenario": _record_to_json(record)}
 
     @app.get("/v1/scenarios")
@@ -163,11 +292,30 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None
             "scenario": _record_to_json(store.get_scenario(scenario_id)),
         }
 
+    @app.get("/v1/scenarios/{scenario_id}/revisions")
+    async def scenario_revisions(request: Request, scenario_id: str):
+        revisions = store.list_scenario_revisions(scenario_id)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "scenarioId": scenario_id,
+            "revisions": [_record_to_json(revision) for revision in revisions],
+        }
+
     @app.put("/v1/scenarios/{scenario_id}")
     async def update_scenario(request: Request, scenario_id: str):
         payload = await request.json()
-        scenario, title, tags = _saved_scenario_from_request(payload)
-        record = store.update_scenario(scenario_id, scenario, title=title, tags=tags)
+        scenario, title, tags, raw_scenario_json = _saved_scenario_from_request(payload)
+        _set_scenario_context(request, scenario)
+        adapter.replay(scenario)
+        adapter.replay_to_decision(scenario)
+        record = store.update_scenario(
+            scenario_id,
+            scenario,
+            title=title,
+            tags=tags,
+            raw_scenario_json=raw_scenario_json,
+        )
         return {"schemaVersion": 1, "requestId": request.state.request_id, "scenario": _record_to_json(record)}
 
     @app.post("/v1/scenarios/{scenario_id}/copy")
@@ -197,6 +345,44 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None
             "analyses": store.list_analyses(scenario_id),
         }
 
+    @app.get("/v1/scenarios/{scenario_id}/analyses/compare")
+    async def compare_analysis_history(request: Request, scenario_id: str):
+        left_id = request.query_params.get("leftAnalysisId")
+        right_id = request.query_params.get("rightAnalysisId")
+        if not left_id or not right_id or left_id == right_id:
+            raise ApiError(
+                "invalid_analysis_comparison",
+                "leftAnalysisId and rightAnalysisId must be two different analysis IDs",
+            )
+        records = {record["analysisId"]: record for record in store.list_analyses(scenario_id)}
+        if left_id not in records or right_id not in records:
+            raise StoreNotFound(left_id if left_id not in records else right_id)
+        left = records[left_id]
+        right = records[right_id]
+        fields = ("metrics", "hand", "board", "equity", "rangeAnalysis", "rangeComparison", "strategyMatch", "warnings")
+        differences = [
+            {
+                "field": field,
+                "left": left["output"].get(field) if left["output"] else None,
+                "right": right["output"].get(field) if right["output"] else None,
+            }
+            for field in fields
+            if (left["output"].get(field) if left["output"] else None)
+            != (right["output"].get(field) if right["output"] else None)
+        ]
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "scenarioId": scenario_id,
+            "leftAnalysisId": left_id,
+            "rightAnalysisId": right_id,
+            "differences": differences,
+            "versions": {
+                "left": {"rulesEngineVersion": left["rulesEngineVersion"], "analysisVersion": left["analysisVersion"]},
+                "right": {"rulesEngineVersion": right["rulesEngineVersion"], "analysisVersion": right["analysisVersion"]},
+            },
+        }
+
     @app.post("/v1/scenarios/{scenario_id}/analyze")
     async def analyze_saved_scenario(request: Request, scenario_id: str):
         record = store.get_scenario(scenario_id)
@@ -204,13 +390,14 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None
         result = analyze_scenario(
             record["scenario"],
             adapter=adapter,
-            timeout_seconds=_timeout_query(request),
+            timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
         )
         elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
         analysis_record = store.save_analysis(
             scenario_id,
             result,
             raw_scenario=record["scenario"],
+            raw_scenario_json=record.get("rawScenarioJson"),
             execution_ms=elapsed_ms,
         )
         return {
@@ -221,27 +408,79 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None
             "analysisRun": analysis_record,
         }
 
+    @app.post("/v1/scenarios/{scenario_id}/revisions/{revision_no}/analyze")
+    async def analyze_saved_revision(request: Request, scenario_id: str, revision_no: int):
+        record = store.get_scenario_revision(scenario_id, revision_no)
+        _set_scenario_context(request, record["scenario"])
+        started = time.perf_counter()
+        result = analyze_scenario(
+            record["scenario"],
+            adapter=adapter,
+            timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
+        )
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+        analysis_record = store.save_analysis(
+            scenario_id,
+            result,
+            raw_scenario=record["scenario"],
+            raw_scenario_json=record.get("rawScenarioJson"),
+            revision_no=revision_no,
+            execution_ms=elapsed_ms,
+        )
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "revisionNo": revision_no,
+            "executionMs": elapsed_ms,
+            "analysis": result.to_dict(),
+            "analysisRun": analysis_record,
+        }
+
     @app.post("/v1/scenarios/{scenario_id}/teach")
     async def teach_saved_scenario(request: Request, scenario_id: str):
         record = store.get_scenario(scenario_id)
         payload = await request.json()
         analysis_result = analyze_scenario(record["scenario"], adapter=adapter)
+        question = _question_from_payload(payload)
+        depth = _depth_from_payload(payload)
         response = teacher.explain(
             record["scenario"],
             analysis=analysis_result,
-            user_question=payload.get("question") if isinstance(payload, dict) else None,
+            depth=depth,
+            user_question=question,
         )
+        session = None
+        profile_id = payload.get("profileId") if isinstance(payload, dict) else None
+        if profile_id is not None:
+            if not isinstance(profile_id, str) or not profile_id.strip():
+                raise ApiError("invalid_profile_id", "profileId must be a non-empty string")
+            store.get_or_create_profile(profile_id)
+            session = store.save_teaching_session(
+                response.to_dict(),
+                teacher_version=teacher.version,
+                prompt_version=teacher.prompt_version,
+                depth=depth,
+                user_question=question if config.store_user_text else None,
+                profile_id=profile_id,
+                scenario_id=scenario_id,
+            )
         return {
             "schemaVersion": 1,
             "requestId": request.state.request_id,
             "teacherVersion": teacher.version,
+            "promptVersion": teacher.prompt_version,
             "response": response.to_dict(),
+            "session": session,
         }
 
     @app.post("/v1/scenarios/state")
     async def scenario_state(request: Request):
         scenario = _scenario_from_request(await request.json())
-        replay = adapter.replay(scenario)
+        _set_scenario_context(request, scenario)
+        node_scenario = scenario.model_copy(
+            update={"action_history": scenario.action_history[: scenario.decision_point.after_sequence]}
+        )
+        replay = adapter.replay(node_scenario)
         return {
             "schemaVersion": scenario.schema_version,
             "requestId": request.state.request_id,
@@ -254,19 +493,148 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None
     @app.post("/v1/analysis")
     async def analysis(request: Request):
         scenario = _scenario_from_request(await request.json())
+        _set_scenario_context(request, scenario)
+        scenario_hash = hashlib.sha256(scenario.to_json().encode("utf-8")).hexdigest()
+        idempotency_key = request.headers.get("Idempotency-Key")
+        if idempotency_key:
+            cached = idempotency_cache.get(idempotency_key)
+            if cached is not None:
+                request.state.cache_hit = True
+                cached_hash, cached_payload = cached
+                if cached_hash != scenario_hash:
+                    raise ApiError(
+                        "idempotency_conflict",
+                        "Idempotency-Key was already used for a different scenario",
+                        status_code=409,
+                    )
+                replay = dict(cached_payload)
+                replay["requestId"] = request.state.request_id
+                replay["idempotentReplay"] = True
+                return replay
         started = time.perf_counter()
         result = analyze_scenario(
             scenario,
             adapter=adapter,
-            timeout_seconds=_timeout_query(request),
+            timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
         )
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+        response_payload = {
+            "schemaVersion": scenario.schema_version,
+            "requestId": request.state.request_id,
+            "analysisVersion": result.analysis_version,
+            "executionMs": elapsed_ms,
+            "analysis": result.to_dict(),
+        }
+        if idempotency_key:
+            idempotency_cache[idempotency_key] = (scenario_hash, response_payload)
+        return response_payload
+
+    @app.post("/v1/analysis/equity")
+    async def equity_analysis(request: Request):
+        scenario = _scenario_from_request(await request.json())
+        _set_scenario_context(request, scenario)
+        started = time.perf_counter()
+        result = analyze_scenario(
+            scenario,
+            adapter=adapter,
+            timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
+        )
+        if result.equity is None:
+            raise ApiError(
+                "equity_unavailable",
+                "equity requires a concrete villain hand or a non-empty villain range",
+            )
         elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
         return {
             "schemaVersion": scenario.schema_version,
             "requestId": request.state.request_id,
             "analysisVersion": result.analysis_version,
             "executionMs": elapsed_ms,
-            "analysis": result.to_dict(),
+            "equity": result.equity.to_dict(),
+            "evidence": result.evidence.to_dict(),
+        }
+
+    @app.post("/v1/analysis/jobs", status_code=202)
+    async def submit_analysis_job(request: Request):
+        scenario = _scenario_from_request(await request.json())
+        _set_scenario_context(request, scenario)
+        for stale_id, stale_job in list(analysis_jobs.items()):
+            if stale_job["status"] in {"completed", "failed", "cancelled", "timeout"}:
+                analysis_jobs.pop(stale_id, None)
+        if len(analysis_jobs) >= 64:
+            raise ApiError("analysis_queue_full", "too many analysis jobs are active", status_code=429)
+        job_id = uuid4().hex
+        cancel_event = Event()
+        analysis_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "cancel_event": cancel_event,
+            "created_at": time.time(),
+            "result": None,
+            "error": None,
+        }
+
+        def run_job() -> None:
+            job = analysis_jobs[job_id]
+            job["status"] = "running"
+            started = time.perf_counter()
+            try:
+                result = analyze_scenario(
+                    scenario,
+                    adapter=adapter,
+                    cancel_event=cancel_event,
+                    timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
+                )
+                job["result"] = result
+                job["execution_ms"] = round((time.perf_counter() - started) * 1000, 3)
+                job["status"] = "completed"
+            except AnalysisCancelled as exc:
+                job["error"] = str(exc)
+                job["status"] = "cancelled"
+            except AnalysisTimeout as exc:
+                job["error"] = str(exc)
+                job["status"] = "timeout"
+            except Exception as exc:  # pragma: no cover - defensive worker boundary
+                job["error"] = str(exc)
+                job["status"] = "failed"
+
+        analysis_executor.submit(run_job)
+        return {
+            "schemaVersion": scenario.schema_version,
+            "requestId": request.state.request_id,
+            "jobId": job_id,
+            "status": "queued",
+        }
+
+    @app.get("/v1/analysis/jobs/{job_id}")
+    async def get_analysis_job(request: Request, job_id: str):
+        job = analysis_jobs.get(job_id)
+        if job is None:
+            raise StoreNotFound(job_id)
+        result = job.get("result")
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "jobId": job_id,
+            "status": job["status"],
+            "executionMs": job.get("execution_ms"),
+            "error": job.get("error"),
+            "analysis": result.to_dict() if result is not None else None,
+        }
+
+    @app.delete("/v1/analysis/jobs/{job_id}", status_code=202)
+    async def cancel_analysis_job(request: Request, job_id: str):
+        job = analysis_jobs.get(job_id)
+        if job is None:
+            raise StoreNotFound(job_id)
+        if job["status"] in {"queued", "running"}:
+            job["cancel_event"].set()
+            job["status"] = "cancellation_requested"
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "jobId": job_id,
+            "status": job["status"],
         }
 
     @app.post("/v1/teaching")
@@ -275,6 +643,7 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None
         if not isinstance(payload, dict):
             raise ApiError("invalid_request", "request body must be a JSON object")
         scenario = _scenario_from_request(payload.get("scenario", payload))
+        _set_scenario_context(request, scenario)
         raw_analysis = payload.get("analysis")
         if isinstance(raw_analysis, dict) and "analysis" in raw_analysis:
             raw_analysis = raw_analysis["analysis"]
@@ -283,17 +652,159 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None
             if raw_analysis
             else analyze_scenario(scenario, adapter=adapter)
         )
+        question = _question_from_payload(payload)
+        depth = _depth_from_payload(payload)
         response = teacher.explain(
             scenario,
             analysis=analysis_result,
-            depth=payload.get("depth", "intermediate"),
-            user_question=payload.get("question"),
+            depth=depth,
+            user_question=question,
         )
+        session = None
+        profile_id = payload.get("profileId")
+        if profile_id is not None:
+            if not isinstance(profile_id, str) or not profile_id.strip():
+                raise ApiError("invalid_profile_id", "profileId must be a non-empty string")
+            store.get_or_create_profile(profile_id)
+            session = store.save_teaching_session(
+                response.to_dict(),
+                teacher_version=teacher.version,
+                prompt_version=teacher.prompt_version,
+                depth=depth,
+                user_question=question if config.store_user_text else None,
+                profile_id=profile_id,
+            )
         return {
             "schemaVersion": 1,
             "requestId": request.state.request_id,
             "teacherVersion": teacher.version,
+            "promptVersion": teacher.prompt_version,
             "response": response.to_dict(),
+            "session": session,
+        }
+
+    @app.post("/v1/strategies/match")
+    async def strategy_match(request: Request):
+        scenario = _scenario_from_request(await request.json())
+        _set_scenario_context(request, scenario)
+        match = strategy_catalog.match(scenario)
+        return {
+            "schemaVersion": scenario.schema_version,
+            "requestId": request.state.request_id,
+            "libraryVersion": strategy_catalog.version,
+            "strategyMatch": match.to_dict(),
+        }
+
+    @app.get("/v1/ranges/defaults")
+    async def default_ranges(request: Request):
+        ranges = default_preflop_ranges()
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "version": next(iter(ranges.values())).version,
+            "ranges": {key: value.to_dict() for key, value in ranges.items()},
+        }
+
+    @app.post("/v1/learning/profiles")
+    async def create_learning_profile(request: Request):
+        payload = await request.json()
+        profile_id = payload.get("profileId") if isinstance(payload, dict) else None
+        if profile_id is not None and (not isinstance(profile_id, str) or not profile_id.strip()):
+            raise ApiError("invalid_profile_id", "profileId must be a non-empty string")
+        profile = store.get_or_create_profile(profile_id)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "profile": profile.to_dict(),
+        }
+
+    @app.get("/v1/learning/profiles/{profile_id}")
+    async def get_learning_profile(request: Request, profile_id: str):
+        profile = store.get_profile(profile_id)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "profile": profile.to_dict(),
+        }
+
+    @app.delete("/v1/learning/profiles/{profile_id}")
+    async def delete_learning_profile(request: Request, profile_id: str):
+        store.delete_profile(profile_id)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "deleted": True,
+        }
+
+    @app.post("/v1/practice/generate")
+    async def generate_practice(request: Request):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_request", "request body must be a JSON object")
+        profile_id = payload.get("profileId")
+        if profile_id is None:
+            profile_id = store.get_or_create_profile().profile_id
+        if not isinstance(profile_id, str) or not profile_id.strip():
+            raise ApiError("invalid_profile_id", "profileId must be a non-empty string")
+        source_scenario_id = payload.get("sourceScenarioId")
+        if source_scenario_id:
+            source = store.get_scenario(source_scenario_id)
+            source_scenario = source["scenario"]
+        else:
+            source_scenario = _scenario_from_request(payload.get("scenario", payload))
+        store.get_or_create_profile(profile_id)
+        try:
+            question = learning.generate_practice(
+                source_scenario,
+                profile_id=profile_id,
+                source_scenario_id=source_scenario_id,
+                source_analysis_id=payload.get("sourceAnalysisId"),
+                mistake_tag=payload.get("mistakeTag"),
+            )
+        except PracticeUnavailable as exc:
+            raise ApiError("practice_unavailable", str(exc)) from exc
+        store.save_practice_question(question)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "learningVersion": learning.version,
+            "question": _public_practice(question),
+        }
+
+    @app.get("/v1/practice/{question_id}")
+    async def get_practice(request: Request, question_id: str):
+        question = store.get_practice_question(question_id)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "question": _public_practice(question),
+        }
+
+    @app.post("/v1/practice/{question_id}/attempt")
+    async def attempt_practice(request: Request, question_id: str):
+        payload = await request.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("selectedAction"), str):
+            raise ApiError("invalid_practice_attempt", "selectedAction must be a string")
+        question = store.get_practice_question(question_id)
+        legal = adapter.replay(question.scenario).final_state.legal_actions.actions
+        if payload["selectedAction"] not in {action.value for action in legal}:
+            raise ApiError(
+                "illegal_practice_action",
+                "selectedAction is not legal at the practice decision point",
+                details={"legalActions": [action.value for action in legal]},
+            )
+        profile = store.get_or_create_profile(question.profile_id)
+        outcome = learning.grade(
+            question,
+            selected_action=payload["selectedAction"],
+            rationale=payload.get("rationale"),
+            profile=profile,
+        )
+        saved = store.save_practice_outcome(question, outcome)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "outcome": saved,
         }
 
     @app.post("/v1/ranges/parse")
@@ -301,19 +812,29 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | None = None
         payload = await request.json()
         if not isinstance(payload, dict) or not isinstance(payload.get("notation"), str):
             raise ApiError("invalid_range_request", "notation must be a string")
+        dead_cards = payload.get("deadCards", [])
+        if not isinstance(dead_cards, list) or not all(isinstance(card, str) for card in dead_cards):
+            raise ApiError("invalid_range_request", "deadCards must be a list of card strings")
         try:
             range_spec = range_spec_from_notation(
                 payload["notation"],
                 range_id=payload.get("rangeId", "notation-range"),
                 name=payload.get("name", "Imported range"),
                 version=payload.get("version", "1"),
+                dead_cards=tuple(dead_cards),
             )
         except (ValueError, ValidationError) as exc:
             raise ApiError("invalid_range_notation", str(exc)) from exc
+        combos = expand_range(range_spec)
         return {
             "schemaVersion": 1,
             "requestId": request.state.request_id,
             "range": range_spec.to_dict(),
+            "summary": {
+                "totalCombos": len(combos),
+                "weightedCombos": sum((combo.weight for combo in combos), start=0),
+            },
+            "combos": [combo.to_dict() for combo in combos],
         }
 
     return app
@@ -332,7 +853,15 @@ def _scenario_from_request(payload: Any) -> ScenarioSpec:
         ) from exc
 
 
-def _saved_scenario_from_request(payload: Any) -> tuple[ScenarioSpec, str, tuple[str, ...]]:
+def _set_scenario_context(request: Request, scenario: ScenarioSpec) -> None:
+    request.state.scenario_hash = hashlib.sha256(
+        scenario.to_json().encode("utf-8")
+    ).hexdigest()
+
+
+def _saved_scenario_from_request(
+    payload: Any,
+) -> tuple[ScenarioSpec, str, tuple[str, ...], str]:
     if not isinstance(payload, dict):
         raise ApiError("invalid_request", "request body must be a JSON object")
     raw_scenario = payload.get("scenario")
@@ -343,18 +872,52 @@ def _saved_scenario_from_request(payload: Any) -> tuple[ScenarioSpec, str, tuple
         raise ApiError("invalid_title", "title must be a non-empty string")
     if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
         raise ApiError("invalid_tags", "tags must be a list of strings")
-    return scenario, title.strip(), tuple(tags)
+    if len(tags) != len(set(tags)):
+        raise ApiError("invalid_tags", "tags must be unique")
+    return (
+        scenario,
+        title.strip(),
+        tuple(tags),
+        json.dumps(raw_scenario, ensure_ascii=False, separators=(",", ":"), allow_nan=False),
+    )
 
 
 def _record_to_json(record: dict[str, Any]) -> dict[str, Any]:
     result = dict(record)
+    result.pop("rawScenarioJson", None)
     scenario = result.get("scenario")
     if isinstance(scenario, ScenarioSpec):
         result["scenario"] = scenario.to_dict()
     return result
 
 
-def _timeout_query(request: Request) -> float | None:
+def _public_practice(question) -> dict[str, Any]:
+    result = question.to_dict()
+    result.pop("expectedAction", None)
+    result.pop("expectedEvidenceReferences", None)
+    return result
+
+
+def _question_from_payload(payload: Any) -> str | None:
+    if not isinstance(payload, dict) or payload.get("question") is None:
+        return None
+    question = payload["question"]
+    if not isinstance(question, str):
+        raise ApiError("invalid_question", "question must be a string")
+    question = question.strip()
+    if len(question) > 2_000:
+        raise ApiError("question_too_long", "question cannot exceed 2000 characters")
+    return question or None
+
+
+def _depth_from_payload(payload: Any) -> str:
+    depth = payload.get("depth", "intermediate") if isinstance(payload, dict) else "intermediate"
+    if depth not in {"beginner", "intermediate", "advanced"}:
+        raise ApiError("invalid_teaching_depth", "depth must be beginner, intermediate, or advanced")
+    return depth
+
+
+def _timeout_query(request: Request, max_timeout_seconds: float = 120.0) -> float | None:
     raw = request.query_params.get("timeoutSeconds")
     if raw is None:
         return None
@@ -362,9 +925,71 @@ def _timeout_query(request: Request) -> float | None:
         value = float(raw)
     except ValueError as exc:
         raise ApiError("invalid_timeout", "timeoutSeconds must be numeric") from exc
-    if value < 0:
-        raise ApiError("invalid_timeout", "timeoutSeconds cannot be negative")
+    if not math.isfinite(value) or value < 0:
+        raise ApiError("invalid_timeout", "timeoutSeconds must be finite and non-negative")
+    if value > max_timeout_seconds:
+        raise ApiError(
+            "timeout_too_large",
+            f"timeoutSeconds cannot exceed {max_timeout_seconds:g}",
+            details={"maxTimeoutSeconds": max_timeout_seconds},
+        )
     return value
+
+
+def _env_int(name: str, default: int, *, minimum: int) -> int:
+    raw = getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not math.isfinite(value) or value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    return value
+
+
+def _env_float(name: str, default: float, *, minimum: float) -> float:
+    raw = getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be numeric") from exc
+    if value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    return value
+
+
+def _rate_limit_key(request: Request) -> str:
+    session = request.headers.get("X-Anonymous-Session")
+    if session and len(session) <= 128:
+        return f"session:{session}"
+    host = request.client.host if request.client is not None else "unknown"
+    return f"host:{host}"
+
+
+def _allow_request(
+    state: dict[str, list[float]],
+    lock: Lock,
+    key: str,
+    *,
+    limit: int,
+    now: float | None = None,
+) -> bool:
+    current = time.monotonic() if now is None else now
+    cutoff = current - 60.0
+    with lock:
+        timestamps = [stamp for stamp in state.get(key, []) if stamp > cutoff]
+        allowed = len(timestamps) < limit
+        if allowed:
+            timestamps.append(current)
+        if timestamps:
+            state[key] = timestamps
+        else:
+            state.pop(key, None)
+        return allowed
 
 
 def _error_payload(request: Request, code: str, message: str, details: Any = None) -> dict[str, Any]:

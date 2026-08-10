@@ -1,5 +1,5 @@
 """FastAPI transport for the local strategy-analysis core."""
 
-from .app import create_app
+from .app import AppConfig, create_app
 
-__all__ = ["create_app"]
+__all__ = ["AppConfig", "create_app"]
