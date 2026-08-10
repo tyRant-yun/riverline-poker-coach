@@ -18,6 +18,8 @@ export type FinalState = {
   pot: number;
   stacks: Record<string, number>;
   bets: Record<string, number>;
+  foldedSeats: number[];
+  handInProgress: boolean;
   legalActions: LegalActions;
 };
 
@@ -26,6 +28,7 @@ export type StateResponse = { finalState: FinalState };
 export type AnalysisResponse = {
   analysis: {
     metrics: Record<string, string | number | null>;
+    /** null for a fresh hand / review mode where hero has no hole cards yet. */
     hand: {
       category: string;
       madeHand: string;
@@ -34,9 +37,20 @@ export type AnalysisResponse = {
       overcards: string[];
       outCards: string[];
       counterfeitRiskCards: string[];
-    };
+    } | null;
     board: { labels: string[]; staticOrDynamic: string; nutComboCount: number; nextStreetChangeCards: string[] };
     equity: { heroEquity: string; villainEquity: string; tieProbability: string; sourceLevel: string } | null;
+    multiwayEquity: {
+      algorithm: string;
+      sourceLevel: string;
+      equityBySeat: Record<string, string>;
+      activePlayerCount: number;
+      tieProbability: string;
+      trials: number;
+      randomSeed?: number | null;
+      standardErrorsBySeat?: Record<string, string> | null;
+      weighted: boolean;
+    } | null;
     rangeAnalysis?: {
       totalCombos: number;
       weightedCombos: string;

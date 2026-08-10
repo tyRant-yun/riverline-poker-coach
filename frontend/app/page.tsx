@@ -40,6 +40,11 @@ import {
 import { cardsToViewModels } from "../lib/poker/cards";
 import { notationFromMatrix, notationFromMatrixExplicit } from "../lib/poker/matrix";
 import { positionLabel } from "../lib/poker/positions";
+import {
+  getKnownCardsForSeat,
+  heroCards,
+  syncSeatSourcesFromLegacy,
+} from "../lib/poker/scenario";
 
 import AppShell, { type WorkspaceView } from "../components/AppShell";
 import PokerTable from "../components/poker/PokerTable";
@@ -167,7 +172,8 @@ export default function Home() {
         const isHero = seat.seatId === scenario.heroSeat;
         const isDealer = seat.seatId === scenario.buttonSeat;
         const isActor = state?.legalActions.actorSeat === seat.seatId;
-        const holeCards = isHero ? scenario.heroHoleCards : (scenario.villainHoleCards ?? []);
+        const isFolded = state?.foldedSeats.includes(seat.seatId) ?? false;
+        const holeCards = getKnownCardsForSeat(scenario, seat.seatId);
         return {
           seatId: seat.seatId,
           position: seat.position,
@@ -180,16 +186,19 @@ export default function Home() {
           isHero,
           isDealer,
           isActor,
-          isFolded: false,
+          isFolded,
           isAllIn: false,
-          isActive: state ? state.actorSeat === null || isActor : true,
+          // Active = still in the hand (not folded). The current actor is a
+          // separate concept (isActor) and may be null between streets.
+          isActive: state ? !isFolded : true,
         };
       }),
     [scenario, state],
   );
 
   function updateScenario(patch: Partial<Scenario>) {
-    commitScenario({ ...scenario, ...patch });
+    const seatSync = syncSeatSourcesFromLegacy(scenario, patch);
+    commitScenario({ ...scenario, ...patch, ...seatSync });
     setMessage("场景已修改，需要重新校验或分析。");
   }
 
@@ -605,8 +614,8 @@ export default function Home() {
   async function normalizeRange(notation = rangeText, side = rangeSide) {
     try {
       const deadCards = side === "heroRange"
-        ? [...scenario.heroHoleCards, ...(scenario.villainHoleCards ?? []), ...scenario.board]
-        : [...scenario.heroHoleCards, ...scenario.board];
+        ? [...heroCards(scenario), ...(scenario.villainHoleCards ?? []), ...scenario.board]
+        : [...heroCards(scenario), ...scenario.board];
       const payload = await rangesApi.parse(notation, deadCards);
       setRangeMatrix(payload.range.matrix169);
       setRangeSummary(payload.summary);
@@ -739,7 +748,20 @@ export default function Home() {
     }
   }
 
-  const canSubmitSolve = Boolean(scenario.heroRange && scenario.villainRange) && !busy;
+  // Solve is enabled when the ranges for the decision point are available:
+  // legacy hero/villain ranges (v1) or seat-based rangesBySeat (v2) covering
+  // the players still active. A valid Schema v2 spot must never be disabled
+  // just because the legacy fields are absent.
+  const foldedSeats = state?.foldedSeats ?? [];
+  const activeSeats = scenario.seats
+    .map((seat) => seat.seatId)
+    .filter((seatId) => !foldedSeats.includes(seatId));
+  const rangesBySeat = scenario.rangesBySeat ?? {};
+  const hasLegacyRanges = Boolean(scenario.heroRange && scenario.villainRange);
+  const hasSeatRanges =
+    Object.keys(rangesBySeat).length >= 2 &&
+    activeSeats.every((seatId) => Boolean(rangesBySeat[String(seatId)]));
+  const canSubmitSolve = !busy && (hasLegacyRanges || hasSeatRanges);
 
   const handLab = (
     <>
@@ -853,7 +875,9 @@ export default function Home() {
         busy={busy}
         solveJob={solveJob}
         canSubmitSolve={canSubmitSolve}
-        heroHoleCards={scenario.heroHoleCards}
+        heroHoleCards={heroCards(scenario)}
+        seats={scenario.seats}
+        heroSeat={scenario.heroSeat}
         onSolveSubmit={() => void submitSolve()}
         onSolveCancel={() => void cancelSolve()}
         onPracticeAnswer={(action) => void answerPractice(action)}
@@ -869,7 +893,7 @@ export default function Home() {
       <SolverWorkspace
         solveJob={solveJob}
         canSubmit={canSubmitSolve}
-        heroHoleCards={scenario.heroHoleCards}
+        heroHoleCards={heroCards(scenario)}
         onSubmit={() => void submitSolve()}
         onCancel={() => void cancelSolve()}
       />

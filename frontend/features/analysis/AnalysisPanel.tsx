@@ -1,13 +1,22 @@
 // Structured evidence bundle view: metrics, hand/board, equity, range
 // analysis, strategy match and evidence rows.
+//
+// A fresh hand / review-mode scenario legitimately produces hand === null
+// (no hero hole cards yet). Every hand-dependent section degrades instead
+// of crashing, and no hand facts are fabricated.
 
 import type { AnalysisResponse } from "../../types/api";
+import type { SeatSpec } from "../../types/scenario";
+import { positionLabel } from "../../lib/poker/positions";
 
 type Analysis = AnalysisResponse["analysis"];
 
 type Props = {
   analysis: Analysis;
   analysisStale: boolean;
+  /** Table seats, used to label multiway equity rows with positions. */
+  seats?: SeatSpec[];
+  heroSeat?: number;
 };
 
 function Metric({ label, value }: { label: string; value: string | number }) {
@@ -19,7 +28,24 @@ function Metric({ label, value }: { label: string; value: string | number }) {
   );
 }
 
-export default function AnalysisPanel({ analysis, analysisStale }: Props) {
+function seatLabel(
+  seatId: number,
+  seats: SeatSpec[] | undefined,
+  heroSeat: number | undefined,
+): string {
+  const seat = seats?.find((entry) => entry.seatId === seatId);
+  const position = seat ? positionLabel(seat.position) : `Seat ${seatId}`;
+  return seatId === heroSeat ? `${position} · HERO` : `${position}`;
+}
+
+function equityPercent(share: string): string {
+  const value = Number(share);
+  if (!Number.isFinite(value)) return share;
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+export default function AnalysisPanel({ analysis, analysisStale, seats, heroSeat }: Props) {
+  const hand = analysis.hand;
   return (
     <section className="panel results-panel">
       <div className="panel-heading">
@@ -29,7 +55,7 @@ export default function AnalysisPanel({ analysis, analysisStale }: Props) {
         </div>
         <div className="heading-actions">
           {analysisStale && <span className="source-tag">结果已过期</span>}
-          <span className="source-tag green">{analysis.equity?.sourceLevel ?? "principle_only"}</span>
+          <span className="source-tag green">{analysis.multiwayEquity?.sourceLevel ?? analysis.equity?.sourceLevel ?? "principle_only"}</span>
         </div>
       </div>
       <div className="metric-grid">
@@ -37,22 +63,35 @@ export default function AnalysisPanel({ analysis, analysisStale }: Props) {
         <Metric label="Call cost" value={analysis.metrics.callCost ?? "—"} />
         <Metric label="SPR" value={analysis.metrics.spr ?? "—"} />
         <Metric label="Pot odds" value={analysis.metrics.potOdds ?? "—"} />
-        <Metric label="Hand" value={analysis.hand.madeHand} />
-        <Metric label="Outs" value={analysis.hand.outCount} />
+        <Metric label="Hand" value={hand ? hand.madeHand : "未输入 Hero 手牌"} />
+        <Metric label="Outs" value={hand ? hand.outCount : "—"} />
       </div>
       <div className="result-columns">
         <div>
           <p className="eyebrow">HAND / BOARD</p>
-          <p className="result-line">
-            <strong>{analysis.hand.category}</strong> · {analysis.hand.draws.join(", ") || "no draw"}
-          </p>
-          <p className="muted">
-            Board: {analysis.board.labels.join(" · ")} · {analysis.board.staticOrDynamic}
-          </p>
-          <p className="muted small">
-            Outs: {analysis.hand.outCards.join(", ") || "—"} · 反制牌：
-            {analysis.hand.counterfeitRiskCards.join(", ") || "—"}
-          </p>
+          {hand ? (
+            <>
+              <p className="result-line">
+                <strong>{hand.category}</strong> · {hand.draws.join(", ") || "no draw"}
+              </p>
+              <p className="muted">
+                Board: {analysis.board.labels.join(" · ")} · {analysis.board.staticOrDynamic}
+              </p>
+              <p className="muted small">
+                Outs: {hand.outCards.join(", ") || "—"} · 反制牌：
+                {hand.counterfeitRiskCards.join(", ") || "—"}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="muted">
+                Board: {analysis.board.labels.join(" · ")} · {analysis.board.staticOrDynamic}
+              </p>
+              <p className="muted small">
+                牌力分析需要 Hero 手牌；当前仍可查看牌面、规则状态和可用的其他证据。
+              </p>
+            </>
+          )}
         </div>
         <div>
           <p className="eyebrow">EQUITY</p>
@@ -61,11 +100,35 @@ export default function AnalysisPanel({ analysis, analysisStale }: Props) {
               <strong>{analysis.equity.heroEquity}</strong> Hero · {analysis.equity.villainEquity}{" "}
               Villain · tie {analysis.equity.tieProbability}
             </p>
+          ) : analysis.multiwayEquity ? (
+            <p className="muted">多路底池 equity 见下方 MULTIWAY EQUITY。</p>
           ) : (
-            <p className="muted">缺少 Villain 手牌或范围，未计算 Equity。</p>
+            <p className="muted">
+              {hand === null
+                ? "缺少 Hero 手牌或范围，未计算 Equity。"
+                : "缺少 Villain 手牌或范围，未计算 Equity。"}
+            </p>
           )}
         </div>
       </div>
+      {analysis.multiwayEquity && (
+        <div className="multiway-equity-card">
+          <p className="eyebrow">MULTIWAY EQUITY</p>
+          {Object.entries(analysis.multiwayEquity.equityBySeat)
+            .sort(([, left], [, right]) => Number(right) - Number(left))
+            .map(([seatId, share]) => (
+              <p className="result-line" key={seatId}>
+                <strong>{equityPercent(share)}</strong>{" "}
+                {seatLabel(Number(seatId), seats, heroSeat)}
+              </p>
+            ))}
+          <p className="muted small">
+            Tie probability {equityPercent(analysis.multiwayEquity.tieProbability)} · Trials{" "}
+            {analysis.multiwayEquity.trials} · {analysis.multiwayEquity.weighted ? "weighted" : "unweighted"}{" "}
+            · {analysis.multiwayEquity.activePlayerCount} active
+          </p>
+        </div>
+      )}
       {analysis.rangeAnalysis && (
         <div className="range-result-card">
           <p className="eyebrow">RANGE / COMBOS</p>

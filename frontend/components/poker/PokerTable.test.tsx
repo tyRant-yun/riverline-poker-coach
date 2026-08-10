@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import PokerTable from "./PokerTable";
+import { makeSeat } from "../../test/fixtures";
+import { cardsToViewModels } from "../../lib/poker/cards";
 import { BOARD_3, seatsFixture } from "../../test/fixtures";
+
+const POSITIONS = ["button", "small_blind", "big_blind", "utg", "utg+1", "mp", "hj", "co"];
 
 describe("PokerTable", () => {
   it("renders two seats for a HU fixture", () => {
@@ -51,5 +55,34 @@ describe("PokerTable", () => {
     expect(screen.getByLabelText("A♠")).toBeInTheDocument();
     expect(screen.getByLabelText("K♦")).toBeInTheDocument();
     expect(screen.getAllByLabelText("card back").length).toBeGreaterThan(0);
+  });
+
+  it("renders per-seat known hole cards (Schema v2 seat-based source)", () => {
+    const perSeatCards: Record<number, string[]> = {
+      0: ["As", "Kd"],
+      1: ["Qh", "Qc"],
+      2: ["7c", "7h"],
+      3: ["8c", "8h"],
+      4: ["5c", "5h"],
+      5: ["3c", "3h"],
+      6: ["2s", "2d"],
+      7: ["9c", "9d"],
+    };
+    const seats = Array.from({ length: 8 }, (_, index) =>
+      makeSeat({
+        seatId: index,
+        position: POSITIONS[index],
+        cards: cardsToViewModels(perSeatCards[index]),
+      }),
+    );
+    render(<PokerTable seats={seats} board={BOARD_3} pot={200} />);
+    // Each seat shows its own two cards; no seat falls back to a neighbor's.
+    for (const [seatId, cards] of Object.entries(perSeatCards)) {
+      const seatEl = screen.getByLabelText(`seat ${seatId} ${POSITIONS[Number(seatId)]}`);
+      for (const card of cards) {
+        expect(seatEl.textContent).toContain(card[0]);
+      }
+    }
+    expect(screen.queryAllByLabelText("card back")).toHaveLength(0);
   });
 });

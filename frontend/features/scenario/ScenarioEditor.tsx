@@ -10,6 +10,7 @@
 import { useMemo, useState } from "react";
 
 import CardPicker from "../../components/poker/CardPicker";
+import { heroSeatSpec, opponentSeatSpec } from "../../lib/poker/scenario";
 import type { Scenario } from "../../types/scenario";
 
 type Props = {
@@ -48,19 +49,23 @@ export default function ScenarioEditor({
   const [pickerTarget, setPickerTarget] = useState<PickerTarget | null>(null);
   const [heroOnlyMode, setHeroOnlyMode] = useState(false);
 
+  const heroSeat = heroSeatSpec(scenario);
+  // HU-only fields: the "Villain" slot is only meaningful with two seats.
+  const villainSeat = opponentSeatSpec(scenario);
+  const isHeadsUp = scenario.tableSize === 2;
+
+  const heroHoleCards = scenario.heroHoleCards ?? [];
+  const villainHoleCards = scenario.villainHoleCards ?? [];
+
   const usedCards = useMemo(
-    () => [
-      ...scenario.heroHoleCards,
-      ...(scenario.villainHoleCards ?? []),
-      ...boardInput.filter(Boolean),
-    ],
-    [scenario.heroHoleCards, scenario.villainHoleCards, boardInput],
+    () => [...heroHoleCards, ...villainHoleCards, ...boardInput.filter(Boolean)],
+    [heroHoleCards, villainHoleCards, boardInput],
   );
 
   const handlePick = (card: string) => {
     const lower = card.toLowerCase();
     if (pickerTarget === "hero") {
-      const current = scenario.heroHoleCards;
+      const current = scenario.heroHoleCards ?? [];
       if (current.length < 2 && !current.some((c) => c.toLowerCase() === lower)) {
         onUpdateScenario({ heroHoleCards: [...current, card] });
         if (current.length + 1 >= 2) setPickerTarget(null);
@@ -105,7 +110,7 @@ export default function ScenarioEditor({
           Hero 手牌
           <span className="card-slot">
             <input
-              value={scenario.heroHoleCards.join(" ")}
+              value={heroHoleCards.join(" ")}
               onChange={(event) =>
                 onUpdateScenario({
                   heroHoleCards: event.target.value.split(/\s+/).filter(Boolean).slice(0, 2),
@@ -123,46 +128,50 @@ export default function ScenarioEditor({
             </button>
           </span>
         </label>
-        <label>
-          Villain 手牌
-          <span className="card-slot">
-            <input
-              value={villainUnknown ? "" : (scenario.villainHoleCards ?? []).join(" ")}
-              disabled={villainUnknown}
-              placeholder={villainUnknown ? "对手手牌未知（复盘模式）" : undefined}
-              onChange={(event) =>
-                onUpdateScenario({
-                  villainHoleCards: event.target.value.split(/\s+/).filter(Boolean).slice(0, 2),
-                })
-              }
-            />
-            <button
-              type="button"
-              className="pick-toggle"
-              disabled={villainUnknown}
-              onClick={() => setPickerTarget(pickerTarget === "villain" ? null : "villain")}
-              aria-label="为 Villain 手牌选牌"
-              aria-pressed={pickerTarget === "villain"}
-            >
-              选牌
-            </button>
-          </span>
-        </label>
+        {isHeadsUp && (
+          <label>
+            Villain 手牌
+            <span className="card-slot">
+              <input
+                value={villainUnknown ? "" : villainHoleCards.join(" ")}
+                disabled={villainUnknown}
+                placeholder={villainUnknown ? "对手手牌未知（复盘模式）" : undefined}
+                onChange={(event) =>
+                  onUpdateScenario({
+                    villainHoleCards: event.target.value.split(/\s+/).filter(Boolean).slice(0, 2),
+                  })
+                }
+              />
+              <button
+                type="button"
+                className="pick-toggle"
+                disabled={villainUnknown}
+                onClick={() => setPickerTarget(pickerTarget === "villain" ? null : "villain")}
+                aria-label="为 Villain 手牌选牌"
+                aria-pressed={pickerTarget === "villain"}
+              >
+                选牌
+              </button>
+            </span>
+          </label>
+        )}
       </div>
-      <label className="hero-only-toggle">
-        <input
-          type="checkbox"
-          checked={heroOnlyMode}
-          onChange={(event) => {
-            const enabled = event.target.checked;
-            setHeroOnlyMode(enabled);
-            if (enabled) {
-              onUpdateScenario({ villainHoleCards: undefined });
-            }
-          }}
-        />
-        复盘模式 · 只填自己的手牌（对手手牌未知）
-      </label>
+      {isHeadsUp && (
+        <label className="hero-only-toggle">
+          <input
+            type="checkbox"
+            checked={heroOnlyMode}
+            onChange={(event) => {
+              const enabled = event.target.checked;
+              setHeroOnlyMode(enabled);
+              if (enabled) {
+                onUpdateScenario({ villainHoleCards: undefined });
+              }
+            }}
+          />
+          复盘模式 · 只填自己的手牌（对手手牌未知）
+        </label>
+      )}
       <div className="settings-grid">
         <label>
           小盲
@@ -187,31 +196,37 @@ export default function ScenarioEditor({
           <input
             type="number"
             min="1"
-            value={scenario.seats[0].startingStack}
+            value={heroSeat.startingStack}
             onChange={(event) =>
               onUpdateScenario({
-                seats: scenario.seats.map((seat, index) =>
-                  index === 0 ? { ...seat, startingStack: Number(event.target.value) || 1 } : seat,
+                seats: scenario.seats.map((seat) =>
+                  seat.seatId === heroSeat.seatId
+                    ? { ...seat, startingStack: Number(event.target.value) || 1 }
+                    : seat,
                 ),
               })
             }
           />
         </label>
-        <label>
-          Villain 起始筹码
-          <input
-            type="number"
-            min="1"
-            value={scenario.seats[1].startingStack}
-            onChange={(event) =>
-              onUpdateScenario({
-                seats: scenario.seats.map((seat, index) =>
-                  index === 1 ? { ...seat, startingStack: Number(event.target.value) || 1 } : seat,
-                ),
-              })
-            }
-          />
-        </label>
+        {isHeadsUp && villainSeat && (
+          <label>
+            Villain 起始筹码
+            <input
+              type="number"
+              min="1"
+              value={villainSeat.startingStack}
+              onChange={(event) =>
+                onUpdateScenario({
+                  seats: scenario.seats.map((seat) =>
+                    seat.seatId === villainSeat.seatId
+                      ? { ...seat, startingStack: Number(event.target.value) || 1 }
+                      : seat,
+                  ),
+                })
+              }
+            />
+          </label>
+        )}
       </div>
       <div className="card-inputs">
         {boardInput.map((card, index) => (

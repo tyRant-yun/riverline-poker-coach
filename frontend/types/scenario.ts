@@ -35,14 +35,18 @@ export type Scenario = {
   buttonSeat: number;
   heroSeat: number;
   seats: SeatSpec[];
-  heroHoleCards: string[];
-  villainHoleCards?: string[];
+  heroHoleCards: string[] | null;
+  villainHoleCards?: string[] | null;
+  /** Schema v2 canonical hole-card source, keyed by seat id (string keys on the wire). */
+  knownHoleCardsBySeat?: Record<string, string[]>;
   board: string[];
   actionHistory: ActionEvent[];
   decisionPoint: { street: string; actorSeat: number; afterSequence: number };
   assumptions: Record<string, unknown>;
   heroRange?: RangeSpecPayload;
   villainRange?: RangeSpecPayload;
+  /** Schema v2 canonical range source, keyed by seat id (string keys on the wire). */
+  rangesBySeat?: Record<string, RangeSpecPayload>;
 };
 
 export type RangeSide = "heroRange" | "villainRange";

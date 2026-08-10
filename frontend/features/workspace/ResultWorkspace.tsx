@@ -12,6 +12,7 @@ import type {
   TeachingMeta,
   TeachingResponse,
 } from "../../types/api";
+import type { SeatSpec } from "../../types/scenario";
 import AnalysisPanel from "../analysis/AnalysisPanel";
 import TeachingPanel from "../coach/TeachingPanel";
 import PracticePanel from "../practice/PracticePanel";
@@ -47,6 +48,8 @@ type Props = {
   solveJob: SolveJob | null;
   canSubmitSolve: boolean;
   heroHoleCards: string[];
+  seats: SeatSpec[];
+  heroSeat: number;
   onSolveSubmit: () => void;
   onSolveCancel: () => void;
   onPracticeAnswer: (action: string) => void;
@@ -66,6 +69,8 @@ export default function ResultWorkspace({
   solveJob,
   canSubmitSolve,
   heroHoleCards,
+  seats,
+  heroSeat,
   onSolveSubmit,
   onSolveCancel,
   onPracticeAnswer,
@@ -88,7 +93,12 @@ export default function ResultWorkspace({
       <div className="result-content" role="tabpanel">
         {activeTab === "evidence" &&
           (analysis ? (
-            <AnalysisPanel analysis={analysis} analysisStale={analysisStale} />
+            <AnalysisPanel
+              analysis={analysis}
+              analysisStale={analysisStale}
+              seats={seats}
+              heroSeat={heroSeat}
+            />
           ) : (
             <p className="muted">{PLACEHOLDERS.evidence}</p>
           ))}

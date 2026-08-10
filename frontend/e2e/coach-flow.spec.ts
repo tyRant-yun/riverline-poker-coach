@@ -1,6 +1,28 @@
 import { expect, test } from "@playwright/test";
 import path from "node:path";
 
+test("analyzes the default fresh hand without hero cards", async ({ page }) => {
+  // The app opens on a fresh hand (no hero cards, blinds only). Analyzing
+  // it must succeed and degrade — never crash.
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "构造决策场景" })).toBeVisible();
+
+  await page.getByRole("button", { name: "生成分析" }).click();
+  await expect(page.getByText("分析完成。所有定量结果都来自结构化证据。"))
+    .toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("结构化分析")).toBeVisible();
+
+  // Evidence tab renders and the missing-hand prompt is explicit.
+  await expect(page.getByText("未输入 Hero 手牌")).toBeVisible();
+  await expect(page.getByText("牌力分析需要 Hero 手牌；当前仍可查看牌面、规则状态和可用的其他证据。"))
+    .toBeVisible();
+  await expect(page.getByText(/Board: /)).toBeVisible();
+
+  // The page did not crash: the editor and action bar are still live.
+  await expect(page.getByRole("heading", { name: "构造决策场景" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "校验场景" })).toBeEnabled();
+});
+
 test("can validate, analyze, and explain the default HU scene", async ({ page }) => {
   await page.goto("/");
 

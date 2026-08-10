@@ -109,3 +109,45 @@ describe("ScenarioEditor 52-card picker", () => {
     expect(screen.queryByRole("group", { name: "选牌器 Hero 手牌" })).not.toBeInTheDocument();
   });
 });
+
+describe("ScenarioEditor seat-based stacks", () => {
+  const eightMax: Scenario = {
+    schemaVersion: 2,
+    gameVariant: "nlhe",
+    tableSize: 8,
+    smallBlind: 50,
+    bigBlind: 100,
+    buttonSeat: 4,
+    heroSeat: 5,
+    seats: [0, 1, 2, 3, 4, 5, 6, 7].map((seatId) => ({
+      seatId,
+      startingStack: 10000,
+      position: ["button", "small_blind", "big_blind", "utg", "utg+1", "mp", "hj", "co"][seatId],
+    })),
+    heroHoleCards: ["As", "Kd"],
+    board: [],
+    actionHistory: [],
+    decisionPoint: { street: "preflop", actorSeat: 3, afterSequence: 0 },
+    assumptions: {},
+  };
+
+  it("edits the hero seat's stack when heroSeat is not 0", () => {
+    const { onUpdateScenario } = renderEditor(eightMax);
+
+    const heroStackInput = screen.getByLabelText("Hero 起始筹码");
+    expect(heroStackInput).toHaveValue(10000);
+    fireEvent.change(heroStackInput, { target: { value: "7500" } });
+    const patch = onUpdateScenario.mock.calls.at(-1)?.[0] as Partial<Scenario>;
+    const edited = patch.seats?.find((seat) => seat.seatId === 5);
+    expect(edited?.startingStack).toBe(7500);
+    const untouched = patch.seats?.find((seat) => seat.seatId === 0);
+    expect(untouched?.startingStack).toBe(10000);
+  });
+
+  it("hides the villain fields in a multiway scenario", () => {
+    renderEditor(eightMax);
+    expect(screen.queryByLabelText("Villain 手牌")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Villain 起始筹码")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/复盘模式/)).not.toBeInTheDocument();
+  });
+});
