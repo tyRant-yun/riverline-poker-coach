@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
-import tempfile
 import threading
 import time
 from typing import Callable
@@ -60,31 +58,25 @@ class SidecarClient:
     def _run_docker(
         self, config_json: str, cancel_event: threading.Event | None
     ) -> str:
-        with tempfile.TemporaryDirectory(prefix="poker-coach-solve-") as tmp_dir:
-            config_path = os.path.join(tmp_dir, "config.json")
-            with open(config_path, "w", encoding="utf-8") as handle:
-                handle.write(config_json)
-            host_dir = os.path.abspath(tmp_dir)
-            command = [
-                "docker",
-                "run",
-                "--rm",
-                "-v",
-                f"{host_dir}:/work:ro",
-                self._image,
-                "/work/config.json",
-            ]
-            if cancel_event is None:
-                try:
-                    completed = subprocess.run(
-                        command, capture_output=True, text=True, timeout=self._timeout_seconds
-                    )
-                except subprocess.TimeoutExpired as exc:
-                    raise SolverUnsupportedError(
-                        f"sidecar timed out after {self._timeout_seconds}s"
-                    ) from exc
-            else:
-                completed = self._run_cancellable(command, cancel_event)
+        # Config travels over stdin ("-"): bind-mounting a host path does not
+        # survive the Windows-daemon -> Linux-container boundary that the
+        # compose solver-worker crosses (daemon resolves -v sources on the host).
+        command = ["docker", "run", "--rm", "-i", self._image, "-"]
+        if cancel_event is None:
+            try:
+                completed = subprocess.run(
+                    command,
+                    input=config_json,
+                    capture_output=True,
+                    text=True,
+                    timeout=self._timeout_seconds,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise SolverUnsupportedError(
+                    f"sidecar timed out after {self._timeout_seconds}s"
+                ) from exc
+        else:
+            completed = self._run_cancellable(command, config_json, cancel_event)
             if cancel_event is not None and cancel_event.is_set():
                 raise SolverCancelled("sidecar process killed by cancellation")
             if completed.returncode != 0:
@@ -95,10 +87,17 @@ class SidecarClient:
             return completed.stdout
 
     def _run_cancellable(
-        self, command: list[str], cancel_event: threading.Event
+        self,
+        command: list[str],
+        config_json: str,
+        cancel_event: threading.Event,
     ) -> subprocess.CompletedProcess:
         proc = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
 
         def watcher() -> None:
@@ -110,7 +109,7 @@ class SidecarClient:
 
         threading.Thread(target=watcher, daemon=True).start()
         try:
-            stdout, stderr = proc.communicate(timeout=self._timeout_seconds)
+            stdout, stderr = proc.communicate(input=config_json, timeout=self._timeout_seconds)
         except subprocess.TimeoutExpired:
             proc.kill()
             stdout, stderr = proc.communicate()
