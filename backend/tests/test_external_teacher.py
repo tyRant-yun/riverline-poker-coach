@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from poker_coach.analysis import analyze_scenario
 from poker_coach.api import AppConfig, create_app
 from poker_coach.coach import ExternalModelTeacher
-from poker_coach.coach.external import _strategy_match_facts
+from poker_coach.coach.external import _sanitize_response, _strategy_match_facts
 from poker_coach.coach.tools import TeachingToolGateway
 from poker_coach.domain.models import ScenarioSpec
 from poker_coach.persistence import SQLiteStore
@@ -303,6 +303,56 @@ def test_strategy_frequencies_gated_by_approval():
     approved = match.model_copy(update={"can_quote_frequencies": True})
     facts = _strategy_match_facts(approved)
     assert facts["recommendations"][0]["frequency"] == "0.35"
+
+
+def test_string_evidence_references_are_normalized():
+    """Models often cite evidence ids as plain strings instead of objects;
+    both forms must parse instead of degrading to the local teacher."""
+
+    scenario = scenario_at_flop()
+    analysis = analysis_for(scenario)
+    bundle = analysis.evidence.model_copy(deep=True)
+    legal = legal_for(scenario, analysis)
+    payload = compliant_payload(bundle, legal)
+
+    def to_strings(value):
+        if isinstance(value, dict):
+            if "evidenceReferences" in value and isinstance(value["evidenceReferences"], list):
+                value = {
+                    **value,
+                    "evidenceReferences": [
+                        item["evidenceId"] for item in value["evidenceReferences"]
+                    ],
+                }
+            return {key: to_strings(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [to_strings(item) for item in value]
+        return value
+
+    response = _sanitize_response(to_strings(payload), bundle, legal)
+    assert response.summary.evidence_references[0].evidence_id.endswith("rules.pot")
+    assert response.recommended_actions[0].evidence_references[0].evidence_id.endswith("equity.hero")
+    assert response.evidence_references[0].evidence_id.endswith("equity.hero")
+    # All surviving references still validate against the evidence bundle.
+    response.validate_evidence_references(bundle)
+
+
+def test_singleton_list_fields_are_normalized():
+    """Models sometimes emit list-typed fields (keyReasons, futureStreetPlan)
+    as a single object; both forms must parse."""
+
+    scenario = scenario_at_flop()
+    analysis = analysis_for(scenario)
+    bundle = analysis.evidence.model_copy(deep=True)
+    legal = legal_for(scenario, analysis)
+    payload = compliant_payload(bundle, legal)
+    payload["futureStreetPlan"] = payload["futureStreetPlan"][0]
+    payload["keyReasons"] = payload["keyReasons"][0]
+
+    response = _sanitize_response(payload, bundle, legal)
+    assert len(response.future_street_plan) == 1
+    assert response.future_street_plan[0].text.startswith("转牌")
+    assert len(response.key_reasons) == 1
 
 
 def test_api_envelope_reports_provider_and_degradation():

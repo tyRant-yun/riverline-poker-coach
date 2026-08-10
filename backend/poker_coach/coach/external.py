@@ -253,6 +253,7 @@ def _sanitize_response(raw: Any, bundle: EvidenceBundle, legal_actions: LegalAct
         field.alias or name: name for name, field in TeachingResponse.model_fields.items()
     }
     cleaned = {aliases[key]: value for key, value in raw.items() if key in aliases}
+    cleaned = _coerce_response_shape(cleaned)
     response = TeachingResponse.model_validate(cleaned)
     valid_ids = bundle.ids()
     legal_names = {action.value for action in legal_actions.actions}
@@ -308,6 +309,69 @@ def _sanitize_response(raw: Any, bundle: EvidenceBundle, legal_actions: LegalAct
     response = response.model_copy(update=updated)
     response.validate_evidence_references(bundle)
     return response
+
+
+_REF_LIST_FIELDS = {
+    "evidenceReferences",
+    "evidence_references",
+    "expectedEvidenceReferences",
+    "expected_evidence_references",
+}
+_LIST_FIELDS = {
+    "recommendedActions",
+    "recommended_actions",
+    "recommendationBasis",
+    "recommendation_basis",
+    "assumptions",
+    "keyReasons",
+    "key_reasons",
+    "alternativeLines",
+    "alternative_lines",
+    "futureStreetPlan",
+    "future_street_plan",
+    "conceptTags",
+    "concept_tags",
+}
+
+
+def _coerce_response_shape(raw: Any) -> Any:
+    """Normalize common model-output shape drift before validation.
+
+    Models drift in two ways that used to force degradation to the local
+    teacher:
+
+    - evidence references cited as plain strings (``["rules.pot", ...]``)
+      instead of objects (``[{"evidenceId": "..."}]``);
+    - list-typed fields (keyReasons, futureStreetPlan, ...) emitted as a
+      single object instead of an array.
+
+    Both forms carry the same contract, so coerce instead of falling back.
+    """
+
+    def coerce_item(item: Any) -> Any:
+        if isinstance(item, str):
+            return {"evidenceId": item}
+        return _coerce_response_shape(item)
+
+    if isinstance(raw, dict):
+        result: dict[str, Any] = {}
+        for key, value in raw.items():
+            if key in _REF_LIST_FIELDS:
+                if isinstance(value, dict):
+                    value = [value]
+                if isinstance(value, list):
+                    value = [coerce_item(item) for item in value]
+            elif key in _LIST_FIELDS:
+                if isinstance(value, dict):
+                    value = [value]
+                value = _coerce_response_shape(value)
+            else:
+                value = _coerce_response_shape(value)
+            result[key] = value
+        return result
+    if isinstance(raw, list):
+        return [_coerce_response_shape(item) for item in raw]
+    return raw
 
 
 def _strip_fences(content: str) -> str:
