@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
 
-$apiProcess = Start-Process -FilePath "python" `
-  -ArgumentList "-m", "uvicorn", "poker_coach.api.app:app", "--app-dir", "backend" `
+$apiProcess = Start-Process -FilePath "py" `
+  -ArgumentList "-3.13", "-m", "uvicorn", "poker_coach.api.app:app", "--app-dir", "backend" `
   -WorkingDirectory $projectRoot -WindowStyle Hidden -PassThru
 
 $webProcess = Start-Process -FilePath "npm.cmd" `

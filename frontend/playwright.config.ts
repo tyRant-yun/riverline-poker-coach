@@ -16,7 +16,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "python -m uvicorn poker_coach.api.app:app --app-dir backend --port 8000",
+      command: "py -3.13 -m uvicorn poker_coach.api.app:app --app-dir backend --port 8000",
       cwd: workspaceRoot,
       url: "http://127.0.0.1:8000/health",
       reuseExistingServer: !process.env.CI,

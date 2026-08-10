@@ -8,20 +8,20 @@
 
 ```powershell
 cd C:\Users\Administrator\Documents\ChatGPT\德州扑克
-python -m pytest
-python -m compileall -q backend/poker_coach backend/tests
-python -m pip check
+py -3.13 -m pytest
+py -3.13 -m compileall -q backend/poker_coach backend/tests
+py -3.13 -m pip check
 ```
 
 测试入口从仓库根目录执行，覆盖领域合同、PokerKit 适配层、金标牌谱、回放不变量、分析核心、专用 Equity API、场景修订重分析、持久化和教学证据绑定。
 
 ## 本地启动
 
-启动后端：
+启动后端（项目依赖安装在 Python 3.13，用 `py -3.13` 调用）：
 
 ```powershell
 cd C:\Users\Administrator\Documents\ChatGPT\德州扑克
-python -m uvicorn poker_coach.api.app:app --app-dir backend --reload
+py -3.13 -m uvicorn poker_coach.api.app:app --app-dir backend --reload
 ```
 
 启动前端（另开终端）：
@@ -47,6 +47,17 @@ API 默认限制单请求体为 1 MiB、单次分析超时为 120 秒、匿名�
 ```powershell
 .\scripts\run-local.ps1
 ```
+
+## Docker 部署（API + 独立 worker + PostgreSQL + Redis）
+
+```powershell
+docker compose up -d            # 构建并启动 4 个容器
+curl http://127.0.0.1:8000/health
+```
+
+- `api` 容器使用 PostgreSQL 与 Redis；`POKER_COACH_REDIS_WORKER_IN_PROCESS=0`，分析作业由独立的 `worker` 容器消费，取消可跨容器生效。
+- 首次部署可执行 `docker compose exec api alembic upgrade head` 走迁移路径（存储层自举与迁移幂等，两者可共存）。
+- 停止：`docker compose down`；数据卷 `pgdata` 保留，`docker compose down -v` 可连数据一并删除。
 
 ## 工程文档
 

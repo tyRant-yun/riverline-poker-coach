@@ -25,7 +25,7 @@
 
 ```powershell
 cd C:\Users\Administrator\Documents\ChatGPT\德州扑克
-python -m pytest backend/tests/test_agent_groundedness.py backend/tests/test_strategy_catalog.py backend/tests/test_external_teacher.py
+py -3.13 -m pytest backend/tests/test_agent_groundedness.py backend/tests/test_strategy_catalog.py backend/tests/test_external_teacher.py
 ```
 
 外部模型接入通过环境变量启用：`POKER_COACH_LLM_API_KEY`（必需）、`POKER_COACH_LLM_BASE_URL`（默认 OpenAI 兼容端点）、`POKER_COACH_LLM_MODEL`、`POKER_COACH_LLM_TIMEOUT_SECONDS`；未设置密钥时始终使用本地教师。
