@@ -28,12 +28,13 @@ load_dotenv(override=False)
 from poker_coach.analysis import AnalysisCancelled, AnalysisTimeout, analyze_scenario, expand_range, range_spec_from_notation
 from poker_coach.analysis.models import AnalysisResult, InvalidAnalysisInput
 from poker_coach.coach import TeachingService
-from poker_coach.domain.models import ScenarioSpec
+from poker_coach.domain.models import RangeSpec, ScenarioSpec
 from poker_coach.jobs import InProcessJobBackend, RedisJobBackend
 from poker_coach.learning import LearningService, PracticeUnavailable
 from poker_coach.persistence import PostgresStore, SQLiteStore
 from poker_coach.persistence.sqlite_store import StoreNotFound
 from poker_coach.rules import PokerKitAdapter, ReplayError
+from poker_coach.solver import SolverJobQueue, SolverSpot, SolverUnsupportedError, build_spot
 from poker_coach.strategy.catalog import StrategyCatalog
 from poker_coach.strategy.ranges import default_preflop_ranges
 
@@ -136,6 +137,7 @@ def create_app(
     config: AppConfig | None = None,
     store: SQLiteStore | PostgresStore | None = None,
     teacher: TeachingService | None = None,
+    solver_queue=None,
 ) -> FastAPI:
     config = config or AppConfig.from_environment()
     adapter = PokerKitAdapter()
@@ -655,6 +657,84 @@ def create_app(
     @app.delete("/v1/analysis/jobs/{job_id}", status_code=202)
     async def cancel_analysis_job(request: Request, job_id: str):
         status = job_backend.cancel(job_id)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "jobId": job_id,
+            "status": status,
+        }
+
+    _solver_queue = solver_queue
+
+    def _get_solver_queue():
+        nonlocal _solver_queue
+        if _solver_queue is None:
+            if not config.redis_url:
+                raise ApiError(
+                    "solver_unavailable",
+                    "solver jobs require POKER_COACH_REDIS_URL and the optional 'redis' dependency",
+                    status_code=503,
+                )
+            _solver_queue = SolverJobQueue(config.redis_url)
+        return _solver_queue
+
+    @app.post("/v1/solve/jobs", status_code=202)
+    async def submit_solve_job(request: Request):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_request", "request body must be a JSON object")
+        scenario = _scenario_from_request(payload.get("scenario", payload))
+        _set_scenario_context(request, scenario)
+        hero_range = None
+        villain_range = None
+        if payload.get("heroRange") is not None:
+            hero_range = RangeSpec.model_validate(payload["heroRange"])
+        if payload.get("villainRange") is not None:
+            villain_range = RangeSpec.model_validate(payload["villainRange"])
+        hero_range = hero_range or scenario.hero_range
+        villain_range = villain_range or scenario.villain_range
+        if hero_range is None or villain_range is None:
+            raise ApiError(
+                "invalid_request",
+                "solve jobs require heroRange and villainRange (or ranges on the scenario)",
+            )
+        max_iterations = payload.get("maxIterations", 400)
+        if not isinstance(max_iterations, int) or max_iterations <= 0:
+            raise ApiError("invalid_request", "maxIterations must be a positive integer")
+        try:
+            spot = build_spot(
+                scenario,
+                hero_range=hero_range,
+                villain_range=villain_range,
+                max_iterations=min(max_iterations, 50_000),
+            )
+        except SolverUnsupportedError as exc:
+            raise ApiError("invalid_spot", str(exc)) from exc
+        job_id = _get_solver_queue().submit(spot)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "jobId": job_id,
+            "status": "queued",
+            "spot": spot.to_dict(),
+        }
+
+    @app.get("/v1/solve/jobs/{job_id}")
+    async def get_solve_job(request: Request, job_id: str):
+        job = _get_solver_queue().get(job_id)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "jobId": job_id,
+            "status": job["status"],
+            "executionMs": job.get("executionMs"),
+            "error": job.get("error"),
+            "result": job["result"].to_dict() if job.get("result") is not None else None,
+        }
+
+    @app.post("/v1/solve/jobs/{job_id}/cancel", status_code=202)
+    async def cancel_solve_job(request: Request, job_id: str):
+        status = _get_solver_queue().cancel(job_id)
         return {
             "schemaVersion": 1,
             "requestId": request.state.request_id,
