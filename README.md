@@ -34,7 +34,7 @@ npm run dev
 
 前端默认访问 `http://127.0.0.1:3000`，并调用 `http://127.0.0.1:8000` 的 API；可用 `NEXT_PUBLIC_API_BASE_URL` 覆盖。默认 SQLite 文件位于 `.data/`，不会提交到 Git。
 
-生产或集成环境可设置 `POKER_COACH_DATABASE_URL` 切换到 PostgreSQL；需先安装可选依赖 `pip install -e ".[postgres]"`。未设置时始终使用 SQLite。
+生产或集成环境可设置 `POKER_COACH_DATABASE_URL` 切换到 PostgreSQL；需先安装可选依赖 `pip install -e ".[postgres]"`。未设置时始终使用 SQLite。本地部署回归可用 `.\scripts\dev-services.ps1` 一键启动 PostgreSQL 16 和 Redis 7 容器（Docker Desktop），然后运行 `backend/tests/test_postgres_live.py`（需设置 `POKER_COACH_TEST_PG_URL`，未设置时自动跳过）。
 
 API 默认限制单请求体为 1 MiB、单次分析超时为 120 秒、匿名会话每分钟 120 个请求；可用 `POKER_COACH_MAX_REQUEST_BYTES`、`POKER_COACH_MAX_TIMEOUT_SECONDS` 和 `POKER_COACH_RATE_LIMIT_PER_MINUTE` 调整，限流设为 `0` 可关闭（仅适合本地测试）。
 
@@ -54,6 +54,6 @@ API 默认限制单请求体为 1 MiB、单次分析超时为 120 秒、匿名�
 
 ## 当前边界
 
-PostgreSQL 适配已提供可选的 psycopg3 存储边界，但尚未在本地仓库之外的真实 PostgreSQL 实例上做部署回归；Redis/异步任务、完整外部模型 Agent 和真正的跨进程取消仍待后续阶段。前端 E2E 已覆盖保存、修订、历史重分析和导入流程。当前教学服务只使用 EvidenceBundle 提供 principle-only 解释；没有可靠策略数据时不会输出虚假 GTO 频率。
+PostgreSQL 适配已通过真实实例部署回归（PostgreSQL 16，见 `backend/tests/test_postgres_live.py`：schema 迁移、场景/修订/分析/学习记录与 SQLite 对拍、完整 HTTP 流程）；连接池和迁移回滚仍待生产化。Redis 异步任务、完整外部模型 Agent 和真正的跨进程取消仍待后续阶段。前端 E2E 已覆盖保存、修订、历史重分析和导入流程。当前教学服务只使用 EvidenceBundle 提供 principle-only 解释；没有可靠策略数据时不会输出虚假 GTO 频率。
 
 示例场景见 [examples/scenario-flop.json](examples/scenario-flop.json)，安全和运维边界见 [安全、隐私与运维](docs/security-privacy-operations.md)。编辑器支持 ScenarioSpec JSON 导入/导出；教学层的只读工具边界和评测见 [教学 Agent 评测基线](docs/agent-evaluation.md)。
