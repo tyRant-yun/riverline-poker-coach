@@ -1,3 +1,5 @@
+import random
+
 import pytest
 
 from poker_coach.domain.models import ScenarioSpec
@@ -169,3 +171,49 @@ def test_invalid_event_keeps_input_immutable_and_reports_current_legal_actions()
     assert error.value.state.actor_seat == 0
     assert error.value.state.legal_actions.actions
     assert scenario.to_json() == before
+
+
+def test_random_legal_prefixes_preserve_invariants_and_replay_determinism():
+    rng = random.Random(20260810)
+    adapter = PokerKitAdapter()
+
+    for _ in range(64):
+        history = []
+        for sequence in range(1, 7):
+            current = make_scenario(history)
+            state = adapter.replay(current).final_state
+            legal = {action.value for action in state.legal_actions.actions}
+            if not legal:
+                break
+            choices = [
+                action
+                for action in ("check", "call", "raise_to", "all_in", "fold")
+                if action in legal and (action != "fold" or len(legal) == 1)
+            ]
+            action_type = rng.choice(choices)
+            event = {
+                "actionId": f"random-{sequence}",
+                "sequence": sequence,
+                "street": "preflop",
+                "actorSeat": state.legal_actions.actor_seat,
+                "actionType": action_type,
+            }
+            if action_type == "call":
+                event.update(amount=state.legal_actions.call_amount, amountType="cost")
+            elif action_type == "raise_to":
+                event.update(amount=state.legal_actions.min_raise_to, amountType="to")
+            elif action_type == "all_in":
+                event.update(amount=state.legal_actions.max_raise_to, amountType="to")
+            history.append(event)
+            if action_type == "fold":
+                break
+
+        scenario = make_scenario(history)
+        first = adapter.replay(scenario)
+        second = adapter.replay(scenario)
+        assert first.to_json() == second.to_json()
+        expected_total = sum(seat.starting_stack for seat in scenario.seats)
+        assert sum(first.final_state.stacks.values()) + first.final_state.pot == expected_total
+        assert first.final_state.pot >= 0
+        assert all(amount >= 0 for amount in first.final_state.stacks.values())
+        assert all(amount >= 0 for amount in first.final_state.bets.values())

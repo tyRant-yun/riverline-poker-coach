@@ -133,6 +133,31 @@ class PokerKitAdapter:
     def legal_actions(self, scenario: ScenarioSpec) -> LegalActions:
         return self.replay(scenario).final_state.legal_actions
 
+    def replay_to_decision(self, scenario: ScenarioSpec) -> ReplayResult:
+        """Replay only the selected node and verify its declared decision point."""
+
+        prefix = scenario.model_copy(
+            update={"action_history": scenario.action_history[: scenario.decision_point.after_sequence]}
+        )
+        result = self.replay(prefix)
+        state = result.final_state
+        if state.hand_in_progress and state.actor_seat is not None:
+            if state.actor_seat != scenario.decision_point.actor_seat:
+                raise ReplayError(
+                    "decision_point_actor_mismatch",
+                    f"decision point actor must be seat {state.actor_seat}",
+                    scenario.decision_point.after_sequence,
+                    state,
+                )
+            if state.street is not scenario.decision_point.street:
+                raise ReplayError(
+                    "decision_point_street_mismatch",
+                    f"decision point street must be {state.street.value}",
+                    scenario.decision_point.after_sequence,
+                    state,
+                )
+        return result
+
     def _create_initial_state(self, scenario: ScenarioSpec) -> tuple[Any, _SeatMap]:
         from pokerkit import Automation, Mode, NoLimitTexasHoldem
 
