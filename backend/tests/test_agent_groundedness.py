@@ -111,6 +111,7 @@ def test_teaching_tool_gateway_exposes_facts_without_mutation_methods():
             "get_evidence_bundle",
             "get_range",
             "get_strategy_match",
+            "get_solver_analysis",
             "get_term",
             "create_practice",
         }
@@ -119,6 +120,7 @@ def test_teaching_tool_gateway_exposes_facts_without_mutation_methods():
     assert gateway.get_legal_actions().actions
     assert gateway.get_evidence_bundle().ids() == analysis.evidence.ids()
     assert gateway.get_range("villain") is None
+    assert gateway.get_solver_analysis() is None
     assert gateway.get_term("pot_odds")
     practice = gateway.create_practice(profile_id="tool-profile")
     assert practice.expected_evidence_references
