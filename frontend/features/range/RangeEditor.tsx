@@ -1,6 +1,7 @@
 // 169-cell range editor. The full matrix stays available here; the workspace
 // will surface only a compact summary and open this editor on demand.
 
+import { useState } from "react";
 import { RANKS, matrixCell } from "../../lib/poker/matrix";
 import type { DefaultRanges, RangeCombo, RangeSide, RangeSummary } from "../../types/scenario";
 
@@ -31,6 +32,10 @@ export default function RangeEditor({
   onParse,
   onCycleCell,
 }: Props) {
+  // The full 169 matrix is heavy; the workspace starts expanded but the
+  // editor can collapse into a compact summary so it never permanently
+  // occupies primary space.
+  const [expanded, setExpanded] = useState(true);
   return (
     <section className="panel compact-panel">
       <div className="panel-heading">
@@ -38,9 +43,38 @@ export default function RangeEditor({
           <p className="eyebrow">02 · RANGE</p>
           <h2>{rangeSide === "heroRange" ? "Hero" : "Villain"} 范围</h2>
         </div>
-        <span className="source-tag">假设</span>
+        <div className="heading-actions">
+          {expanded ? (
+            <button className="text-button" onClick={() => setExpanded(false)} aria-label="收起范围矩阵">
+              收起矩阵
+            </button>
+          ) : (
+            <button className="text-button" onClick={() => setExpanded(true)} aria-label="编辑范围">
+              编辑范围
+            </button>
+          )}
+          <span className="source-tag">假设</span>
+        </div>
       </div>
-      <div className="range-controls">
+      {!expanded ? (
+        <div className="range-compact" aria-label="range summary compact">
+          <span className="range-compact__name">
+            {rangeSide === "heroRange" ? "Hero" : "Villain"} 范围
+          </span>
+          {rangeSummary ? (
+            <span className="muted small">
+              加权组合：<strong>{rangeSummary.weightedCombos}</strong> · {Object.keys(rangeMatrix).length} 格
+            </span>
+          ) : (
+            <span className="muted small">尚未标准化</span>
+          )}
+          <button className="secondary-button" onClick={() => setExpanded(true)}>
+            编辑范围
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="range-controls">
         <label>
           编辑对象
           <select
@@ -105,6 +139,8 @@ export default function RangeEditor({
           有效组合：<strong>{rangeSummary.totalCombos}</strong> · 加权组合：
           <strong>{rangeSummary.weightedCombos}</strong> · 已展开：{rangeCombos.length}
         </p>
+      )}
+        </>
       )}
     </section>
   );

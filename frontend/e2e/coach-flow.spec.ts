@@ -97,3 +97,18 @@ test("imports a ScenarioSpec through the editor", async ({ page }) => {
     .toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("3 events")).toBeVisible();
 });
+
+test("stacks responsively on a mobile viewport with the table first", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  // The table is the primary visual: on narrow viewports it comes first.
+  await expect(page.locator(".table-area")).toBeVisible({ timeout: 15_000 });
+  const tableBox = await page.locator(".table-area").boundingBox();
+  const railBox = await page.locator(".left-rail").boundingBox();
+  expect(tableBox && railBox ? tableBox.y < railBox.y : false).toBe(true);
+
+  // The 169 matrix remains usable (not hidden away).
+  await expect(page.getByLabel("169 格范围矩阵")).toBeVisible();
+  await expect(page.getByLabel("AA weight")).toBeVisible();
+});

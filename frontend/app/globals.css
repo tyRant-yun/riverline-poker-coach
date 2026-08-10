@@ -321,6 +321,8 @@ select { width: 100%; }
 .matrix-cell.active { color: var(--color-accent); border-color: var(--color-accent-border); background: var(--color-accent-soft); font-weight: 800; }
 .matrix-cell small { position: absolute; right: 2px; bottom: 1px; color: var(--color-success); font-size: 7px; }
 .range-summary { margin-top: 10px; color: var(--color-text-muted); font-size: 11px; }
+.range-compact { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 4px 0; }
+.range-compact__name { font-size: 12px; font-weight: 800; }
 
 /* ---- History ---- */
 .saved-list { display: grid; gap: 6px; margin-top: 10px; }
