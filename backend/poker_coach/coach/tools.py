@@ -30,6 +30,7 @@ class TeachingToolGateway:
             "get_evidence_bundle",
             "get_range",
             "get_strategy_match",
+            "get_solver_analysis",
             "get_term",
             "create_practice",
         }
@@ -48,10 +49,36 @@ class TeachingToolGateway:
         analysis: AnalysisResult,
         *,
         adapter: PokerKitAdapter | None = None,
+        solver_result: "SolveResult | None" = None,
     ):
         self._scenario = scenario.model_copy(deep=True)
         self._analysis = analysis
         self._adapter = adapter or PokerKitAdapter()
+        self._solver_result = solver_result
+        self._solver_analysis = None
+        self._solver_evidence: tuple[EvidenceItem, ...] = ()
+
+    def get_solver_analysis(self):
+        """Read-only solver summary (primary action, mixing, shapes) or None.
+
+        The raw per-combo tables are never exposed here — only the
+        deterministic analyzer output (docs/solver-integration-design.md §5).
+        """
+        if self._solver_result is None:
+            return None
+        if self._solver_analysis is None:
+            from poker_coach.solver.analyzer import analyze
+            from poker_coach.solver.evidence import solver_evidence_items
+
+            hero_is_button = self._scenario.hero_seat == self._scenario.button_seat
+            hero_player = 1 if hero_is_button else 0
+            self._solver_analysis = analyze(
+                self._solver_result, hero_player=hero_player
+            )
+            self._solver_evidence = solver_evidence_items(
+                self._solver_result, self._solver_analysis
+            )
+        return self._solver_analysis
 
     def get_normalized_scenario(self) -> ScenarioSpec:
         return self._scenario.model_copy(deep=True)
@@ -67,7 +94,13 @@ class TeachingToolGateway:
         return self._adapter.replay(node).final_state.legal_actions
 
     def get_evidence_bundle(self) -> EvidenceBundle:
-        return self._analysis.evidence.model_copy(deep=True)
+        bundle = self._analysis.evidence.model_copy(deep=True)
+        if self._solver_result is not None:
+            self.get_solver_analysis()  # populate cached analysis + evidence
+            bundle = bundle.model_copy(
+                update={"items": bundle.items + self._solver_evidence}
+            )
+        return bundle
 
     def get_range(self, side: RangeSide) -> RangeSpec | None:
         if side not in {"hero", "villain"}:

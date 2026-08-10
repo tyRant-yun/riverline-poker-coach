@@ -7,8 +7,11 @@ code. The contracts in ``types`` are the only boundary crossing it.
 """
 
 from .adapter import build_spot, parse_result, range_to_string, spot_to_config_json
+from .analyzer import HandAnalysis, NodeAnalysis, SolverAnalysis, analyze, classify_hand
+from .artifact import hero_node_of, solve_result_to_artifact
 from .cache import SolveCache, solve_hash
 from .client import SidecarClient, SolverCancelled
+from .evidence import solver_evidence_items
 from .jobs import SolverJobQueue, SolverQueueUnavailable
 from .types import (
     SolveMetadata,
@@ -25,6 +28,14 @@ __all__ = [
     "parse_result",
     "range_to_string",
     "spot_to_config_json",
+    "analyze",
+    "classify_hand",
+    "SolverAnalysis",
+    "NodeAnalysis",
+    "HandAnalysis",
+    "hero_node_of",
+    "solve_result_to_artifact",
+    "solver_evidence_items",
     "SidecarClient",
     "SolverCancelled",
     "SolveCache",
