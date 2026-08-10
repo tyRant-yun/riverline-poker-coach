@@ -2,29 +2,30 @@
    All colors flow from the design tokens below; components never use raw hex. */
 
 :root {
-  /* Dark palette (semantic tokens) */
-  --color-bg: #0d1420;
-  --color-surface: #141d2b;
-  --color-surface-alt: #1a2536;
-  --color-surface-hover: #223049;
-  --color-border: #2b3a52;
-  --color-text: #e8eef6;
-  --color-text-muted: #93a3b8;
-  --color-accent: #5b93ff;
-  --color-accent-soft: rgba(91, 147, 255, 0.14);
-  --color-accent-border: rgba(91, 147, 255, 0.45);
-  --color-success: #34c98d;
-  --color-success-soft: rgba(52, 201, 141, 0.13);
-  --color-warning: #e0b354;
-  --color-warning-soft: rgba(224, 179, 84, 0.12);
-  --color-danger: #ff7262;
+  /* Brighter analytical palette (semantic tokens) — lifted from the original
+     near-black navy so panels read lighter while staying a dark theme. */
+  --color-bg: #16233a;
+  --color-surface: #1e2f4c;
+  --color-surface-alt: #273a5e;
+  --color-surface-hover: #324b7a;
+  --color-border: #3f5880;
+  --color-text: #f2f6fc;
+  --color-text-muted: #a9bbd2;
+  --color-accent: #6ea3ff;
+  --color-accent-soft: rgba(110, 163, 255, 0.16);
+  --color-accent-border: rgba(110, 163, 255, 0.5);
+  --color-success: #3ad698;
+  --color-success-soft: rgba(58, 214, 152, 0.15);
+  --color-warning: #e8c163;
+  --color-warning-soft: rgba(232, 193, 99, 0.14);
+  --color-danger: #ff8274;
 
   /* Felt / table */
-  --felt-top: #2e6b56;
-  --felt-bottom: #173b31;
-  --felt-seat-fg: rgba(255, 255, 255, 0.82);
+  --felt-top: #35795f;
+  --felt-bottom: #1c463a;
+  --felt-seat-fg: rgba(255, 255, 255, 0.85);
   --felt-seat-strong: #ffffff;
-  --felt-rim: rgba(255, 255, 255, 0.07);
+  --felt-rim: rgba(255, 255, 255, 0.09);
 
   /* Playing cards (faces stay light for readability on dark felt) */
   --card-face: #f5f8fc;
@@ -623,3 +624,77 @@ footer { color: var(--color-text-muted); font-size: 11px; padding: 20px 3px 0; }
   .recommendation-row em { grid-column: 2; }
   .felt { min-height: 300px; }
 }
+
+/* ---- 52-card picker + review-mode toggle (Phase: UX polish) ---- */
+
+.card-slot { display: inline-flex; align-items: center; gap: 6px; width: 100%; }
+.card-slot input { flex: 1; min-width: 0; }
+
+.pick-toggle {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pick-toggle:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
+.pick-toggle[aria-pressed="true"] {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent);
+}
+.pick-toggle:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.hero-only-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 0 10px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.hero-only-toggle input { accent-color: var(--color-accent); }
+
+.card-picker {
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid var(--color-accent-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+}
+.card-picker__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.card-picker__label { font-size: 12px; font-weight: 700; color: var(--color-text); }
+.card-picker__grid { display: flex; flex-direction: column; gap: 5px; }
+.card-picker__row { display: flex; gap: 5px; }
+
+.pick-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--card-face);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.1;
+  padding: 2px 0;
+}
+.pick-card:hover:not(:disabled) { border-color: var(--color-accent-border); box-shadow: 0 0 0 1px var(--color-accent-border); }
+.pick-card:disabled { opacity: 0.35; cursor: not-allowed; }
+.pick-card.red { color: var(--suit-red); }
+.pick-card.black { color: var(--suit-black, #1c2b40); }
+.pick-card__rank { font-weight: 800; }
+.pick-card__suit { font-size: 13px; }
