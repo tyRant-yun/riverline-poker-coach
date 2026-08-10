@@ -6,6 +6,10 @@ const workspaceRoot = path.resolve(__dirname, "..");
 // Deploy-mode runs: PLAYWRIGHT_BASE_URL=http://127.0.0.1:3000 skips the
 // local webServers and tests the compose deployment (web -> nginx -> api).
 const deployBaseURL = process.env.PLAYWRIGHT_BASE_URL;
+// CI runners have no Windows `py` launcher; override via env there.
+const backendCmd =
+  process.env.PLAYWRIGHT_BACKEND_CMD ??
+  "py -3.13 -m uvicorn poker_coach.api.app:app --app-dir backend --port 8000";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -22,7 +26,7 @@ export default defineConfig({
     ? undefined
     : [
         {
-          command: "py -3.13 -m uvicorn poker_coach.api.app:app --app-dir backend --port 8000",
+          command: backendCmd,
           cwd: workspaceRoot,
           url: "http://127.0.0.1:8000/health",
           reuseExistingServer: !process.env.CI,

@@ -95,4 +95,6 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Playwright E2E
+        env:
+          PLAYWRIGHT_BACKEND_CMD: python -m uvicorn poker_coach.api.app:app --app-dir backend --port 8000
         run: npx playwright test
