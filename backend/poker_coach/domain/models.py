@@ -515,6 +515,11 @@ class ScenarioSpec(DomainModel):
         seat_ids = [seat.seat_id for seat in self.seats]
         if len(set(seat_ids)) != len(seat_ids):
             raise ValueError("seat IDs must be unique")
+        # The PokerKit adapter maps seats positionally onto 0..table_size-1;
+        # sparse seat IDs would silently misalign every derived position, so
+        # require contiguous seats in the current architecture.
+        if sorted(seat_ids) != list(range(self.table_size)):
+            raise ValueError("seat IDs must be contiguous 0..table_size-1")
         if self.hero_seat not in seat_ids or self.button_seat not in seat_ids:
             raise ValueError("hero_seat and button_seat must reference existing seats")
 
@@ -530,25 +535,32 @@ class ScenarioSpec(DomainModel):
 
         # Hole cards: canonical source is knownHoleCardsBySeat (v2); the
         # legacy hero/villain fields are accepted (v1) and normalized into it.
+        # Empty arrays are the wire form of "no cards" and are dropped.
         known_by_seat = {
             seat_id: tuple(sorted(cards, key=_card_sort_key))
             for seat_id, cards in self.known_hole_cards_by_seat.items()
+            if cards
         }
         mutations: dict[str, Any] = {}
         if known_by_seat:
             if any(seat_id not in seat_ids for seat_id in known_by_seat):
                 raise ValueError("knownHoleCardsBySeat must reference existing seats")
+            # Every known seat carries exactly two hole cards (an empty array
+            # is the wire form of "no cards known"); a partial hand would
+            # silently become unknown cards in the adapter instead of
+            # surfacing as invalid input.
+            for seat_id, cards in known_by_seat.items():
+                if cards and len(cards) != 2:
+                    raise ValueError(
+                        f"seat {seat_id} must have exactly 2 known hole cards (or none)"
+                    )
             hero_cards = known_by_seat.get(self.hero_seat)
             if hero_cards is not None:
-                if len(hero_cards) != 2:
-                    raise ValueError(f"hero seat {self.hero_seat} must have exactly 2 hole cards")
                 mutations["hero_hole_cards"] = tuple(sorted(hero_cards, key=_card_sort_key))
             if self.table_size == 2:
                 opponent_seat = next(seat for seat in seat_ids if seat != self.hero_seat)
                 opponent_cards = known_by_seat.get(opponent_seat)
                 if opponent_cards is not None:
-                    if len(opponent_cards) != 2:
-                        raise ValueError(f"seat {opponent_seat} must have 0 or 2 hole cards")
                     mutations["villain_hole_cards"] = tuple(
                         sorted(opponent_cards, key=_card_sort_key)
                     )

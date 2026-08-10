@@ -322,6 +322,61 @@ class TestHonestBoundaries:
         assert SCENARIO_SCHEMA_VERSION == 2
 
 
+class TestSeatAndCardValidation:
+    def test_non_contiguous_seat_ids_rejected(self):
+        # The adapter maps seats positionally onto 0..table_size-1; sparse
+        # ids would silently misalign positions.
+        positions = [p.value for p in positions_for_table(6)]
+        seats = [
+            {"seatId": seat_id, "startingStack": 10_000, "position": positions[index]}
+            for index, seat_id in enumerate([0, 1, 2, 3, 4, 7])
+        ]
+        with pytest.raises(ValidationError, match="contiguous"):
+            v2_scenario(6, seats=seats, knownHoleCardsBySeat={})
+
+    def test_out_of_range_seat_id_rejected(self):
+        positions = [p.value for p in positions_for_table(6)]
+        seats = [
+            {"seatId": seat_id, "startingStack": 10_000, "position": positions[index]}
+            for index, seat_id in enumerate([0, 1, 2, 3, 4, 9])
+        ]
+        with pytest.raises(ValidationError):
+            v2_scenario(6, seats=seats, knownHoleCardsBySeat={})
+
+    def test_one_card_known_hole_cards_rejected_for_any_seat(self):
+        # A partial hand must be rejected up front, not silently turned into
+        # unknown cards by the adapter. This applies to every seat, not just
+        # the hero / heads-up opponent.
+        with pytest.raises(ValidationError, match="exactly 2 known hole cards"):
+            v2_scenario(
+                6,
+                knownHoleCardsBySeat={0: ["As", "Kd"], 3: ["Qh"]},
+            )
+
+    def test_three_card_known_hole_cards_rejected(self):
+        with pytest.raises(ValidationError, match="exactly 2 known hole cards"):
+            v2_scenario(
+                6,
+                knownHoleCardsBySeat={0: ["As", "Kd"], 4: ["Qh", "Qc", "Qs"]},
+            )
+
+    def test_empty_array_is_the_same_as_absent_cards(self):
+        # The frontend serializes "no cards yet" as an empty array; it must
+        # not be treated as a partial hand.
+        scenario = v2_scenario(6, knownHoleCardsBySeat={0: ["As", "Kd"], 5: []})
+        assert scenario.known_hole_cards_by_seat == {0: ("Kd", "As")}
+
+    def test_empty_array_normalized_away(self):
+        scenario = v2_scenario(6, knownHoleCardsBySeat={3: []})
+        assert scenario.known_hole_cards_by_seat == {}
+
+    def test_contiguous_seat_ids_accepted(self):
+        # Sanity: the standard 2..8 seat layouts still validate.
+        for table_size in (2, 3, 4, 5, 6, 7, 8):
+            scenario = v2_scenario(table_size, knownHoleCardsBySeat={})
+            assert len(scenario.seats) == table_size
+
+
 class TestApiContract:
     def test_validate_accepts_v2_hu_scenario(self):
         from fastapi.testclient import TestClient
