@@ -10,6 +10,7 @@ from __future__ import annotations
 import threading
 import time
 
+from .cache import SolveCache, solve_with_cache
 from .client import SidecarClient, SolverCancelled
 from .jobs import SolverJobQueue
 from .types import SolverUnsupportedError
@@ -18,9 +19,15 @@ _CANCEL_POLL_SECONDS = 0.2
 
 
 class SolverWorker:
-    def __init__(self, queue: SolverJobQueue, client: SidecarClient | None = None):
+    def __init__(
+        self,
+        queue: SolverJobQueue,
+        client: SidecarClient | None = None,
+        cache: SolveCache | None = None,
+    ):
         self._queue = queue
         self._client = client or SidecarClient()
+        self._cache = cache
 
     def process_one(self, block_seconds: float = 0.0) -> str | None:
         """Claim and run at most one job; return its id or None."""
@@ -35,7 +42,12 @@ class SolverWorker:
         poller.start()
         started = time.perf_counter()
         try:
-            result = self._client.solve(spot, cancel_event=cancel_event)
+            if self._cache is not None:
+                result = solve_with_cache(
+                    self._client, spot, self._cache, cancel_event=cancel_event
+                )
+            else:
+                result = self._client.solve(spot, cancel_event=cancel_event)
         except SolverCancelled as exc:
             self._queue.finish(job_id, status="cancelled", error=str(exc))
             return job_id

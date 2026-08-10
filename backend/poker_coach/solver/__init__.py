@@ -9,10 +9,11 @@ code. The contracts in ``types`` are the only boundary crossing it.
 from .adapter import build_spot, parse_result, range_to_string, spot_to_config_json
 from .analyzer import HandAnalysis, NodeAnalysis, SolverAnalysis, analyze, classify_hand
 from .artifact import hero_node_of, solve_result_to_artifact
-from .cache import SolveCache, solve_hash
+from .cache import SolveCache, solve_hash, solve_with_cache
 from .client import SidecarClient, SolverCancelled
 from .evidence import solver_evidence_items
 from .jobs import SolverJobQueue, SolverQueueUnavailable
+from .presolver import common_spots, pre_solve
 from .types import (
     SolveMetadata,
     SolverHand,
@@ -40,8 +41,11 @@ __all__ = [
     "SolverCancelled",
     "SolveCache",
     "solve_hash",
+    "solve_with_cache",
     "SolverJobQueue",
     "SolverQueueUnavailable",
+    "common_spots",
+    "pre_solve",
     "SolverWorker",
     "SolverSpot",
     "SolveResult",

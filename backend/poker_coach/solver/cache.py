@@ -64,3 +64,19 @@ class SolveCache:
 
     def close(self) -> None:
         self._connection.close()
+
+
+def solve_with_cache(
+    client,
+    spot: SolverSpot,
+    cache: SolveCache,
+    *,
+    cancel_event=None,
+) -> SolveResult:
+    """Solve through the cache: deterministic spots are solved at most once."""
+    cached = cache.get(spot)
+    if cached is not None:
+        return cached
+    result = client.solve(spot, cancel_event=cancel_event)
+    cache.put(spot, result)
+    return result
