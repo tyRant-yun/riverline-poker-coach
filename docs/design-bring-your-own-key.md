@@ -1,6 +1,16 @@
 # 设计：用户自带 DeepSeek API Key 唤醒教学 Agent（端到端加密）
 
-版本：draft-1 · 日期：2026-08-10 · 状态：设计草案（未实现，待评审）
+版本：draft-1 · 日期：2026-08-10 · 状态：设计草案（未实现，待评审）· **CORS spike 已完成：浏览器直连路线可行**
+
+## 0. CORS spike 结论（2026-08-10）
+
+实测 `https://api.deepseek.com/v1` 对浏览器 preflight（`Origin: http://127.0.0.1:3000` / `http://localhost:3000`）返回：
+
+- `access-control-allow-origin: <请求 Origin>`（回显模式）
+- `access-control-allow-headers: authorization, content-type`
+- `access-control-allow-methods: POST`、`access-control-allow-credentials: true`
+
+**含义**：路线 A（浏览器直连 DeepSeek）可行——用户 key 只存浏览器（localStorage/IndexedDB），前端直接调 `api.deepseek.com`，服务器永不接触明文密钥，是真正的端到端安全，且实现成本最低。路线 B（信封加密）降级为备选。
 
 ## 1. 需求
 
