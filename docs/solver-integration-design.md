@@ -1,6 +1,6 @@
 # Solver Integration Design Review
 
-版本：v1 · 日期：2026-08-10 · 状态：已评审（只读设计，未实现）
+版本：v1 · 日期：2026-08-10 · 状态：已评审（只读设计，未实现）· **实施状态：阶段 2–5 已完成（2026-08-10，`poker_coach/solver` 包）**
 
 目标：完成一次 **Coach Spot → Solver → Coach Answer** 的完整闭环设计——把成熟求解引擎作为**计算引擎依赖（sidecar）**接入现有 Poker Coach，而不是自研 CFR。本文档只读分析现有仓库架构，确定模块落点、`ScenarioSpec → SolverSpot` 字段映射、以及 `SolveResult` 如何被现有回答流程消费。不含任何代码改动。
 
@@ -107,15 +107,15 @@ Solver 输出是数学策略，Coach 需要人类可理解的策略；中间不�
 - 求解失败/超时/被取消 → 降级为现有 principle-only 教学（与外部教师降级路径同构，用户可见 `degraded`）。
 - 同步分析（`/v1/analysis`）不受影响：SolveJob 走既有异步作业模式，不阻塞普通 API。
 
-## 7. 分阶段落地（映射用户五阶段到现有资产）
+## 7. 分阶段落地（实施状态：✅ 2–5 已完成，2026-08-10）
 
-| 阶段 | 内容 | 现有资产复用 |
-|---|---|---|
-| 1（spike，不碰 UI） | 固定 HU flop spot（board/pot/stack/ranges/bet sizes 全固定）手工跑通 sidecar：稳定得到 exploitability、range EV、AK/QQ/draw 策略 | docker-compose 新 `solver` 服务；验证 `memory_usage()` 预检 |
-| 2 | SolverAdapter 双向映射（ScenarioSpec ↔ SolverSpot；SolveResult → 规范模型） | `analysis/models.py`、`domain/models.py` 已有契约 |
-| 3 | 异步 SolveJob：QUEUED/RUNNING/SOLVED/FAILED/CANCELLED + timeout/stop/内存配额/progress | `jobs/` Redis 队列、cancel 标志、配额校验模式 |
-| 4 | StrategyAnalyzer → `TeachingToolGateway.get_solver_analysis()` + 证据绑定 | `coach/tools.py`、`teacher.py`、`validate_evidence_references` |
-| 5 | `solve_hash` 缓存（命中毫秒级）+ 预求解库（常见 spot 批求入库）；后续 node locking / batch solve | `strategy_artifacts` 表 + 现有注册路径 |
+| 阶段 | 内容 | 现有资产复用 | 状态 |
+|---|---|---|---|
+| 1（spike，不碰 UI） | 固定 HU flop spot 手工跑通 sidecar | docker-compose 新 `solver` 服务 | ✅ 完成（见 docs/spike-postflop-solver.md） |
+| 2 | SolverAdapter（`solver/adapter.py`：ScenarioSpec↔SolverSpot、SolveResult 校验；`solver/types.py` 契约；`solver/client.py` sidecar 客户端；`solver/cache.py` solve_hash） | `analysis/models.py`、`domain/models.py` | ✅ 完成（`1484a38`） |
+| 3 | 异步 SolveJob（`solver/jobs.py` Redis 队列 + `solver/worker.py` 协作式取消；compose `solver-worker` 服务） | `jobs/` Redis 模式、cancel 标志 | ✅ 完成（`213cce0`） |
+| 4 | StrategyAnalyzer（`solver/analyzer.py`）+ 证据（`solver/evidence.py`，`solver.*` 前缀）+ artifact 注册（`solver/artifact.py`，EXACT 匹配开启频率门控）+ 网关 `get_solver_analysis()` | `coach/tools.py`、`validate_evidence_references`、ADR-0003 | ✅ 完成（`e71b2bf`） |
+| 5 | solve_hash 缓存落地（`solve_with_cache` + worker 集成）+ 预求解（`solver/presolver.py`，3 个内置常见 spot） | `strategy_artifacts` 表 + 注册路径 | ✅ 完成（`fc6906d`） |
 
 阶段 1 完成后，turn/river 只是输入差异；缓存比 GPU 更值得先投入（用户结论）。
 
