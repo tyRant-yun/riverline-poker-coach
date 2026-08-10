@@ -331,6 +331,158 @@ def default_strategy_artifacts() -> tuple[StrategyArtifact, ...]:
                 ),
             ),
         ),
+        # --- Phase 8D: 8-max preflop knowledge ---------------------------
+        # Raise-first-in plans for every 8-max seat, plus BB/SB defend
+        # against an open and the facing-a-3bet node. All artifacts are
+        # qualitative teaching references (no solver frequencies), matching
+        # the existing catalog's honesty rules: APPROXIMATE matches never
+        # quote frequencies, and the assumptions field names the context.
+        _rfi_artifact(
+            position=SeatPosition.UTG,
+            label="UTG",
+            tightness=(
+                "the tightest full-ring opening range; early positions face "
+                "everyone behind, so the plan is value-anchored and narrow"
+            ),
+        ),
+        _rfi_artifact(
+            position=SeatPosition.UTG_PLUS_1,
+            label="UTG+1",
+            tightness=(
+                "a tight plan slightly wider than UTG; still out of position "
+                "against the whole table behind"
+            ),
+        ),
+        _rfi_artifact(
+            position=SeatPosition.MP,
+            label="MP",
+            tightness=(
+                "a moderately tight plan; the middle seats open a little "
+                "wider as the field behind shrinks"
+            ),
+        ),
+        _rfi_artifact(
+            position=SeatPosition.HJ,
+            label="HJ",
+            tightness=(
+                "a balanced, position-aware plan; the hijack is the first "
+                "seat with meaningful steal leverage"
+            ),
+        ),
+        _rfi_artifact(
+            position=SeatPosition.CUTOFF,
+            label="CO",
+            tightness=(
+                "a wider plan; the cutoff leverages late position and the "
+                "busted big blind behind"
+            ),
+        ),
+        _rfi_artifact(
+            position=SeatPosition.BUTTON,
+            label="BTN",
+            tightness=(
+                "the widest full-ring opening range; the button realizes "
+                "equity best but the blinds still defend"
+            ),
+        ),
+        _rfi_artifact(
+            position=SeatPosition.SMALL_BLIND,
+            label="SB",
+            tightness=(
+                "a narrow plan; the small blind is out of position against "
+                "the big blind after the flop"
+            ),
+        ),
+        _rfi_artifact(
+            position=SeatPosition.BIG_BLIND,
+            label="BB",
+            tightness=(
+                "the big blind option after folds; raising exploits the dead "
+                "small blind, checking keeps the option open"
+            ),
+        ),
+        _curated_preflop_artifact(
+            artifact_id="curated.preflop.8max.bb-defend-vs-rfi",
+            name="8-max BB defend vs raise first in",
+            hero_position=SeatPosition.BIG_BLIND,
+            action_signature=("raise_to",),
+            assumptions=(
+                "8-max NLHE",
+                "BB facing a raise first in, 100BB",
+                "no rake",
+                "qualitative defend/call/raise comparison",
+            ),
+            recommendations=(
+                StrategyRecommendation(
+                    action="call",
+                    summary="Call the defendable hands that realize equity in position postflop or hold favorable blocker interaction.",
+                    sourceLevel=curated,
+                ),
+                StrategyRecommendation(
+                    action="raise_to",
+                    summary="Three-bet a polar value-and-bluff plan; the extra caller behind is folded out when the sizing is credible.",
+                    sourceLevel=curated,
+                ),
+                StrategyRecommendation(
+                    action="fold",
+                    summary="Fold the weakest holdings that cannot defend profitably against the opening range.",
+                    sourceLevel=curated,
+                ),
+            ),
+        ),
+        _curated_preflop_artifact(
+            artifact_id="curated.preflop.8max.sb-defend-vs-rfi",
+            name="8-max SB defend vs raise first in",
+            hero_position=SeatPosition.SMALL_BLIND,
+            action_signature=("raise_to",),
+            assumptions=(
+                "8-max NLHE",
+                "SB facing a raise first in, 100BB",
+                "no rake",
+                "qualitative defend reference",
+            ),
+            recommendations=(
+                StrategyRecommendation(
+                    action="call",
+                    summary="Call only hands that tolerate being out of position against the opener and the big blind behind.",
+                    sourceLevel=curated,
+                ),
+                StrategyRecommendation(
+                    action="fold",
+                    summary="Default to folding the marginal hands; the small blind defends the narrowest range of the table.",
+                    sourceLevel=curated,
+                ),
+            ),
+        ),
+        _curated_preflop_artifact(
+            artifact_id="curated.preflop.8max.vs-3bet",
+            name="8-max facing a three-bet",
+            hero_position=None,
+            action_signature=("raise_to", "raise_to"),
+            assumptions=(
+                "8-max NLHE",
+                "open facing a three-bet, 100BB",
+                "no rake",
+                "qualitative 4bet/call/fold reference",
+            ),
+            recommendations=(
+                StrategyRecommendation(
+                    action="raise_to",
+                    summary="Four-bet the value hands and the bluff candidates that block the three-bettor's value range.",
+                    sourceLevel=curated,
+                ),
+                StrategyRecommendation(
+                    action="call",
+                    summary="Call the hands with strong realized equity when the three-bet size still prices them in.",
+                    sourceLevel=curated,
+                ),
+                StrategyRecommendation(
+                    action="fold",
+                    summary="Fold the range's bottom; facing a three-bet compresses the opening range sharply.",
+                    sourceLevel=curated,
+                ),
+            ),
+        ),
     )
 
 
@@ -364,6 +516,73 @@ def _curated_postflop_artifact(
         sourceLevel=AnalysisLevel.CURATED,
         assumptions=assumptions,
         recommendations=recommendations,
+    )
+
+
+def _curated_preflop_artifact(
+    *,
+    artifact_id: str,
+    name: str,
+    hero_position: SeatPosition | None,
+    action_signature: tuple[str, ...],
+    assumptions: tuple[str, ...],
+    recommendations: tuple[StrategyRecommendation, ...],
+) -> StrategyArtifact:
+    return StrategyArtifact(
+        artifactId=artifact_id,
+        name=name,
+        version="1",
+        source="poker-coach curated teaching catalog",
+        license="Original project data",
+        creator="poker-coach",
+        gameVariant=GameVariant.NLHE,
+        tableSize=8,
+        stackMinBb=Decimal("80"),
+        stackMaxBb=Decimal("120"),
+        rakeSignature="no_rake",
+        heroPosition=hero_position,
+        villainPosition=None,
+        street=Street.PREFLOP,
+        actionSignature=action_signature,
+        boardLabels=(),
+        sourceLevel=AnalysisLevel.CURATED,
+        assumptions=assumptions,
+        recommendations=recommendations,
+    )
+
+
+def _rfi_artifact(
+    *,
+    position: SeatPosition,
+    label: str,
+    tightness: str,
+) -> StrategyArtifact:
+    return _curated_preflop_artifact(
+        artifact_id=f"curated.preflop.8max.{position.value}-rfi",
+        name=f"8-max {label} raise first in",
+        hero_position=position,
+        action_signature=(),
+        assumptions=(
+            "8-max NLHE",
+            f"{label} raise first in, 100BB",
+            "no rake",
+            "qualitative teaching reference",
+        ),
+        recommendations=(
+            StrategyRecommendation(
+                action="raise_to",
+                summary=f"Raise first in from {label} with {tightness}.",
+                sourceLevel=AnalysisLevel.CURATED,
+            ),
+            StrategyRecommendation(
+                action="fold",
+                summary=(
+                    f"Fold the marginal hands from {label} that cannot realize "
+                    "value against the ranges still behind."
+                ),
+                sourceLevel=AnalysisLevel.CURATED,
+            ),
+        ),
     )
 
 

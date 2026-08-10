@@ -26,9 +26,15 @@ class ScenarioFeatures:
 
 def features_for_scenario(scenario: ScenarioSpec) -> ScenarioFeatures:
     positions = {seat.seat_id: seat.position for seat in scenario.seats}
-    villain_seat = next(
-        (seat.seat_id for seat in scenario.seats if seat.seat_id != scenario.hero_seat),
-        None,
+    # Multiway tables have no single villain: strategy matching for 3+
+    # players keys on the hero's position and the action signature only.
+    villain_seat = (
+        next(
+            (seat.seat_id for seat in scenario.seats if seat.seat_id != scenario.hero_seat),
+            None,
+        )
+        if scenario.table_size == 2
+        else None
     )
     stack_bb = Decimal(min(seat.starting_stack for seat in scenario.seats)) / Decimal(scenario.big_blind)
     meaningful_actions = tuple(
