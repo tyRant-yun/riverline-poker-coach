@@ -156,7 +156,10 @@ def create_app(
     app = FastAPI(
         title="Poker Coach API",
         version=config.app_version,
-        description="Local HU NLHE validation and evidence analysis API",
+        description=(
+            "Local NLHE replay, 2-8 seat multiway analysis and heads-up "
+            "postflop solve API"
+        ),
     )
     cors_origins = tuple(
         origin.strip()
@@ -306,6 +309,9 @@ def create_app(
 
     @app.get("/version")
     async def version_info(request: Request):
+        # schemaVersion here is the /version envelope version (1), NOT the
+        # scenario schema version: ScenarioSpec is SCENARIO_SCHEMA_VERSION=2
+        # and scenario-bearing endpoints echo the scenario's own schemaVersion.
         return {
             "schemaVersion": 1,
             "appVersion": config.app_version,
@@ -695,19 +701,16 @@ def create_app(
             raise ApiError("invalid_request", "request body must be a JSON object")
         scenario = _scenario_from_request(payload.get("scenario", payload))
         _set_scenario_context(request, scenario)
+        # v1 compatibility: request-level legacy ranges override the scenario.
+        # Schema v2 spots resolve their ranges from rangesBySeat (the
+        # canonical source) inside build_spot, so there is no
+        # heroRange/villainRange requirement here.
         hero_range = None
         villain_range = None
         if payload.get("heroRange") is not None:
             hero_range = RangeSpec.model_validate(payload["heroRange"])
         if payload.get("villainRange") is not None:
             villain_range = RangeSpec.model_validate(payload["villainRange"])
-        hero_range = hero_range or scenario.hero_range
-        villain_range = villain_range or scenario.villain_range
-        if hero_range is None or villain_range is None:
-            raise ApiError(
-                "invalid_request",
-                "solve jobs require heroRange and villainRange (or ranges on the scenario)",
-            )
         max_iterations = payload.get("maxIterations", 400)
         if not isinstance(max_iterations, int) or max_iterations <= 0:
             raise ApiError("invalid_request", "maxIterations must be a positive integer")

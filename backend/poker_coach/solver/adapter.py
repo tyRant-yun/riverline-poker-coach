@@ -104,20 +104,44 @@ def build_spot(
             "for the two-player spots)"
         )
 
-    hero_seat = scenario.hero_seat
     # Postflop, the out-of-position player is the first active seat clockwise
     # from the button (the button itself acts last, so it is never OOP).
     n = scenario.table_size
     candidates = [seat for seat in active_seats if seat != scenario.button_seat] or active_seats
     oop_seat = min(candidates, key=lambda seat: (seat - scenario.button_seat) % n)
+    ip_seat = next(seat for seat in active_seats if seat != oop_seat)
 
-    hero_range = hero_range or scenario.hero_range
-    villain_range = villain_range or scenario.villain_range
-    if hero_range is None or villain_range is None:
-        raise SolverUnsupportedError("solver requires both hero and villain ranges")
+    # Ranges: the canonical source is rangesBySeat (Schema v2). Legacy
+    # heroRange/villainRange (v1) are normalized into rangesBySeat by the
+    # domain validator, so the adapter never re-derives a Hero/Villain truth
+    # source. Explicit kwargs remain for v1 API compatibility and override
+    # the scenario when supplied.
+    ranges_by_seat = dict(scenario.ranges_by_seat)
+    if hero_range is not None:
+        ranges_by_seat[scenario.hero_seat] = hero_range
+    if villain_range is not None:
+        # v1 semantics: the villain is the other heads-up player. On a
+        # multiway table where the hero is one of the two active seats, the
+        # villain range belongs to the other active seat. If the hero is not
+        # live (folded), no v1 mapping exists and the active-seat check below
+        # reports the missing range.
+        if scenario.table_size == 2:
+            opponent_seat = next(
+                seat.seat_id for seat in scenario.seats if seat.seat_id != scenario.hero_seat
+            )
+            ranges_by_seat[opponent_seat] = villain_range
+        elif scenario.hero_seat in active_seats:
+            other_active = next(seat for seat in active_seats if seat != scenario.hero_seat)
+            ranges_by_seat[other_active] = villain_range
 
-    oop_range_spec = hero_range if hero_seat == oop_seat else villain_range
-    ip_range_spec = villain_range if hero_seat == oop_seat else hero_range
+    oop_range_spec = ranges_by_seat.get(oop_seat)
+    ip_range_spec = ranges_by_seat.get(ip_seat)
+    if oop_range_spec is None or ip_range_spec is None:
+        missing = [seat for seat in (oop_seat, ip_seat) if ranges_by_seat.get(seat) is None]
+        raise SolverUnsupportedError(
+            "solver requires ranges for the active seats (rangesBySeat); "
+            f"missing: {missing}"
+        )
 
     board = tuple(state.board[:3])
     turn = state.board[3] if len(state.board) > 3 else None

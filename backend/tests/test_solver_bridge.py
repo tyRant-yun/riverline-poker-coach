@@ -238,3 +238,78 @@ class TestHuBridgeReplayIntegration:
             replay=replay,
         )
         assert spot.starting_pot == 650  # 150 blinds + BTN 300 + BB 200
+
+
+class TestHuBridgeRangesBySeat:
+    """Schema v2: ranges come from rangesBySeat for the two ACTIVE seats.
+
+    The hero seat is a Coach concept and may be folded; the solver only
+    cares about the two live seats at the decision point.
+    """
+
+    # 8-max with button on seat 0. Hero (seat 4) folds preflop; only BTN (0)
+    # and BB (2) remain live at the flop.
+    EIGHT_MAX_HISTORY = [
+        action(1, 3, "fold"),
+        action(2, 4, "fold"),
+        action(3, 5, "fold"),
+        action(4, 6, "fold"),
+        action(5, 7, "fold"),
+        action(6, 0, "raise_to", amount=300, amount_type="to"),
+        action(7, 1, "fold"),
+        action(8, 2, "call", amount=200, amount_type="cost"),
+        action(9, 1, "deal_flop", street="flop"),
+    ]
+    EIGHT_MAX_DECISION = {"street": "flop", "actorSeat": 2, "afterSequence": 9}
+
+    def test_ranges_resolve_from_active_seats_when_hero_folded(self):
+        scenario = multiway_scenario(
+            8,
+            hero_seat=4,
+            board=FULL_BOARD,
+            actionHistory=self.EIGHT_MAX_HISTORY,
+            decisionPoint=self.EIGHT_MAX_DECISION,
+            rangesBySeat={
+                0: range_spec("BTN", "99"),
+                2: range_spec("BB", "22"),
+            },
+        )
+        spot = build_spot(scenario)
+        # OOP is BB (seat 2), IP is BTN (seat 0) — regardless of the folded
+        # hero seat 4.
+        assert spot.oop_range == range_to_string(range_spec("BB", "22"))
+        assert spot.ip_range == range_to_string(range_spec("BTN", "99"))
+        assert spot.assumptions == ("bunching_ignored",)
+        # Active stacks: BTN 9700 (10000-300), BB 9800 (10000-200).
+        assert spot.effective_stack == 9700
+
+    def test_folded_short_stack_does_not_drag_effective_stack(self):
+        stacks = [8_000, 2_000, 9_000, 5_000, 10_000, 10_000, 10_000, 10_000]
+        scenario = multiway_scenario(
+            8,
+            hero_seat=4,
+            stacks=stacks,
+            board=FULL_BOARD,
+            actionHistory=self.EIGHT_MAX_HISTORY,
+            decisionPoint=self.EIGHT_MAX_DECISION,
+            rangesBySeat={
+                0: range_spec("BTN", "99"),
+                2: range_spec("BB", "22"),
+            },
+        )
+        spot = build_spot(scenario)
+        # Active: BTN 7700 (8000-300), BB 8800 (9000-200). The folded 1950
+        # SB stack must not drag the spot down.
+        assert spot.effective_stack == 7700
+
+    def test_missing_active_seat_range_rejected(self):
+        scenario = multiway_scenario(
+            8,
+            hero_seat=4,
+            board=FULL_BOARD,
+            actionHistory=self.EIGHT_MAX_HISTORY,
+            decisionPoint=self.EIGHT_MAX_DECISION,
+            rangesBySeat={0: range_spec("BTN", "99")},
+        )
+        with pytest.raises(SolverUnsupportedError, match="ranges for the active seats"):
+            build_spot(scenario)

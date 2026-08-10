@@ -98,10 +98,14 @@ def test_solve_job_submit_query_cancel(app_client):
 
 
 def test_solve_job_requires_ranges(app_client):
+    # A spot whose active seats have no ranges anywhere is still rejected —
+    # but with the structured unsupported-spot error, not a legacy
+    # heroRange/villainRange requirement.
     payload = {"scenario": SCENARIO}
     response = app_client.post("/v1/solve/jobs", json=payload)
     assert response.status_code == 422
-    assert response.json()["error"]["code"] == "invalid_request"
+    assert response.json()["error"]["code"] == "invalid_spot"
+    assert "ranges for the active seats" in response.json()["error"]["message"]
 
 
 def test_solve_job_rejects_preflop(app_client):
@@ -128,3 +132,84 @@ def test_solve_job_unavailable_without_queue():
     response = client.post("/v1/solve/jobs", json=payload)
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "solver_unavailable"
+
+
+def _range_matrix_payload(range_id: str, entry: str) -> dict:
+    return {
+        "rangeId": range_id,
+        "name": range_id,
+        "version": "1",
+        "source": "user_defined",
+        "matrix169": {entry: "1"},
+    }
+
+
+def _v2_bridge_scenario() -> dict:
+    """6-max Schema v2 spot: only BTN (0) and BB (2) live at the flop.
+
+    Hero is seat 4 — a folded preflop player, proving the solver resolves
+    ranges from the active seats rather than the Coach's hero view. A
+    folded short stack (seat 1, 2000) must not affect the effective stack.
+    """
+    positions = ["button", "small_blind", "big_blind", "utg", "mp", "co"]
+    return {
+        "schemaVersion": 2,
+        "gameVariant": "nlhe",
+        "tableSize": 6,
+        "smallBlind": 50,
+        "bigBlind": 100,
+        "ante": 0,
+        "buttonSeat": 0,
+        "heroSeat": 4,
+        "seats": [
+            {"seatId": seat_id, "startingStack": stack, "position": positions[seat_id]}
+            for seat_id, stack in enumerate([8_000, 2_000, 9_000, 5_000, 10_000, 10_000])
+        ],
+        "knownHoleCardsBySeat": {"4": ["As", "Kd"]},
+        "board": ["2c", "7d", "Jh"],
+        "actionHistory": [
+            {"actionId": "a1", "sequence": 1, "street": "preflop", "actorSeat": 3, "actionType": "fold"},
+            {"actionId": "a2", "sequence": 2, "street": "preflop", "actorSeat": 4, "actionType": "fold"},
+            {"actionId": "a3", "sequence": 3, "street": "preflop", "actorSeat": 5, "actionType": "fold"},
+            {"actionId": "a4", "sequence": 4, "street": "preflop", "actorSeat": 0, "actionType": "raise_to", "amount": 300, "amountType": "to"},
+            {"actionId": "a5", "sequence": 5, "street": "preflop", "actorSeat": 1, "actionType": "fold"},
+            {"actionId": "a6", "sequence": 6, "street": "preflop", "actorSeat": 2, "actionType": "call", "amount": 200, "amountType": "cost"},
+            {"actionId": "a7", "sequence": 7, "street": "flop", "actorSeat": 1, "actionType": "deal_flop"},
+        ],
+        "decisionPoint": {"street": "flop", "actorSeat": 2, "afterSequence": 7},
+        "assumptions": {},
+        "rangesBySeat": {
+            "0": _range_matrix_payload("btn", "99"),
+            "2": _range_matrix_payload("bb", "22"),
+        },
+        "source": "manual",
+        "tags": ["solve-schema-v2"],
+    }
+
+
+def test_solve_job_schema_v2_ranges_by_seat_only(app_client):
+    """A Schema v2 multiway-origin spot reaches the HU solver through the
+    real API path with rangesBySeat alone (no heroRange/villainRange)."""
+    payload = {
+        "scenario": _v2_bridge_scenario(),
+        "maxIterations": 50,
+    }
+    submitted = app_client.post("/v1/solve/jobs", json=payload)
+    assert submitted.status_code == 202
+    body = submitted.json()
+    assert body["status"] == "queued"
+    spot = body["spot"]
+    # OOP = BB (seat 2), IP = BTN (seat 0), resolved from the active seats.
+    assert spot["oopRange"] == "22:1"
+    assert spot["ipRange"] == "99:1"
+    # Active stacks: BTN 7700 (8000-300), BB 8800 (9000-200); the folded
+    # 1950 SB stack does not drag the spot down.
+    assert spot["effectiveStack"] == 7700
+    assert spot["startingPot"] == 650
+    # The multiway-origin spot records the bunching approximation.
+    assert spot["assumptions"] == ["bunching_ignored"]
+
+    job_id = body["jobId"]
+    status = app_client.get(f"/v1/solve/jobs/{job_id}")
+    assert status.status_code == 200
+    assert status.json()["status"] == "queued"
