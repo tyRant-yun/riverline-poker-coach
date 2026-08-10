@@ -11,6 +11,8 @@
 | pydantic | 直接运行时 | 2.13.4 | MIT | 领域合同校验和序列化 |
 | fastapi | 直接运行时 | 0.139.2 | MIT | HTTP API 和请求校验边界 |
 | uvicorn | 直接运行时 | 0.51.0 | BSD-3-Clause | 本地 ASGI 服务启动 |
+| psycopg | 可选 PostgreSQL 运行时 | 3.3.4 | LGPL-3.0-only | PostgreSQL DB-API 适配层 |
+| psycopg-binary | 可选 PostgreSQL 运行时 | 3.3.4 | LGPL-3.0-only | 无本地 libpq 的预编译驱动 |
 | httpx | 测试组直接依赖 | 0.28.1 | BSD-3-Clause | FastAPI TestClient 测试传输 |
 | pytest | 测试组直接依赖 | 9.1.1 | MIT | Python 单元测试 |
 | pokerkit | 直接规则依赖 | 0.7.4 | MIT | MVP 牌局规则、合法动作和牌面状态 |
@@ -26,6 +28,7 @@
 | Next.js | 前端直接运行时 | 16.1.0 | MIT | Web App Router 和页面服务 |
 | React | 前端直接运行时 | 19.2.0 | MIT | 前端 UI |
 | react-dom | 前端直接运行时 | 19.2.0 | MIT | React 浏览器渲染 |
+| @playwright/test | 前端测试依赖 | 1.62.1 | Apache-2.0 | Chromium 浏览器端到端测试 |
 | TypeScript | 前端开发依赖 | 5.9.3 | Apache-2.0 | 类型检查和构建 |
 
 许可证以本地发行包元数据或随包许可证文件为准；缺失 SPDX 字段的包已按其发行包声明核对，并应在 CI 依赖审计中再次验证。
@@ -36,13 +39,13 @@
 
 | 领域 | 候选组件 | 引入条件 |
 |---|---|---|
-| Web | Next.js、React、TypeScript | 已引入本地前端切片；需继续补充 E2E |
+| Web | Next.js、React、TypeScript | 已引入本地前端切片和 E2E |
 | 前端数据 | TanStack Query | API 契约稳定后 |
 | API | FastAPI、Pydantic | 已引入；业务逻辑仍保持在领域/分析层 |
 | 规则 | PokerKit | 适配层和金标牌谱准备后；MVP 唯一正式规则源 |
-| 数据库 | SQLite（标准库） | 已用于本地持久化；PostgreSQL 适配待后续 |
+| 数据库 | SQLite（标准库）、psycopg | SQLite 已用于本地持久化；PostgreSQL 由可选适配层支持 |
 | 缓存/任务 | Redis 客户端和轻量任务队列 | 需要异步分析或缓存时 |
-| 测试 | Pytest、Vitest、Playwright | 对应代码切片落地时 |
+| 测试 | Pytest、Playwright | 已引入；Vitest 仍待有独立前端单元逻辑时评估 |
 
 ## 许可证政策
 
@@ -56,6 +59,6 @@
 ## 待办
 
 1. 用锁文件生成直接/间接依赖报告并接入 CI。
-2. 为前端补充 Vitest/Playwright 前再评估测试依赖。
+2. 为前端补充 Vitest 前再评估测试依赖。
 3. 为 CI 增加许可证清单检查和 AGPL 源码扫描。
 4. 在 PokerKit 版本固定后记录其 API 适配范围和回归结果。

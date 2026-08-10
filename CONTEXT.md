@@ -30,8 +30,18 @@
 
 ## 策略与教学
 
-**Strategy Match**：输入场景与策略库条目的匹配结果。exact、compatible、approximate 和 no-match 必须区分，近似匹配不能静默继承精确频率。
-
 **Principle Teaching**：只基于规则、数学或扑克概念的解释。它可以说明为什么某条线路合理，但不能声称拥有 Solver 频率或精确 GTO 结论。
 
-**Validated Practice**：绑定到已验证证据和正确答案的练习题。Agent 可以调整表达，不能凭空创造正确答案。
+**Teaching Depth**：教学输出的解释层级（beginner、intermediate、advanced）；它只改变表达和可展示的证据层次，不改变牌局事实或计算结果。
+
+**Teaching Tool Gateway**：教学编排读取标准化场景、合法动作、EvidenceBundle、范围、策略匹配和术语的只读边界；创建练习必须重新经过验证服务。
+
+**Strategy Artifact**：带有规则、范围、下注树、来源、许可证和版本元数据的可引用策略条目。它可以是人工策划或 Solver 产物，来源等级必须随条目保存。
+
+**Strategy Match**：场景与 Strategy Artifact 的匹配结果，包含匹配等级、相似度和差异。`approximate` 或 `no_match` 不得继承行动频率。
+
+**Validated Practice**：绑定到具体场景版本、EvidenceBundle 和验证答案的练习题；自由生成的题面不是事实来源。
+
+**Learning Profile**：匿名用户在错误标签、概念进度和练习表现上的可删除学习记录，不是牌局事实或策略证据。
+
+**Mistake Tag**：对一次练习或复盘中可复用的决策偏差分类，例如 pot odds、SPR、下注尺度或 blocker；它描述学习主题，不改写牌局事实。

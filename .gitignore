@@ -10,6 +10,8 @@ htmlcov/
 node_modules/
 .next/
 out/
+*.tsbuildinfo
+frontend/test-results/
 
 # Local configuration and generated reports
 .env
