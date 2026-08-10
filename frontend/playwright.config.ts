@@ -31,6 +31,12 @@ export default defineConfig({
           url: "http://127.0.0.1:8000/health",
           reuseExistingServer: !process.env.CI,
           timeout: 120_000,
+          env: {
+            // Hermetic E2E: force the LOCAL teacher. The external-LLM teacher
+            // is covered by backend unit tests; an external call here makes
+            // the suite latency-dependent (10-90s per request).
+            POKER_COACH_LLM_API_KEY: "",
+          },
         },
         {
           command: "npm run dev -- --hostname 127.0.0.1 --port 3000",

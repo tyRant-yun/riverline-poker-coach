@@ -1,132 +1,48 @@
 "use client";
 
+// Workspace composition root. Scenario state, API orchestration, undo/redo
+// and cross-feature wiring live here; rendering lives in features/components.
+
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 
-type ActionEvent = {
-  actionId: string;
-  sequence: number;
-  street: string;
-  actorSeat: number;
-  actionType: string;
-  amount?: number;
-  amountType?: string;
-};
+import type { SolverNodePayload, SolveJob, StateResponse, TeachingMeta, TeachingResponse, PracticeOutcome, PracticeQuestion, AnalysisResponse } from "../types/api";
+import type {
+  ActionEvent,
+  AnalysisComparison,
+  AnalysisRun,
+  DefaultRanges,
+  RangeCombo,
+  RangeSide,
+  RangeSpecPayload,
+  RangeSummary,
+  SavedScenario,
+  Scenario,
+  ScenarioRevision,
+} from "../types/scenario";
+import type { SeatViewModel } from "../types/poker";
 
-type Scenario = {
-  schemaVersion: number;
-  gameVariant: string;
-  tableSize: number;
-  smallBlind: number;
-  bigBlind: number;
-  buttonSeat: number;
-  heroSeat: number;
-  seats: { seatId: number; startingStack: number; position: string }[];
-  heroHoleCards: string[];
-  villainHoleCards?: string[];
-  board: string[];
-  actionHistory: ActionEvent[];
-  decisionPoint: { street: string; actorSeat: number; afterSequence: number };
-  assumptions: Record<string, unknown>;
-  heroRange?: RangeSpecPayload;
-  villainRange?: RangeSpecPayload;
-};
+import {
+  analysisApi,
+  coachApi,
+  errorMessage,
+  practiceApi,
+  rangesApi,
+  scenariosApi,
+  solverApi,
+} from "../lib/api/client";
+import { cardsToViewModels } from "../lib/poker/cards";
+import { notationFromMatrix, notationFromMatrixExplicit } from "../lib/poker/matrix";
+import { positionLabel } from "../lib/poker/positions";
 
-type RangeSpecPayload = {
-  rangeId: string;
-  name: string;
-  version: string;
-  source: string;
-  isDefaultAssumption?: boolean;
-  matrix169: Record<string, string>;
-};
-
-type RangeSide = "heroRange" | "villainRange";
-
-type StateResponse = {
-  finalState: {
-    street: string;
-    actorSeat: number | null;
-    board: string[];
-    pot: number;
-    stacks: Record<string, number>;
-    bets: Record<string, number>;
-    legalActions: {
-      actorSeat: number | null;
-      actions: string[];
-      callAmount: number | null;
-      minRaiseTo: number | null;
-      maxRaiseTo: number | null;
-      explanations: Record<string, string>;
-    };
-  };
-};
-
-type AnalysisResponse = {
-  analysis: {
-    metrics: Record<string, string | number | null>;
-    hand: { category: string; madeHand: string; draws: string[]; outCount: number; overcards: string[]; outCards: string[]; counterfeitRiskCards: string[] };
-    board: { labels: string[]; staticOrDynamic: string; nutComboCount: number; nextStreetChangeCards: string[] };
-    equity: { heroEquity: string; villainEquity: string; tieProbability: string; sourceLevel: string } | null;
-    rangeAnalysis?: { totalCombos: number; weightedCombos: string; valueCombos: number; bluffCombos: number; drawCombos: number; blockedCombos: number; blockedWeight: string; blockerCards: string[]; polarity: string; heuristic: boolean } | null;
-    rangeComparison?: { rangeAdvantage: string | null; nutAdvantage: string | null; equityDistribution: Record<string, string>; heuristic: boolean } | null;
-    strategyMatch: {
-      level: string;
-      similarity: string;
-      canQuoteFrequencies: boolean;
-      explanation: string;
-      differences: { field: string; requested: unknown; artifact: unknown; impact: string }[];
-      recommendations: { action: string; summary: string; frequency?: string | null; ev?: string | null }[];
-    } | null;
-    evidence: { items: { evidenceId: string; kind: string; value: unknown; sourceLevel: string; description: string }[] };
-    warnings: string[];
-  };
-};
-
-type TeachingResponse = {
-  response: {
-    explanationDepth: string;
-    summary: { text: string };
-    recommendedActions: { action: string; frequency?: string | null }[];
-    keyReasons: { text: string }[];
-    uncertainty: { text: string };
-    conceptTags?: string[];
-    followUpQuestion?: string | null;
-  };
-  provider?: string;
-  degraded?: boolean;
-  teacherVersion?: string;
-  promptVersion?: string;
-};
-
-type TeachingMeta = {
-  provider: string;
-  degraded: boolean;
-  teacherVersion: string;
-};
-
-type SolverNodePayload = {
-  actions: string[];
-  player: number;
-  hands: { combo: string; weight: number; equity: number; ev: number; strategy: Record<string, number> }[];
-};
-
-type SolveJob = {
-  jobId: string;
-  status: string;
-  error?: string | null;
-  executionMs?: number | null;
-  result?: {
-    metadata?: {
-      solver: string;
-      version: string;
-      exploitabilityChips: number;
-      solveTimeMs: number;
-      maxIterations: number;
-    };
-    root?: SolverNodePayload;
-    responseNode?: SolverNodePayload;
-  } | null;
-};
+import PokerTable from "../components/poker/PokerTable";
+import ActionBar from "../components/poker/ActionBar";
+import ScenarioEditor from "../features/scenario/ScenarioEditor";
+import ActionTimeline from "../features/scenario/ActionTimeline";
+import RangeEditor from "../features/range/RangeEditor";
+import ScenarioHistory from "../features/history/ScenarioHistory";
+import AnalysisPanel from "../features/analysis/AnalysisPanel";
+import TeachingPanel from "../features/coach/TeachingPanel";
+import PracticePanel from "../features/practice/PracticePanel";
 
 function solvePrimary(node?: SolverNodePayload | null): { action: string; frequency: number } | null {
   if (!node || !node.hands.length) return null;
@@ -148,44 +64,6 @@ function solveHeroCombo(node: SolverNodePayload | undefined | null, cards: strin
     return cards.every((card) => comboSet.has(card));
   }) ?? null;
 }
-
-type PracticeQuestion = {
-  questionId: string;
-  profileId: string;
-  prompt: string;
-  conceptTags: string[];
-  scenario: Scenario;
-};
-
-type PracticeOutcome = {
-  attempt: { correct: boolean; selectedAction: string };
-  expectedAction: string;
-  explanation: string;
-  evidenceReferences: { evidenceId: string }[];
-};
-
-type SavedScenario = {
-  scenarioId: string;
-  title: string;
-  scenario: Scenario;
-  revisionNo: number;
-  updatedAt: string;
-};
-
-type ScenarioRevision = {
-  scenarioId: string;
-  revisionNo: number;
-  scenario: Scenario;
-  createdAt: string;
-};
-
-type RangeCombo = { cards: string[]; weight: string };
-type RangeSummary = { totalCombos: number; weightedCombos: string };
-type DefaultRanges = Record<string, RangeSpecPayload>;
-type AnalysisRun = { analysisId: string; revisionNo: number; createdAt: string; output?: { board?: { board?: string[] } } };
-type AnalysisComparison = { differences: { field: string; left: unknown; right: unknown }[]; versions: Record<string, { rulesEngineVersion: string; analysisVersion: string }> };
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
 const initialScenario: Scenario = {
   schemaVersion: 1,
@@ -245,6 +123,7 @@ export default function Home() {
     void loadSavedScenarios();
     void loadDefaultRanges();
     void refreshState(initialScenario);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const rangeText = rangeTextBySide[rangeSide];
@@ -264,6 +143,33 @@ export default function Home() {
   const currentStreet = pendingDealStreet ?? state?.street ?? scenario.decisionPoint.street;
   const legal = state?.legalActions;
   const boardInput = useMemo(() => [...scenario.board, "", "", "", "", ""].slice(0, 5), [scenario.board]);
+
+  const tableSeats = useMemo<SeatViewModel[]>(
+    () =>
+      scenario.seats.map((seat) => {
+        const isHero = seat.seatId === scenario.heroSeat;
+        const isDealer = seat.seatId === scenario.buttonSeat;
+        const isActor = state?.legalActions.actorSeat === seat.seatId;
+        const holeCards = isHero ? scenario.heroHoleCards : (scenario.villainHoleCards ?? []);
+        return {
+          seatId: seat.seatId,
+          position: seat.position,
+          label: isHero
+            ? `${positionLabel(seat.position)} · Hero`
+            : `${positionLabel(seat.position)} · Seat ${seat.seatId}`,
+          stack: state?.stacks[String(seat.seatId)] ?? seat.startingStack,
+          bet: state?.bets[String(seat.seatId)] ?? null,
+          cards: cardsToViewModels(holeCards),
+          isHero,
+          isDealer,
+          isActor,
+          isFolded: false,
+          isAllIn: false,
+          isActive: state ? state.actorSeat === null || isActor : true,
+        };
+      }),
+    [scenario, state],
+  );
 
   function updateScenario(patch: Partial<Scenario>) {
     commitScenario({ ...scenario, ...patch });
@@ -321,57 +227,15 @@ export default function Home() {
     await refreshState(next);
   }
 
-  function updateCards(field: "heroHoleCards" | "villainHoleCards", index: number, value: string) {
-    const cards = [...(scenario[field] ?? ["", ""])] as string[];
-    cards[index] = value.trim();
-    updateScenario({ [field]: cards } as Partial<Scenario>);
-  }
-
   function updateBoard(index: number, value: string) {
     const board = [...boardInput];
     board[index] = value.trim();
     updateScenario({ board: board.filter(Boolean) });
   }
 
-  function errorMessage(payload: unknown, fallback: string): string {
-    const error = (payload as { error?: { message?: string; details?: unknown } })?.error;
-    let message = error?.message ?? fallback;
-    const details = error?.details;
-    if (Array.isArray(details) && details.length > 0) {
-      const first = details[0] as { msg?: string };
-      if (first?.msg) message = `${message}：${first.msg}`;
-    }
-    return message;
-  }
-
-  async function request(path: string, body: unknown, method: "POST" | "PUT" = "POST") {
-    const response = await fetch(`${API_BASE}${path}`, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(errorMessage(payload, "请求失败"));
-    return payload;
-  }
-
-  async function requestGet(path: string) {
-    const response = await fetch(`${API_BASE}${path}`);
-    const payload = await response.json();
-    if (!response.ok) throw new Error(errorMessage(payload, "请求失败"));
-    return payload;
-  }
-
-  async function requestDelete(path: string) {
-    const response = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(errorMessage(payload, "请求失败"));
-    return payload;
-  }
-
   async function loadSavedScenarios() {
     try {
-      const payload = await requestGet("/v1/scenarios");
+      const payload = await scenariosApi.list();
       setSavedScenarios(payload.scenarios ?? []);
     } catch {
       // Local API may not be running on the first page load.
@@ -380,7 +244,7 @@ export default function Home() {
 
   async function loadDefaultRanges() {
     try {
-      const payload = await requestGet("/v1/ranges/defaults");
+      const payload = await rangesApi.defaults();
       setDefaultRanges(payload.ranges ?? {});
     } catch {
       // Default range loading is optional; manual notation remains available.
@@ -423,7 +287,7 @@ export default function Home() {
 
   async function copySaved(record: SavedScenario) {
     try {
-      await request(`/v1/scenarios/${record.scenarioId}/copy`, { title: `${record.title} copy` });
+      await scenariosApi.copy(record.scenarioId, `${record.title} copy`);
       await loadSavedScenarios();
       setMessage(`已复制「${record.title}」。`);
     } catch (error) {
@@ -435,7 +299,7 @@ export default function Home() {
     if (!window.confirm(`确认删除「${record.title}」吗？该场景的分析历史也会删除。`)) return;
     setBusy(true);
     try {
-      await requestDelete(`/v1/scenarios/${record.scenarioId}`);
+      await scenariosApi.remove(record.scenarioId);
       if (historyScenarioId === record.scenarioId) {
         setHistoryScenarioId(null);
         setSavedAnalyses([]);
@@ -459,8 +323,8 @@ export default function Home() {
   async function loadAnalysisHistory(record: SavedScenario) {
     try {
       const [analysisPayload, revisionPayload] = await Promise.all([
-        requestGet(`/v1/scenarios/${record.scenarioId}/analyses`),
-        requestGet(`/v1/scenarios/${record.scenarioId}/revisions`),
+        scenariosApi.analyses(record.scenarioId),
+        scenariosApi.revisions(record.scenarioId),
       ]);
       const analyses = analysisPayload.analyses ?? [];
       setHistoryScenarioId(record.scenarioId);
@@ -477,7 +341,7 @@ export default function Home() {
   async function compareHistory() {
     if (!historyScenarioId || !compareLeft || !compareRight || compareLeft === compareRight) return;
     try {
-      const payload = await requestGet(`/v1/scenarios/${historyScenarioId}/analyses/compare?leftAnalysisId=${encodeURIComponent(compareLeft)}&rightAnalysisId=${encodeURIComponent(compareRight)}`);
+      const payload = await scenariosApi.compare(historyScenarioId, compareLeft, compareRight);
       setComparison(payload);
       setMessage("历史分析比较完成；差异来自保存的结构化结果。");
     } catch (error) {
@@ -488,7 +352,7 @@ export default function Home() {
   async function reanalyzeSaved(record: SavedScenario) {
     setBusy(true);
     try {
-      const payload = await request(`/v1/scenarios/${record.scenarioId}/analyze`, {});
+      const payload = await scenariosApi.analyze(record.scenarioId);
       setScenario(record.scenario);
       setActiveScenarioId(record.scenarioId);
       setActiveRevisionNo(record.revisionNo);
@@ -523,10 +387,7 @@ export default function Home() {
   async function reanalyzeRevision(revision: ScenarioRevision, title: string) {
     setBusy(true);
     try {
-      const payload = await request(
-        `/v1/scenarios/${revision.scenarioId}/revisions/${revision.revisionNo}/analyze`,
-        {},
-      );
+      const payload = await scenariosApi.analyzeRevision(revision.scenarioId, revision.revisionNo);
       setScenario(revision.scenario);
       setActiveScenarioId(revision.scenarioId);
       setActiveRevisionNo(revision.revisionNo);
@@ -568,7 +429,7 @@ export default function Home() {
     try {
       const raw = JSON.parse(await file.text());
       const importedScenario = raw?.scenario ?? raw;
-      const payload = await request("/v1/scenarios", {
+      const payload = await scenariosApi.create({
         scenario: importedScenario,
         title: file.name.replace(/\.json$/i, "") || "Imported scenario",
         tags: ["imported"],
@@ -596,7 +457,7 @@ export default function Home() {
   async function refreshState(nextScenario = scenario) {
     setBusy(true);
     try {
-      const payload = await request("/v1/scenarios/state", nextScenario);
+      const payload = await scenariosApi.state(nextScenario);
       setState(payload.finalState);
       setScenario((current) => ({
         ...current,
@@ -677,7 +538,12 @@ export default function Home() {
           ? `/v1/scenarios/${activeScenarioId}/analyze`
           : "/v1/analysis";
       const analysisPath = activeScenarioId && !savedScenarioDirty ? path : "/v1/analysis";
-      const payload = await request(analysisPath, analysisPath === "/v1/analysis" ? scenario : {});
+      const payload =
+        analysisPath === "/v1/analysis"
+          ? await analysisApi.run(scenario)
+          : historicalRevision
+            ? await scenariosApi.analyzeRevision(activeScenarioId!, activeRevisionNo!)
+            : await scenariosApi.analyze(activeScenarioId!);
       setAnalysis(payload.analysis);
       setAnalysisStale(false);
       setMessage("分析完成。所有定量结果都来自结构化证据。");
@@ -691,12 +557,9 @@ export default function Home() {
   async function saveScenario() {
     setBusy(true);
     try {
-      const path = activeScenarioId ? `/v1/scenarios/${activeScenarioId}` : "/v1/scenarios";
-      const payload = await request(
-        path,
-        { scenario, title: "Manual review", tags: [currentStreet] },
-        activeScenarioId ? "PUT" : "POST",
-      );
+      const payload = activeScenarioId
+        ? await scenariosApi.update(activeScenarioId, { scenario, title: "Manual review", tags: [currentStreet] })
+        : await scenariosApi.create({ scenario, title: "Manual review", tags: [currentStreet] });
       setActiveScenarioId(payload.scenario.scenarioId);
       setActiveRevisionNo(payload.scenario.revisionNo);
       setSavedScenarioDirty(false);
@@ -713,13 +576,6 @@ export default function Home() {
     setRangeTextBySide((current) => ({ ...current, [rangeSide]: value }));
   }
 
-  function notationFromMatrix(matrix: Record<string, string>) {
-    return Object.entries(matrix)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([hand, weight]) => `${hand}${weight === "1" ? "" : `@${weight}`}`)
-      .join(" ");
-  }
-
   async function applyDefaultRange(key: string) {
     const selected = defaultRanges[key];
     if (!selected) return;
@@ -734,7 +590,7 @@ export default function Home() {
       const deadCards = side === "heroRange"
         ? [...scenario.heroHoleCards, ...(scenario.villainHoleCards ?? []), ...scenario.board]
         : [...scenario.heroHoleCards, ...scenario.board];
-      const payload = await request("/v1/ranges/parse", { notation, deadCards });
+      const payload = await rangesApi.parse(notation, deadCards);
       setRangeMatrix(payload.range.matrix169);
       setRangeSummary(payload.summary);
       setRangeCombos(payload.combos ?? []);
@@ -757,10 +613,7 @@ export default function Home() {
     const nextMatrix = { ...rangeMatrix };
     if (next) nextMatrix[cell] = next;
     else delete nextMatrix[cell];
-    const notation = Object.entries(nextMatrix)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([hand, weight]) => `${hand}@${weight}`)
-      .join(" ");
+    const notation = notationFromMatrixExplicit(nextMatrix);
     setCurrentRangeText(notation);
     setRangeMatrix(nextMatrix);
     await normalizeRange(notation, rangeSide);
@@ -769,7 +622,7 @@ export default function Home() {
   async function runTeaching() {
     setBusy(true);
     try {
-      const payload = await request("/v1/teaching", { scenario, depth: teachingDepth, question: teachingQuestion || undefined });
+      const payload = await coachApi.explain({ scenario, depth: teachingDepth, question: teachingQuestion || undefined });
       setTeaching(payload.response);
       setTeachingMeta({
         provider: payload.provider ?? "local",
@@ -787,7 +640,7 @@ export default function Home() {
   async function submitSolve() {
     setBusy(true);
     try {
-      const payload = await request("/v1/solve/jobs", { scenario, maxIterations: 200 });
+      const payload = await solverApi.submit(scenario);
       setSolveJob({ jobId: payload.jobId, status: payload.status });
       void pollSolveJob(payload.jobId);
       setMessage("求解作业已提交（独立 Solver 容器执行，通常 1–3 分钟）。");
@@ -802,7 +655,7 @@ export default function Home() {
     for (let attempt = 0; attempt < 120; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 3000));
       try {
-        const payload = await requestGet(`/v1/solve/jobs/${jobId}`);
+        const payload = await solverApi.get(jobId);
         setSolveJob({
           jobId,
           status: payload.status,
@@ -827,7 +680,7 @@ export default function Home() {
   async function generatePractice() {
     setBusy(true);
     try {
-      const payload = await request("/v1/practice/generate", { scenario, profileId: "local-browser", mistakeTag: "pot_odds" });
+      const payload = await practiceApi.generate({ scenario, profileId: "local-browser", mistakeTag: "pot_odds" });
       setPractice(payload.question);
       setPracticeOutcome(null);
       setMessage("验证练习已生成；先选择行动，再查看证据答案。");
@@ -842,7 +695,7 @@ export default function Home() {
     if (!practice) return;
     setBusy(true);
     try {
-      const payload = await request(`/v1/practice/${practice.questionId}/attempt`, { selectedAction: action });
+      const payload = await practiceApi.attempt(practice.questionId, action);
       setPracticeOutcome(payload.outcome);
       setMessage("练习已评分；答案来自保存的验证分析。");
     } catch (error) {
@@ -864,78 +717,81 @@ export default function Home() {
 
       <div className="workspace-grid">
         <section className="panel editor-panel">
-          <div className="panel-heading">
-            <div><p className="eyebrow">01 · SCENARIO</p><h2>构造决策场景</h2></div>
-            <div className="heading-actions"><span className="muted">{scenario.actionHistory.length} events</span><button className="text-button" onClick={() => void resetScenario()} disabled={busy}>重置场景</button><button className="icon-button" onClick={undo} disabled={!pastScenarios.length || busy} aria-label="撤销">↶</button><button className="icon-button" onClick={redo} disabled={!futureScenarios.length || busy} aria-label="重做">↷</button></div>
-          </div>
+          <ScenarioEditor
+            scenario={scenario}
+            boardInput={boardInput}
+            busy={busy}
+            canUndo={pastScenarios.length > 0}
+            canRedo={futureScenarios.length > 0}
+            onReset={() => void resetScenario()}
+            onUndo={undo}
+            onRedo={redo}
+            onUpdateScenario={updateScenario}
+            onUpdateBoard={updateBoard}
+          />
 
           <div className="table-card">
-            <div className="felt">
-              <div className="seat seat-left"><span>BB · Seat 1</span><strong>{state?.stacks["1"] ?? "10,000"}</strong></div>
-              <div className="board-row">
-                {boardInput.map((card, index) => <span className={`board-card ${card ? "filled" : "empty"}`} key={index}>{card || "·"}</span>)}
-              </div>
-              <div className="pot-label">POT <strong>{state?.pot ?? 150}</strong></div>
-              <div className="seat seat-right"><span>BTN · Hero</span><strong>{state?.stacks["0"] ?? "9,950"}</strong></div>
-            </div>
+            <PokerTable
+              seats={tableSeats}
+              board={scenario.board}
+              pot={state?.pot ?? null}
+            />
           </div>
 
-          <div className="form-grid">
-            <label>Hero 手牌<input value={scenario.heroHoleCards.join(" ")} onChange={(event) => updateScenario({ heroHoleCards: event.target.value.split(/\s+/).filter(Boolean).slice(0, 2) })} /></label>
-            <label>Villain 手牌<input value={(scenario.villainHoleCards ?? []).join(" ")} onChange={(event) => updateScenario({ villainHoleCards: event.target.value.split(/\s+/).filter(Boolean).slice(0, 2) })} /></label>
-          </div>
-          <div className="settings-grid">
-            <label>小盲<input type="number" min="1" value={scenario.smallBlind} onChange={(event) => updateScenario({ smallBlind: Number(event.target.value) || 1 })} /></label>
-            <label>大盲<input type="number" min="1" value={scenario.bigBlind} onChange={(event) => updateScenario({ bigBlind: Number(event.target.value) || 1 })} /></label>
-            <label>Hero 起始筹码<input type="number" min="1" value={scenario.seats[0].startingStack} onChange={(event) => updateScenario({ seats: scenario.seats.map((seat, index) => index === 0 ? { ...seat, startingStack: Number(event.target.value) || 1 } : seat) })} /></label>
-            <label>Villain 起始筹码<input type="number" min="1" value={scenario.seats[1].startingStack} onChange={(event) => updateScenario({ seats: scenario.seats.map((seat, index) => index === 1 ? { ...seat, startingStack: Number(event.target.value) || 1 } : seat) })} /></label>
-          </div>
-          <div className="card-inputs">
-            {boardInput.map((card, index) => <input aria-label={`board-${index}`} key={index} value={card} placeholder={index < 3 ? `牌面 ${index + 1}` : "future"} onChange={(event) => updateBoard(index, event.target.value)} />)}
-          </div>
+          <ActionBar
+            legal={legal ?? null}
+            currentStreet={currentStreet}
+            busy={busy}
+            boardLength={scenario.board.length}
+            raiseAmount={raiseAmount}
+            onRaiseAmountChange={setRaiseAmount}
+            onAction={(actionType, requestedAmount) => void appendAction(actionType, requestedAmount)}
+            onDeal={(street) => void deal(street)}
+          />
 
-          <div className="action-box">
-            <div className="action-header"><span>当前节点 · {currentStreet}</span><span className="muted">行动者 Seat {legal?.actorSeat ?? state?.actorSeat ?? 0}</span></div>
-            <div className="action-buttons">
-              {legal?.actions.includes("check") && <button onClick={() => appendAction("check")} disabled={busy}>Check</button>}
-              {legal?.actions.includes("call") && <button onClick={() => appendAction("call")} disabled={busy}>Call {legal.callAmount}</button>}
-              {legal?.actions.includes("bet") && <button onClick={() => appendAction("bet", raiseAmount === "" ? undefined : raiseAmount)} disabled={busy}>Bet {raiseAmount || legal.minRaiseTo}</button>}
-              {legal?.actions.includes("raise_to") && <button onClick={() => appendAction("raise_to", raiseAmount === "" ? undefined : raiseAmount)} disabled={busy}>Raise to {raiseAmount || legal.minRaiseTo}</button>}
-              {legal?.actions.includes("all_in") && <button onClick={() => appendAction("all_in")} disabled={busy}>All-in</button>}
-              {legal?.actions.includes("fold") && <button className="quiet" onClick={() => appendAction("fold")} disabled={busy}>Fold</button>}
-              {currentStreet === "preflop" && <button className="quiet" onClick={() => deal("deal_flop")} disabled={busy || scenario.board.length < 3}>Deal flop</button>}
-              {currentStreet === "flop" && <button className="quiet" onClick={() => deal("deal_turn")} disabled={busy || scenario.board.length < 4}>Deal turn</button>}
-              {currentStreet === "turn" && <button className="quiet" onClick={() => deal("deal_river")} disabled={busy || scenario.board.length < 5}>Deal river</button>}
-            </div>
-            {(legal?.actions.includes("bet") || legal?.actions.includes("raise_to")) && <label className="amount-input">下注 / raise-to<input type="number" min={legal.minRaiseTo ?? 0} max={legal.maxRaiseTo ?? undefined} value={raiseAmount === "" ? legal.minRaiseTo ?? "" : raiseAmount} onChange={(event) => setRaiseAmount(event.target.value === "" ? "" : Number(event.target.value))} /></label>}
-          </div>
-
-          <div className="timeline">
-            <div className="subheading"><span>行动时间线</span><button className="text-button" onClick={() => refreshState()}>重新校验</button></div>
-            {scenario.actionHistory.length === 0 ? <p className="muted">尚未录入行动。后端会从盲注和初始筹码推导底池。</p> : scenario.actionHistory.map((event) => <button className={`timeline-row ${scenario.decisionPoint.afterSequence === event.sequence ? "selected" : ""}`} key={event.actionId} onClick={() => void selectNode(event.sequence, event.street)}><span className="sequence">{String(event.sequence).padStart(2, "0")}</span><span>{event.street}</span><strong>Seat {event.actorSeat} · {event.actionType}</strong><span className="muted">{event.amount ?? "—"}</span></button>)}
-          </div>
+          <ActionTimeline
+            events={scenario.actionHistory}
+            selectedSequence={scenario.decisionPoint.afterSequence}
+            onSelectNode={(sequence, street) => void selectNode(sequence, street)}
+            onRefresh={() => void refreshState()}
+          />
         </section>
 
         <aside className="side-column">
-          <section className="panel compact-panel">
-            <div className="panel-heading"><div><p className="eyebrow">02 · RANGE</p><h2>{rangeSide === "heroRange" ? "Hero" : "Villain"} 范围</h2></div><span className="source-tag">假设</span></div>
-            <div className="range-controls">
-              <label>编辑对象<select aria-label="范围侧" value={rangeSide} onChange={(event) => selectRangeSide(event.target.value as RangeSide)}><option value="villainRange">Villain 范围</option><option value="heroRange">Hero 范围</option></select></label>
-              <label>默认范围<select aria-label="默认范围" defaultValue="" onChange={(event) => void applyDefaultRange(event.target.value)}><option value="">选择默认范围</option>{Object.entries(defaultRanges).map(([key, item]) => <option key={key} value={key}>{item.name}</option>)}</select></label>
-            </div>
-            <textarea value={rangeText} onChange={(event) => setCurrentRangeText(event.target.value)} aria-label="range notation" />
-            <button className="secondary-button" onClick={parseRange}>标准化范围</button>
-            <div className="range-matrix" aria-label="169 格范围矩阵">{RANKS.map((row, rowIndex) => RANKS.map((column, columnIndex) => { const cell = matrixCell(rowIndex, columnIndex); const weight = rangeMatrix[cell]; return <button type="button" className={`matrix-cell ${weight ? "active" : ""}`} key={cell} title={weight ? `${cell} · ${weight}` : `${cell} · empty`} aria-label={`${cell} weight`} onClick={() => void cycleRangeCell(cell)}>{cell}{weight && <small>{weight}</small>}</button>; }))}</div>
-            <p className="muted small">点击矩阵格循环设置 0.25 / 0.5 / 0.75 / 1 权重；每次变化都由后端重新标准化。</p>
-            {rangeSummary && <p className="range-summary">有效组合：<strong>{rangeSummary.totalCombos}</strong> · 加权组合：<strong>{rangeSummary.weightedCombos}</strong> · 已展开：{rangeCombos.length}</p>}
-          </section>
+          <RangeEditor
+            rangeSide={rangeSide}
+            rangeText={rangeText}
+            defaultRanges={defaultRanges}
+            rangeMatrix={rangeMatrix}
+            rangeSummary={rangeSummary}
+            rangeCombos={rangeCombos}
+            onRangeSideChange={selectRangeSide}
+            onRangeTextChange={setCurrentRangeText}
+            onApplyDefault={(key) => void applyDefaultRange(key)}
+            onParse={() => void parseRange()}
+            onCycleCell={(cell) => void cycleRangeCell(cell)}
+          />
 
-          <section className="panel compact-panel">
-            <div className="panel-heading"><div><p className="eyebrow">02B · HISTORY</p><h2>场景历史</h2></div><button className="text-button" onClick={() => void loadSavedScenarios()}>刷新</button></div>
-            {savedScenarios.length === 0 ? <p className="muted small">尚无已保存场景。</p> : <div className="saved-list">{savedScenarios.slice(0, 8).map((record) => <div className="saved-row" key={record.scenarioId}><button className="saved-load" onClick={() => loadSaved(record)}><strong>{record.title}</strong><span>rev {record.revisionNo}</span></button><button className="text-button" onClick={() => void loadAnalysisHistory(record)}>历史</button><button className="text-button" onClick={() => void reanalyzeSaved(record)}>重新分析</button><button className="text-button danger-button" onClick={() => void deleteSaved(record)}>删除</button><button className="icon-button" onClick={() => void copySaved(record)} aria-label={`复制 ${record.title}`}>＋</button></div>)}</div>}
-            {historyScenarioId && <div className="history-compare"><p className="eyebrow">SCENARIO REVISIONS</p>{savedRevisions.map((revision) => <div className="revision-row" key={`${revision.scenarioId}-${revision.revisionNo}`}><span>rev {revision.revisionNo}</span><button className="text-button" onClick={() => loadRevision(revision)}>载入</button><button className="text-button" onClick={() => void reanalyzeRevision(revision, savedScenarios.find((item) => item.scenarioId === revision.scenarioId)?.title ?? "场景")}>重新分析</button></div>)}</div>}
-            {historyScenarioId && <div className="history-compare"><p className="eyebrow">ANALYSIS HISTORY</p>{savedAnalyses.length < 2 ? <p className="muted small">至少需要两次保存分析才能比较。</p> : <><label>左侧<select value={compareLeft} onChange={(event) => setCompareLeft(event.target.value)}>{savedAnalyses.map((item) => <option key={item.analysisId} value={item.analysisId}>rev {item.revisionNo} · {item.analysisId.slice(0, 8)}</option>)}</select></label><label>右侧<select value={compareRight} onChange={(event) => setCompareRight(event.target.value)}>{savedAnalyses.map((item) => <option key={item.analysisId} value={item.analysisId}>rev {item.revisionNo} · {item.analysisId.slice(0, 8)}</option>)}</select></label><button className="secondary-button" onClick={() => void compareHistory()} disabled={compareLeft === compareRight}>比较分析</button>{comparison && <p className="muted small">发现 {comparison.differences.length} 个结构化字段差异：{comparison.differences.map((difference) => difference.field).join("、") || "无"}</p>}</>}</div>}
-          </section>
+          <ScenarioHistory
+            savedScenarios={savedScenarios}
+            historyScenarioId={historyScenarioId}
+            savedRevisions={savedRevisions}
+            savedAnalyses={savedAnalyses}
+            compareLeft={compareLeft}
+            compareRight={compareRight}
+            comparison={comparison}
+            onRefresh={() => void loadSavedScenarios()}
+            onLoad={loadSaved}
+            onLoadHistory={(record) => void loadAnalysisHistory(record)}
+            onReanalyze={(record) => void reanalyzeSaved(record)}
+            onDelete={(record) => void deleteSaved(record)}
+            onCopy={(record) => void copySaved(record)}
+            onLoadRevision={loadRevision}
+            onReanalyzeRevision={(revision, title) => void reanalyzeRevision(revision, title)}
+            onCompareLeftChange={setCompareLeft}
+            onCompareRightChange={setCompareRight}
+            onCompare={() => void compareHistory()}
+          />
 
           <section className="panel compact-panel">
             <div className="panel-heading"><div><p className="eyebrow">03 · ANALYZE</p><h2>输出证据</h2></div><span className="source-tag green">grounded</span></div>
@@ -948,46 +804,23 @@ export default function Home() {
         </aside>
       </div>
 
-      {analysis && <section className="panel results-panel">
-        <div className="panel-heading"><div><p className="eyebrow">04 · EVIDENCE BUNDLE</p><h2>结构化分析</h2></div><div className="heading-actions">{analysisStale && <span className="source-tag">结果已过期</span>}<span className="source-tag green">{analysis.equity?.sourceLevel ?? "principle_only"}</span></div></div>
-        <div className="metric-grid">
-          <Metric label="Pot" value={analysis.metrics.currentPot ?? "—"} />
-          <Metric label="Call cost" value={analysis.metrics.callCost ?? "—"} />
-          <Metric label="SPR" value={analysis.metrics.spr ?? "—"} />
-          <Metric label="Pot odds" value={analysis.metrics.potOdds ?? "—"} />
-          <Metric label="Hand" value={analysis.hand.madeHand} />
-          <Metric label="Outs" value={analysis.hand.outCount} />
-        </div>
-        <div className="result-columns">
-          <div><p className="eyebrow">HAND / BOARD</p><p className="result-line"><strong>{analysis.hand.category}</strong> · {analysis.hand.draws.join(", ") || "no draw"}</p><p className="muted">Board: {analysis.board.labels.join(" · ")} · {analysis.board.staticOrDynamic}</p><p className="muted small">Outs: {analysis.hand.outCards.join(", ") || "—"} · 反制牌：{analysis.hand.counterfeitRiskCards.join(", ") || "—"}</p></div>
-          <div><p className="eyebrow">EQUITY</p>{analysis.equity ? <p className="result-line"><strong>{analysis.equity.heroEquity}</strong> Hero · {analysis.equity.villainEquity} Villain · tie {analysis.equity.tieProbability}</p> : <p className="muted">缺少 Villain 手牌或范围，未计算 Equity。</p>}</div>
-        </div>
-        {analysis.rangeAnalysis && <div className="range-result-card"><p className="eyebrow">RANGE / COMBOS</p><p className="result-line"><strong>{analysis.rangeAnalysis.totalCombos}</strong> combos · 加权 {analysis.rangeAnalysis.weightedCombos} · blocked {analysis.rangeAnalysis.blockedCombos}</p><p className="muted">value {analysis.rangeAnalysis.valueCombos} · bluff {analysis.rangeAnalysis.bluffCombos} · draw {analysis.rangeAnalysis.drawCombos} · polarity {analysis.rangeAnalysis.polarity}</p><p className="muted small">Blocker：{analysis.rangeAnalysis.blockerCards.join(", ") || "—"} · 分类标记：{analysis.rangeAnalysis.heuristic ? "heuristic" : "calculated"}</p></div>}
-        {analysis.strategyMatch && <div className="strategy-card"><div><p className="eyebrow">STRATEGY MATCH</p><p className="result-line"><strong>{analysis.strategyMatch.level}</strong> · similarity {analysis.strategyMatch.similarity}</p><p className="muted">{analysis.strategyMatch.explanation}</p></div><div>{analysis.strategyMatch.recommendations.map((recommendation) => <div className="recommendation-row" key={recommendation.action}><strong>{recommendation.action}</strong><span>{recommendation.summary}</span>{recommendation.frequency && <em>{recommendation.frequency}</em>}</div>)}</div>{analysis.strategyMatch.differences.length > 0 && <p className="muted small">差异：{analysis.strategyMatch.differences.map((difference) => difference.field).join("、")}</p>}</div>}
-        <div className="evidence-list">{analysis.evidence.items.slice(0, 12).map((item) => <div className="evidence-row" key={item.evidenceId}><span>{item.evidenceId}</span><strong>{String(item.value)}</strong><em>{item.sourceLevel}</em><small>{item.description}</small></div>)}</div>
-        {analysis.warnings.map((warning) => <p className="warning" key={warning}>{warning}</p>)}
-      </section>}
+      {analysis && <AnalysisPanel analysis={analysis} analysisStale={analysisStale} />}
 
-      {teaching && <section className="panel teaching-panel"><div className="panel-heading"><div><p className="eyebrow">05 · TEACHING</p><h2>证据约束的教学解释</h2></div><span className="source-tag">{teachingMeta?.provider === "external_llm" ? (teachingMeta.degraded ? `external_llm · degraded(本地回退) · ${teachingMeta.teacherVersion}` : `external_llm · ${teachingMeta.teacherVersion}`) : `principle_only · ${teaching.explanationDepth}`}</span></div><p className="teaching-summary">{teaching.summary.text}</p><div className="teaching-columns"><div><p className="eyebrow">RECOMMENDED ACTIONS</p>{teaching.recommendedActions.map((action) => <p className="result-line" key={action.action}><strong>{action.action}</strong>{action.frequency ? ` · ${action.frequency}` : ""}</p>)}</div><div><p className="eyebrow">KEY REASONS</p>{teaching.keyReasons.map((reason) => <p className="muted" key={reason.text}>{reason.text}</p>)}</div></div>{teaching.conceptTags?.length ? <p className="muted small">概念：{teaching.conceptTags.join(" · ")}</p> : null}{teaching.followUpQuestion ? <p className="notice">追问：{teaching.followUpQuestion}</p> : null}<p className="notice">{teaching.uncertainty.text}</p></section>}
+      {teaching && <TeachingPanel teaching={teaching} teachingMeta={teachingMeta} />}
 
       <section className="panel solve-panel"><div className="panel-heading"><div><p className="eyebrow">06 · SOLVER</p><h2>Solver 策略求解</h2></div><span className="source-tag">solver_backed{solveJob ? ` · ${solveJob.status}` : ""}</span></div>{!solveJob ? <div className="action-buttons"><button onClick={() => void submitSolve()} disabled={busy || !scenario.heroRange || !scenario.villainRange}>提交 Solver 求解（独立容器）</button><p className="muted small">需要 Hero 与 Villain 范围（用上方范围面板选择默认范围或手动输入）。求解约 1–3 分钟。</p></div> : <div>{solveJob.status === "solved" && solveJob.result?.metadata ? <div className="teaching-columns"><div><p className="eyebrow">求解质量</p><p className="result-line"><strong>exploitability</strong> {solveJob.result.metadata.exploitabilityChips.toFixed(3)} chips</p><p className="result-line"><strong>耗时</strong> {(solveJob.result.metadata.solveTimeMs / 1000).toFixed(1)}s</p><p className="result-line"><strong>迭代</strong> {solveJob.result.metadata.maxIterations}</p><p className="result-line"><strong>引擎</strong> {solveJob.result.metadata.solver} {solveJob.result.metadata.version}</p></div><div><p className="eyebrow">OOP 主导动作</p>{(() => { const primary = solvePrimary(solveJob.result?.root); return primary ? <p className="result-line"><strong>{primary.action}</strong> · {primary.frequency.toFixed(3)}</p> : <p className="muted">—</p>; })()}<p className="eyebrow">IP 响应主导动作</p>{(() => { const primary = solvePrimary(solveJob.result?.responseNode); return primary ? <p className="result-line"><strong>{primary.action}</strong> · {primary.frequency.toFixed(3)}</p> : <p className="muted">—</p>; })()}<p className="eyebrow">Hero 手牌（{scenario.heroHoleCards?.join(" ")}）</p>{(() => { const combo = solveHeroCombo(solveJob.result?.root, scenario.heroHoleCards ?? []) ?? solveHeroCombo(solveJob.result?.responseNode, scenario.heroHoleCards ?? []); return combo ? <p className="result-line"><strong>{Object.entries(combo.strategy).sort((a, b) => b[1] - a[1])[0][0]}</strong> · {Object.entries(combo.strategy).sort((a, b) => b[1] - a[1])[0][1].toFixed(3)} · EV {combo.ev.toFixed(1)}</p> : <p className="muted">手牌不在当前求解范围中</p>; })()}</div></div> : ["queued", "running", "cancellation_requested"].includes(solveJob.status) ? <p className="muted">求解进行中（独立 sidecar 容器）…</p> : solveJob.error ? <p className="warning">{solveJob.error}</p> : <p className="muted">状态：{solveJob.status}</p>}</div>}</section>
 
-      {practice && <section className="panel practice-panel"><div className="panel-heading"><div><p className="eyebrow">06 · PRACTICE</p><h2>验证练习</h2></div><span className="source-tag">validated</span></div><p className="teaching-summary">{practice.prompt}</p><p className="muted small">概念：{practice.conceptTags.join(" · ")}</p><div className="action-buttons">{(state?.legalActions.actions ?? ["check", "call", "fold"]).filter((action) => ["check", "call", "fold", "bet", "raise_to", "all_in"].includes(action)).map((action) => <button key={action} onClick={() => void answerPractice(action)} disabled={busy}>{action}</button>)}</div>{practiceOutcome && <div className={`practice-outcome ${practiceOutcome.attempt.correct ? "correct" : "incorrect"}`}><strong>{practiceOutcome.attempt.correct ? "Correct" : "Review"}</strong><span>{practiceOutcome.explanation}</span><small>证据：{practiceOutcome.evidenceReferences.map((reference) => reference.evidenceId).join("、")}</small></div>}</section>}
+      {practice && (
+        <PracticePanel
+          practice={practice}
+          practiceOutcome={practiceOutcome}
+          legalActions={state?.legalActions.actions ?? []}
+          busy={busy}
+          onAnswer={(action) => void answerPractice(action)}
+        />
+      )}
 
       <footer><span>ScenarioSpec → Replay → EvidenceBundle</span><span>无 Solver 频率 · 无自动行动</span></footer>
     </main>
   );
-}
-
-function Metric({ label, value }: { label: string; value: string | number }) {
-  return <div className="metric"><span>{label}</span><strong>{String(value)}</strong></div>;
-}
-
-const RANKS = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"];
-
-function matrixCell(row: number, column: number) {
-  if (row === column) return `${RANKS[row]}${RANKS[column]}`;
-  const high = RANKS[Math.min(row, column)];
-  const low = RANKS[Math.max(row, column)];
-  return `${high}${low}${row < column ? "s" : "o"}`;
 }

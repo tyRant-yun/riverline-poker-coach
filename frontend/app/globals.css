@@ -8,6 +8,53 @@
   --mint: #dff4ea;
   --green: #087f5b;
   --orange: #ffb454;
+
+  /* Design tokens (F1): semantic palette mirroring the current light theme.
+     F2 flips these to the dark analytical workspace; components reference
+     tokens only, never raw hex. */
+  --color-bg: var(--paper);
+  --color-surface: var(--white);
+  --color-surface-alt: #fbfcfe;
+  --color-border: var(--line);
+  --color-text: var(--ink);
+  --color-text-muted: var(--muted);
+  --color-accent: var(--blue);
+  --color-accent-soft: #edf2ff;
+  --color-success: var(--green);
+  --color-success-soft: var(--mint);
+  --color-warning: #8c5c08;
+  --color-warning-soft: #fff7dd;
+  --color-danger: #b42318;
+
+  /* Felt / table */
+  --felt-top: #3f806e;
+  --felt-bottom: #1d554d;
+  --felt-seat-fg: rgba(255, 255, 255, 0.78);
+  --felt-seat-strong: #ffffff;
+
+  /* Playing cards */
+  --card-face: #f6f8fb;
+  --card-border: rgba(255, 255, 255, 0.7);
+  --card-empty-bg: rgba(255, 255, 255, 0.16);
+  --card-empty-fg: rgba(255, 255, 255, 0.7);
+  --card-back: #1e3a5f;
+  --card-back-inner: rgba(255, 255, 255, 0.25);
+  --suit-red: #c62828;
+  --suit-black: var(--ink);
+
+  /* Global action semantic colors (Strategy Grid / solver views, F3).
+     One action keeps one color across the whole app. */
+  --action-fold: #6b7280;
+  --action-check: #3b82f6;
+  --action-call: #17a673;
+  --action-bet: #d97706;
+  --action-raise: #dc2626;
+  --action-allin: #8b5cf6;
+  --action-check-bg: rgba(59, 130, 246, 0.18);
+  --action-call-bg: rgba(23, 166, 115, 0.18);
+  --action-bet-bg: rgba(217, 119, 6, 0.18);
+  --action-raise-bg: rgba(220, 38, 38, 0.18);
+  --action-allin-bg: rgba(139, 92, 246, 0.18);
 }
 
 * { box-sizing: border-box; }
@@ -118,3 +165,69 @@ button.quiet, .secondary-button { color: var(--ink); background: white; border: 
 footer { color: var(--muted); font-size: 11px; padding: 20px 3px 0; }
 @media (max-width: 900px) { .workspace-grid { grid-template-columns: 1fr; } .metric-grid { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 600px) { .shell { padding: 20px 14px 30px; } .form-grid, .settings-grid, .result-columns, .teaching-columns { grid-template-columns: 1fr; display: grid; } .card-inputs { grid-template-columns: repeat(3, 1fr); } .metric-grid { grid-template-columns: repeat(2, 1fr); } .evidence-row { grid-template-columns: 1fr 1fr; } .evidence-row small { grid-column: 1 / -1; } .topbar { align-items: flex-start; } .range-matrix { gap: 2px; } .matrix-cell { min-height: 23px; font-size: 8px; } .recommendation-row { grid-template-columns: 70px 1fr; } .recommendation-row em { grid-column: 2; } }
+
+/* ---- F1: poker table components ---- */
+
+.playing-card {
+  position: relative;
+  display: inline-grid;
+  grid-template-rows: auto auto;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--card-face);
+  border: 1px solid var(--card-border);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+  font-weight: 800;
+  line-height: 1.05;
+}
+.playing-card--sm { width: 43px; height: 58px; border-radius: 6px; font-size: 13px; }
+.playing-card--md { width: 52px; height: 70px; border-radius: 7px; font-size: 16px; }
+.playing-card--lg { width: 62px; height: 84px; border-radius: 8px; font-size: 19px; }
+.playing-card__rank { position: absolute; top: 5px; left: 6px; }
+.playing-card__suit { position: absolute; bottom: 4px; left: 6px; font-size: 0.82em; }
+.playing-card--red .playing-card__rank,
+.playing-card--red .playing-card__suit { color: var(--suit-red); }
+.playing-card--black .playing-card__rank,
+.playing-card--black .playing-card__suit { color: var(--suit-black); }
+.playing-card--back {
+  background: var(--card-back);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+.playing-card--back .playing-card__back-inner {
+  width: 68%;
+  height: 68%;
+  border: 1px solid var(--card-back-inner);
+  border-radius: 4px;
+}
+
+.seat-anchor { position: absolute; transform: translate(-50%, -50%); z-index: 1; }
+.seat-anchor .seat { position: relative; min-width: 128px; }
+.seat__header { display: flex; align-items: center; gap: 6px; }
+.seat__position { color: var(--felt-seat-fg); font-size: 11px; font-weight: 700; }
+.seat__stack { color: var(--felt-seat-strong); font-size: 14px; margin-left: auto; }
+.seat__badge {
+  display: inline-grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  color: var(--felt-seat-strong);
+  font-size: 10px;
+  font-weight: 800;
+}
+.seat__badge--hero { background: #ffd166; color: #5a3d00; }
+.seat__cards { display: flex; gap: 4px; justify-content: center; margin-top: 4px; }
+.seat__bet {
+  margin-top: 4px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffe9b0;
+}
+.seat--actor .seat__cards { filter: drop-shadow(0 0 6px rgba(255, 230, 140, 0.85)); }
+.seat--folded { opacity: 0.45; }
+.seat--folded .seat__cards { filter: grayscale(1); }
+.seat--allin .seat__stack { color: #ffd166; }
+.seat--inactive .seat__cards { opacity: 0.75; }
+.board-row { position: relative; z-index: 2; }
