@@ -1,6 +1,6 @@
 # 教学 Agent 评测基线
 
-本地教学实现是确定性的 `TeachingService`；`ExternalModelTeacher` 通过同一只读证据边界调用外部模型。两者都输出现有 `TeachingResponse` 合同。评测固定关注事实一致性，而不是文风。
+本地教学实现是确定性的 `TeachingService`；`ExternalModelTeacher` 通过同一只读证据边界调用外部模型。两者都输出现有 `TeachingResponse` 合同。评测固定关注事实一致性，而不是文风。已通过真实 DeepSeek 端点联调（2026-08-10：AKo on J72 vs QJ，枚举胜率 23.33% 被正确引用，5 条证据引用全部有效，`degraded=False`）。
 
 代码边界由 `TeachingToolGateway` 固定：场景、合法动作、EvidenceBundle、范围、策略匹配和术语只能通过读取工具取得；`create_practice` 会重新经过 `LearningService` 验证，工具没有改写牌局事实的方法。
 
