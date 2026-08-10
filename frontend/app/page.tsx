@@ -89,8 +89,65 @@ type TeachingResponse = {
     recommendedActions: { action: string; frequency?: string | null }[];
     keyReasons: { text: string }[];
     uncertainty: { text: string };
+    conceptTags?: string[];
+    followUpQuestion?: string | null;
   };
+  provider?: string;
+  degraded?: boolean;
+  teacherVersion?: string;
+  promptVersion?: string;
 };
+
+type TeachingMeta = {
+  provider: string;
+  degraded: boolean;
+  teacherVersion: string;
+};
+
+type SolverNodePayload = {
+  actions: string[];
+  player: number;
+  hands: { combo: string; weight: number; equity: number; ev: number; strategy: Record<string, number> }[];
+};
+
+type SolveJob = {
+  jobId: string;
+  status: string;
+  error?: string | null;
+  executionMs?: number | null;
+  result?: {
+    metadata?: {
+      solver: string;
+      version: string;
+      exploitabilityChips: number;
+      solveTimeMs: number;
+      maxIterations: number;
+    };
+    root?: SolverNodePayload;
+    responseNode?: SolverNodePayload;
+  } | null;
+};
+
+function solvePrimary(node?: SolverNodePayload | null): { action: string; frequency: number } | null {
+  if (!node || !node.hands.length) return null;
+  const total = node.hands.reduce((sum, hand) => sum + hand.weight, 0) || 1;
+  const weighted: Record<string, number> = {};
+  for (const hand of node.hands) {
+    for (const [action, frequency] of Object.entries(hand.strategy)) {
+      weighted[action] = (weighted[action] ?? 0) + hand.weight * frequency;
+    }
+  }
+  const action = Object.keys(weighted).sort((a, b) => weighted[b] - weighted[a])[0];
+  return { action, frequency: (weighted[action] ?? 0) / total };
+}
+
+function solveHeroCombo(node: SolverNodePayload | undefined | null, cards: string[]): SolverNodePayload["hands"][number] | null {
+  if (!node || cards.length !== 2) return null;
+  return node.hands.find((hand) => {
+    const comboSet = new Set([hand.combo.slice(0, 2), hand.combo.slice(2, 4)]);
+    return cards.every((card) => comboSet.has(card));
+  }) ?? null;
+}
 
 type PracticeQuestion = {
   questionId: string;
@@ -158,6 +215,8 @@ export default function Home() {
   const [analysis, setAnalysis] = useState<AnalysisResponse["analysis"] | null>(null);
   const [analysisStale, setAnalysisStale] = useState(false);
   const [teaching, setTeaching] = useState<TeachingResponse["response"] | null>(null);
+  const [teachingMeta, setTeachingMeta] = useState<TeachingMeta | null>(null);
+  const [solveJob, setSolveJob] = useState<SolveJob | null>(null);
   const [practice, setPractice] = useState<PracticeQuestion | null>(null);
   const [practiceOutcome, setPracticeOutcome] = useState<PracticeOutcome | null>(null);
   const [teachingDepth, setTeachingDepth] = useState("intermediate");
@@ -274,6 +333,17 @@ export default function Home() {
     updateScenario({ board: board.filter(Boolean) });
   }
 
+  function errorMessage(payload: unknown, fallback: string): string {
+    const error = (payload as { error?: { message?: string; details?: unknown } })?.error;
+    let message = error?.message ?? fallback;
+    const details = error?.details;
+    if (Array.isArray(details) && details.length > 0) {
+      const first = details[0] as { msg?: string };
+      if (first?.msg) message = `${message}：${first.msg}`;
+    }
+    return message;
+  }
+
   async function request(path: string, body: unknown, method: "POST" | "PUT" = "POST") {
     const response = await fetch(`${API_BASE}${path}`, {
       method,
@@ -281,21 +351,21 @@ export default function Home() {
       body: JSON.stringify(body),
     });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error?.message ?? "请求失败");
+    if (!response.ok) throw new Error(errorMessage(payload, "请求失败"));
     return payload;
   }
 
   async function requestGet(path: string) {
     const response = await fetch(`${API_BASE}${path}`);
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error?.message ?? "请求失败");
+    if (!response.ok) throw new Error(errorMessage(payload, "请求失败"));
     return payload;
   }
 
   async function requestDelete(path: string) {
     const response = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error?.message ?? "请求失败");
+    if (!response.ok) throw new Error(errorMessage(payload, "请求失败"));
     return payload;
   }
 
@@ -701,11 +771,56 @@ export default function Home() {
     try {
       const payload = await request("/v1/teaching", { scenario, depth: teachingDepth, question: teachingQuestion || undefined });
       setTeaching(payload.response);
+      setTeachingMeta({
+        provider: payload.provider ?? "local",
+        degraded: payload.degraded ?? false,
+        teacherVersion: payload.teacherVersion ?? "unknown",
+      });
       setMessage("教学解释已生成；定量结论仍受 EvidenceBundle 约束。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "教学解释失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function submitSolve() {
+    setBusy(true);
+    try {
+      const payload = await request("/v1/solve/jobs", { scenario, maxIterations: 200 });
+      setSolveJob({ jobId: payload.jobId, status: payload.status });
+      void pollSolveJob(payload.jobId);
+      setMessage("求解作业已提交（独立 Solver 容器执行，通常 1–3 分钟）。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "求解提交失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pollSolveJob(jobId: string) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      try {
+        const payload = await requestGet(`/v1/solve/jobs/${jobId}`);
+        setSolveJob({
+          jobId,
+          status: payload.status,
+          error: payload.error,
+          executionMs: payload.executionMs,
+          result: payload.result,
+        });
+        if (["solved", "failed", "cancelled"].includes(payload.status)) {
+          setMessage(
+            payload.status === "solved"
+              ? "求解完成；策略频率可作为 solver_backed 证据引用。"
+              : `求解${payload.status}${payload.error ? `：${payload.error}` : ""}`,
+          );
+          return;
+        }
+      } catch {
+        return;
+      }
     }
   }
 
@@ -853,7 +968,9 @@ export default function Home() {
         {analysis.warnings.map((warning) => <p className="warning" key={warning}>{warning}</p>)}
       </section>}
 
-      {teaching && <section className="panel teaching-panel"><div className="panel-heading"><div><p className="eyebrow">05 · TEACHING</p><h2>证据约束的教学解释</h2></div><span className="source-tag">principle_only · {teaching.explanationDepth}</span></div><p className="teaching-summary">{teaching.summary.text}</p><div className="teaching-columns"><div><p className="eyebrow">RECOMMENDED ACTIONS</p>{teaching.recommendedActions.map((action) => <p className="result-line" key={action.action}><strong>{action.action}</strong>{action.frequency ? ` · ${action.frequency}` : ""}</p>)}</div><div><p className="eyebrow">KEY REASONS</p>{teaching.keyReasons.map((reason) => <p className="muted" key={reason.text}>{reason.text}</p>)}</div></div><p className="notice">{teaching.uncertainty.text}</p></section>}
+      {teaching && <section className="panel teaching-panel"><div className="panel-heading"><div><p className="eyebrow">05 · TEACHING</p><h2>证据约束的教学解释</h2></div><span className="source-tag">{teachingMeta?.provider === "external_llm" ? (teachingMeta.degraded ? `external_llm · degraded(本地回退) · ${teachingMeta.teacherVersion}` : `external_llm · ${teachingMeta.teacherVersion}`) : `principle_only · ${teaching.explanationDepth}`}</span></div><p className="teaching-summary">{teaching.summary.text}</p><div className="teaching-columns"><div><p className="eyebrow">RECOMMENDED ACTIONS</p>{teaching.recommendedActions.map((action) => <p className="result-line" key={action.action}><strong>{action.action}</strong>{action.frequency ? ` · ${action.frequency}` : ""}</p>)}</div><div><p className="eyebrow">KEY REASONS</p>{teaching.keyReasons.map((reason) => <p className="muted" key={reason.text}>{reason.text}</p>)}</div></div>{teaching.conceptTags?.length ? <p className="muted small">概念：{teaching.conceptTags.join(" · ")}</p> : null}{teaching.followUpQuestion ? <p className="notice">追问：{teaching.followUpQuestion}</p> : null}<p className="notice">{teaching.uncertainty.text}</p></section>}
+
+      <section className="panel solve-panel"><div className="panel-heading"><div><p className="eyebrow">06 · SOLVER</p><h2>Solver 策略求解</h2></div><span className="source-tag">solver_backed{solveJob ? ` · ${solveJob.status}` : ""}</span></div>{!solveJob ? <div className="action-buttons"><button onClick={() => void submitSolve()} disabled={busy || !scenario.heroRange || !scenario.villainRange}>提交 Solver 求解（独立容器）</button><p className="muted small">需要 Hero 与 Villain 范围（用上方范围面板选择默认范围或手动输入）。求解约 1–3 分钟。</p></div> : <div>{solveJob.status === "solved" && solveJob.result?.metadata ? <div className="teaching-columns"><div><p className="eyebrow">求解质量</p><p className="result-line"><strong>exploitability</strong> {solveJob.result.metadata.exploitabilityChips.toFixed(3)} chips</p><p className="result-line"><strong>耗时</strong> {(solveJob.result.metadata.solveTimeMs / 1000).toFixed(1)}s</p><p className="result-line"><strong>迭代</strong> {solveJob.result.metadata.maxIterations}</p><p className="result-line"><strong>引擎</strong> {solveJob.result.metadata.solver} {solveJob.result.metadata.version}</p></div><div><p className="eyebrow">OOP 主导动作</p>{(() => { const primary = solvePrimary(solveJob.result?.root); return primary ? <p className="result-line"><strong>{primary.action}</strong> · {primary.frequency.toFixed(3)}</p> : <p className="muted">—</p>; })()}<p className="eyebrow">IP 响应主导动作</p>{(() => { const primary = solvePrimary(solveJob.result?.responseNode); return primary ? <p className="result-line"><strong>{primary.action}</strong> · {primary.frequency.toFixed(3)}</p> : <p className="muted">—</p>; })()}<p className="eyebrow">Hero 手牌（{scenario.heroHoleCards?.join(" ")}）</p>{(() => { const combo = solveHeroCombo(solveJob.result?.root, scenario.heroHoleCards ?? []) ?? solveHeroCombo(solveJob.result?.responseNode, scenario.heroHoleCards ?? []); return combo ? <p className="result-line"><strong>{Object.entries(combo.strategy).sort((a, b) => b[1] - a[1])[0][0]}</strong> · {Object.entries(combo.strategy).sort((a, b) => b[1] - a[1])[0][1].toFixed(3)} · EV {combo.ev.toFixed(1)}</p> : <p className="muted">手牌不在当前求解范围中</p>; })()}</div></div> : ["queued", "running", "cancellation_requested"].includes(solveJob.status) ? <p className="muted">求解进行中（独立 sidecar 容器）…</p> : solveJob.error ? <p className="warning">{solveJob.error}</p> : <p className="muted">状态：{solveJob.status}</p>}</div>}</section>
 
       {practice && <section className="panel practice-panel"><div className="panel-heading"><div><p className="eyebrow">06 · PRACTICE</p><h2>验证练习</h2></div><span className="source-tag">validated</span></div><p className="teaching-summary">{practice.prompt}</p><p className="muted small">概念：{practice.conceptTags.join(" · ")}</p><div className="action-buttons">{(state?.legalActions.actions ?? ["check", "call", "fold"]).filter((action) => ["check", "call", "fold", "bet", "raise_to", "all_in"].includes(action)).map((action) => <button key={action} onClick={() => void answerPractice(action)} disabled={busy}>{action}</button>)}</div>{practiceOutcome && <div className={`practice-outcome ${practiceOutcome.attempt.correct ? "correct" : "incorrect"}`}><strong>{practiceOutcome.attempt.correct ? "Correct" : "Review"}</strong><span>{practiceOutcome.explanation}</span><small>证据：{practiceOutcome.evidenceReferences.map((reference) => reference.evidenceId).join("、")}</small></div>}</section>}
 
