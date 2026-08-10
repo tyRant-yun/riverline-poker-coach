@@ -24,6 +24,18 @@ cd C:\Users\Administrator\Documents\ChatGPT\德州扑克
 py -3.13 -m uvicorn poker_coach.api.app:app --app-dir backend --reload
 ```
 
+**环境变量配置**：仓库根目录提供 `.env.example`（含全部可配置项与注释）。复制为 `.env` 并按需填写即可，应用启动时自动加载（已设置的环境变量优先）：
+
+```powershell
+Copy-Item .env.example .env
+# 编辑 .env，填入 DeepSeek Key 即可唤醒外部教学 Agent：
+#   POKER_COACH_LLM_BASE_URL=https://api.deepseek.com/v1
+#   POKER_COACH_LLM_API_KEY=sk-...
+#   POKER_COACH_LLM_MODEL=deepseek-chat
+```
+
+`.env` 已被 `.gitignore` 排除，不会提交；`.env.example` 会随仓库维护。
+
 启动前端（另开终端）：
 
 ```powershell
@@ -66,6 +78,7 @@ curl http://127.0.0.1:8000/health
 - [策略匹配边界](docs/adr/0003-strategy-match-frequency-boundary.md)
 - [Solver 技术评估](docs/adr/0004-solver-evaluation.md)
 - [Solver 输出导入规范](docs/solver-import-spec.md)
+- [BYO DeepSeek Key 端到端加密设计](docs/design-bring-your-own-key.md)
 - [依赖与许可证清单](docs/dependency-inventory.md)
 - [开发规范](AGENT.MD)
 

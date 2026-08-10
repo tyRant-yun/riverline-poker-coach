@@ -15,10 +15,15 @@ from threading import Lock
 from uuid import uuid4
 from typing import Any
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
+
+# Load the repository-root .env file (if present) without overriding
+# variables that are already set in the environment.
+load_dotenv(override=False)
 
 from poker_coach.analysis import AnalysisCancelled, AnalysisTimeout, analyze_scenario, expand_range, range_spec_from_notation
 from poker_coach.analysis.models import AnalysisResult, InvalidAnalysisInput
@@ -54,8 +59,8 @@ class AppConfig:
     @classmethod
     def from_environment(cls) -> AppConfig:
         return cls(
-            app_version=getenv("POKER_COACH_APP_VERSION", cls.app_version),
-            analysis_version=getenv("POKER_COACH_ANALYSIS_VERSION", cls.analysis_version),
+            app_version=getenv("POKER_COACH_APP_VERSION") or cls.app_version,
+            analysis_version=getenv("POKER_COACH_ANALYSIS_VERSION") or cls.analysis_version,
             store_user_text=getenv("POKER_COACH_STORE_USER_TEXT", "0").lower()
             in {"1", "true", "yes"},
             max_request_bytes=_env_int(
@@ -70,9 +75,9 @@ class AppConfig:
             redis_url=getenv("POKER_COACH_REDIS_URL") or None,
             redis_worker_in_process=getenv("POKER_COACH_REDIS_WORKER_IN_PROCESS", "1").lower()
             in {"1", "true", "yes"},
-            llm_base_url=getenv("POKER_COACH_LLM_BASE_URL", cls.llm_base_url),
+            llm_base_url=getenv("POKER_COACH_LLM_BASE_URL") or cls.llm_base_url,
             llm_api_key=getenv("POKER_COACH_LLM_API_KEY") or None,
-            llm_model=getenv("POKER_COACH_LLM_MODEL", cls.llm_model),
+            llm_model=getenv("POKER_COACH_LLM_MODEL") or cls.llm_model,
             llm_timeout_seconds=_env_float(
                 "POKER_COACH_LLM_TIMEOUT_SECONDS", cls.llm_timeout_seconds, minimum=1.0
             ),
@@ -960,7 +965,7 @@ def _timeout_query(request: Request, max_timeout_seconds: float = 120.0) -> floa
 
 def _env_int(name: str, default: int, *, minimum: int) -> int:
     raw = getenv(name)
-    if raw is None:
+    if not raw:
         return default
     try:
         value = int(raw)
@@ -973,13 +978,13 @@ def _env_int(name: str, default: int, *, minimum: int) -> int:
 
 def _env_float(name: str, default: float, *, minimum: float) -> float:
     raw = getenv(name)
-    if raw is None:
+    if not raw:
         return default
     try:
         value = float(raw)
     except ValueError as exc:
         raise ValueError(f"{name} must be numeric") from exc
-    if value < minimum:
+    if not math.isfinite(value) or value < minimum:
         raise ValueError(f"{name} must be >= {minimum}")
     return value
 
