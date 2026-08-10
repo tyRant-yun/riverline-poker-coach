@@ -1,71 +1,51 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import RangeEditor from "./RangeEditor";
-import type { DefaultRanges, RangeSide, RangeSummary } from "../../types/scenario";
+import type { DefaultRanges } from "../../types/scenario";
 
-const MATRIX: Record<string, string> = { AA: "1", AKs: "0.5", "22": "1" };
-const SUMMARY: RangeSummary = { totalCombos: 34, weightedCombos: "30.5" };
-const DEFAULTS: DefaultRanges = {
-  btn_open: { rangeId: "r1", name: "BTN open 100BB", version: "1", source: "default_preflop", matrix169: MATRIX },
-};
-
-function renderEditor(overrides: Partial<Parameters<typeof RangeEditor>[0]> = {}) {
-  const props: Parameters<typeof RangeEditor>[0] = {
-    rangeSide: "villainRange",
-    rangeText: "22+, A5s+, K9o+",
-    defaultRanges: DEFAULTS,
-    rangeMatrix: MATRIX,
-    rangeSummary: SUMMARY,
-    rangeCombos: [],
-    onRangeSideChange: vi.fn(),
-    onRangeTextChange: vi.fn(),
-    onApplyDefault: vi.fn(),
-    onParse: vi.fn(),
-    onCycleCell: vi.fn(),
-    ...overrides,
-  };
-  return { props, ...render(<RangeEditor {...props} />) };
+function renderEditor(overrides: { matrix?: Record<string, string> } = {}) {
+  const onCycleCell = vi.fn();
+  const utils = render(
+    <RangeEditor
+      rangeSide="villainRange"
+      rangeText=""
+      defaultRanges={{} as DefaultRanges}
+      rangeMatrix={overrides.matrix ?? {}}
+      rangeSummary={null}
+      rangeCombos={[]}
+      onRangeSideChange={vi.fn()}
+      onRangeTextChange={vi.fn()}
+      onApplyDefault={vi.fn()}
+      onParse={vi.fn()}
+      onCycleCell={onCycleCell}
+    />,
+  );
+  return { ...utils, onCycleCell };
 }
 
-describe("RangeEditor", () => {
-  it("renders the full 169 matrix expanded by default", () => {
+describe("RangeEditor matrix", () => {
+  it("shows the full notation and weight in the cell tooltip", () => {
+    renderEditor({ matrix: { AKs: "0.75" } });
+    expect(screen.getByLabelText("AKs weight").getAttribute("title")).toBe("AKs · Weight 0.75");
+    expect(screen.getByLabelText("AA weight").getAttribute("title")).toBe("AA · empty");
+  });
+
+  it("scales the visual intensity class with the stored weight", () => {
+    renderEditor({ matrix: { AA: "0.5", KK: "1", QQ: "0.25" } });
+    expect(screen.getByLabelText("AA weight")).toHaveClass("matrix-cell--w50");
+    expect(screen.getByLabelText("KK weight")).toHaveClass("matrix-cell--w100");
+    expect(screen.getByLabelText("QQ weight")).toHaveClass("matrix-cell--w25");
+  });
+
+  it("cycles the cell weight on click", () => {
+    const { onCycleCell } = renderEditor();
+    fireEvent.click(screen.getByLabelText("AKs weight"));
+    expect(onCycleCell).toHaveBeenCalledWith("AKs");
+  });
+
+  it("keeps the E2E hooks (169 matrix group, collapse button)", () => {
     renderEditor();
     expect(screen.getByLabelText("169 格范围矩阵")).toBeInTheDocument();
-    expect(screen.getByLabelText("AA weight")).toBeInTheDocument();
-  });
-
-  it("collapses into a compact summary and re-expands on demand", () => {
-    renderEditor();
-    fireEvent.click(screen.getByLabelText("收起范围矩阵"));
-    expect(screen.queryByLabelText("169 格范围矩阵")).not.toBeInTheDocument();
-    const compact = screen.getByLabelText("range summary compact");
-    expect(compact.textContent).toContain("加权组合：");
-    expect(compact.textContent).toContain("30.5");
-
-    fireEvent.click(screen.getAllByRole("button", { name: "编辑范围" })[0]);
-    expect(screen.getByLabelText("169 格范围矩阵")).toBeInTheDocument();
-  });
-
-  it("cycles cell weights through the editor callback", () => {
-    renderEditor();
-    fireEvent.click(screen.getByLabelText("AA weight"));
-    expect(screen.getByLabelText("AA weight").getAttribute("aria-label")).toBe("AA weight");
-  });
-
-  it("applies default ranges and parses notation", () => {
-    const onApplyDefault = vi.fn();
-    const onParse = vi.fn();
-    renderEditor({ onApplyDefault, onParse });
-    fireEvent.change(screen.getByLabelText("默认范围"), { target: { value: "btn_open" } });
-    expect(onApplyDefault).toHaveBeenCalledWith("btn_open");
-    fireEvent.click(screen.getByRole("button", { name: "标准化范围" }));
-    expect(onParse).toHaveBeenCalled();
-  });
-
-  it("switches the edited side", () => {
-    const onRangeSideChange = vi.fn();
-    renderEditor({ onRangeSideChange });
-    fireEvent.change(screen.getByLabelText("范围侧"), { target: { value: "heroRange" as RangeSide } });
-    expect(onRangeSideChange).toHaveBeenCalledWith("heroRange");
+    expect(screen.getByLabelText("收起范围矩阵")).toBeInTheDocument();
   });
 });

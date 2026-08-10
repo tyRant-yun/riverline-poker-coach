@@ -4,6 +4,8 @@
 
 import type { CSSProperties } from "react";
 import type { SeatViewModel } from "../../types/poker";
+import type { DisplayUnit } from "../../lib/poker/format";
+import { formatAmount } from "../../lib/poker/format";
 import Board from "./Board";
 import PokerSeat from "./PokerSeat";
 
@@ -11,6 +13,9 @@ type Props = {
   seats: SeatViewModel[];
   board: readonly (string | null | undefined)[];
   pot: number | null;
+  /** Display unit for the pot / stacks / bets (default: big blinds). */
+  unit?: DisplayUnit;
+  bigBlind?: number;
 };
 
 /** Ellipse placement as felt-fraction percentages; hero at bottom center. */
@@ -18,28 +23,35 @@ function seatStyle(index: number, total: number, heroIndex: number): CSSProperti
   const heroAngle = Math.PI / 2; // screen y grows downward -> bottom center
   const step = (2 * Math.PI) / Math.max(total, 1);
   const angle = heroAngle + (index - heroIndex) * step;
-  const radiusX = 0.34;
-  const radiusY = 0.36;
+  const radiusX = 0.36;
+  const radiusY = 0.35;
   return {
     left: `${50 + radiusX * 100 * Math.cos(angle)}%`,
     top: `${50 + radiusY * 100 * Math.sin(angle)}%`,
   };
 }
 
-export default function PokerTable({ seats, board, pot }: Props) {
+export default function PokerTable({
+  seats,
+  board,
+  pot,
+  unit = "bb",
+  bigBlind = 100,
+}: Props) {
   const heroIndex = Math.max(
     0,
     seats.findIndex((seat) => seat.isHero),
   );
   return (
     <div className="felt" data-testid="poker-table">
-      <div className="pot-label">
-        POT <strong>{pot ?? "—"}</strong>
+      <div className="pot-label" title={pot == null ? undefined : `${pot} chips`}>
+        <span>POT</span>
+        <strong>{pot == null ? "—" : formatAmount(pot, bigBlind, unit)}</strong>
       </div>
       <Board cards={board} />
       {seats.map((seat, index) => (
         <div className="seat-anchor" style={seatStyle(index, seats.length, heroIndex)} key={seat.seatId}>
-          <PokerSeat seat={seat} />
+          <PokerSeat seat={seat} unit={unit} bigBlind={bigBlind} />
         </div>
       ))}
     </div>

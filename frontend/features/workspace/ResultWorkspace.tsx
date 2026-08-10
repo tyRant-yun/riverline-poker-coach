@@ -13,6 +13,7 @@ import type {
   TeachingResponse,
 } from "../../types/api";
 import type { SeatSpec } from "../../types/scenario";
+import type { SolveGateReasons } from "../../lib/poker/solve";
 import AnalysisPanel from "../analysis/AnalysisPanel";
 import TeachingPanel from "../coach/TeachingPanel";
 import PracticePanel from "../practice/PracticePanel";
@@ -50,6 +51,7 @@ type Props = {
   heroHoleCards: string[];
   seats: SeatSpec[];
   heroSeat: number;
+  solveGate?: SolveGateReasons | null;
   onSolveSubmit: () => void;
   onSolveCancel: () => void;
   onPracticeAnswer: (action: string) => void;
@@ -71,6 +73,7 @@ export default function ResultWorkspace({
   heroHoleCards,
   seats,
   heroSeat,
+  solveGate,
   onSolveSubmit,
   onSolveCancel,
   onPracticeAnswer,
@@ -125,6 +128,7 @@ export default function ResultWorkspace({
             solveJob={solveJob}
             canSubmit={canSubmitSolve}
             heroHoleCards={heroHoleCards}
+            gate={solveGate}
             onSubmit={onSolveSubmit}
             onCancel={onSolveCancel}
           />

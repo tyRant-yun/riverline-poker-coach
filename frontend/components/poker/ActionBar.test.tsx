@@ -48,7 +48,47 @@ describe("ActionBar", () => {
         onDeal={() => {}}
       />,
     );
+    // BB mode keeps the chip amount in the accessible name (E2E "Call 50"
+    // hook) while displaying the big-blind figure visually.
+    expect(screen.getByRole("button", { name: /Call 50/ })).toBeInTheDocument();
+    expect(screen.getByText("0.5 BB")).toBeInTheDocument();
+    expect(screen.getByText("50 chips")).toBeInTheDocument();
+  });
+
+  it("shows plain chip amounts in chips mode", () => {
+    render(
+      <ActionBar
+        legal={{ ...LEGAL, actions: ["call"], callAmount: 50, actorSeat: 0 }}
+        currentStreet="preflop"
+        busy={false}
+        boardLength={0}
+        raiseAmount=""
+        unit="chips"
+        onRaiseAmountChange={() => {}}
+        onAction={() => {}}
+        onDeal={() => {}}
+      />,
+    );
     expect(screen.getByRole("button", { name: "Call 50" })).toBeInTheDocument();
+    expect(screen.queryByText("50 chips")).not.toBeInTheDocument();
+  });
+
+  it("shows the pot and sizing hint in big blinds by default", () => {
+    render(
+      <ActionBar
+        legal={LEGAL}
+        currentStreet="flop"
+        busy={false}
+        boardLength={3}
+        raiseAmount=""
+        pot={150}
+        onRaiseAmountChange={() => {}}
+        onAction={() => {}}
+        onDeal={() => {}}
+      />,
+    );
+    expect(screen.getByText("1.5 BB")).toBeInTheDocument(); // pot
+    expect(screen.getByText("= 2 BB")).toBeInTheDocument(); // sizing hint (min raise 200)
   });
 
   it("emits the action with the requested amount", () => {

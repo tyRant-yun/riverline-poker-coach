@@ -61,4 +61,36 @@ describe("SolverWorkspace assumptions", () => {
     );
     expect(screen.queryByText(/bunching_ignored/)).not.toBeInTheDocument();
   });
+
+  it("explains which solve gate conditions fail when submit is disabled", () => {
+    render(
+      <SolverWorkspace
+        solveJob={null}
+        canSubmit={false}
+        heroHoleCards={[]}
+        gate={{ postflop: true, twoActive: false, ranges: false }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const gate = screen.getByLabelText("solver 提交条件");
+    expect(gate).toBeInTheDocument();
+    expect(gate.textContent).toContain("✓ 翻后节点");
+    expect(gate.textContent).toContain("✗ 仅剩 2 位 active players");
+    expect(gate.textContent).toContain("✗ 两位玩家范围就绪");
+  });
+
+  it("hides the gate list once submission is allowed", () => {
+    render(
+      <SolverWorkspace
+        solveJob={null}
+        canSubmit={true}
+        heroHoleCards={[]}
+        gate={{ postflop: true, twoActive: true, ranges: true }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText("solver 提交条件")).not.toBeInTheDocument();
+  });
 });

@@ -38,9 +38,11 @@ import {
   solverApi,
 } from "../lib/api/client";
 import { notationFromMatrix, notationFromMatrixExplicit } from "../lib/poker/matrix";
-import { canSubmitSolve as solveGate } from "../lib/poker/solve";
+import { canSubmitSolve as solveGate, solveGateReasons } from "../lib/poker/solve";
+import type { DisplayUnit } from "../lib/poker/format";
 import { buildSeatViewModels } from "../lib/poker/table";
 import { heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
+import { applySolvePoll } from "../lib/solver/poll";
 
 import AppShell, { type WorkspaceView } from "../components/AppShell";
 import PokerTable from "../components/poker/PokerTable";
@@ -109,6 +111,7 @@ export default function Home() {
   const [raiseAmount, setRaiseAmount] = useState<number | "">("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("先输入牌面，再使用合法动作按钮推进牌局。");
+  const [displayUnit, setDisplayUnit] = useState<DisplayUnit>("bb");
   const [activeView, setActiveView] = useState<WorkspaceView>("handlab");
   const [resultTab, setResultTab] = useState<ResultTab>("evidence");
   // Generation token that supersedes stale solver poll loops (prevents
@@ -160,6 +163,10 @@ export default function Home() {
     : null;
   const currentStreet = pendingDealStreet ?? state?.street ?? scenario.decisionPoint.street;
   const legal = state?.legalActions;
+  const actorPosition =
+    legal?.actorSeat != null
+      ? scenario.seats.find((seat) => seat.seatId === legal.actorSeat)?.position ?? null
+      : null;
   const boardInput = useMemo(() => [...scenario.board, "", "", "", "", ""].slice(0, 5), [scenario.board]);
 
   const tableSeats = useMemo<SeatViewModel[]>(
@@ -682,13 +689,18 @@ export default function Home() {
       try {
         const payload = await solverApi.get(jobId);
         if (solvePollToken.current !== token) return;
-        setSolveJob({
-          jobId,
-          status: payload.status,
-          error: payload.error,
-          executionMs: payload.executionMs,
-          result: payload.result,
-        });
+        // Merge onto the previous job instead of replacing it: the submit
+        // response's spot (assumptions -> bunching_ignored) must survive
+        // every poll cycle.
+        setSolveJob((previous) =>
+          applySolvePoll(previous, {
+            jobId,
+            status: payload.status,
+            error: payload.error,
+            executionMs: payload.executionMs,
+            result: payload.result,
+          }),
+        );
         if (["solved", "failed", "cancelled"].includes(payload.status)) {
           setMessage(
             payload.status === "solved"
@@ -737,6 +749,7 @@ export default function Home() {
   // backend re-validates every spot; this only blocks obviously invalid
   // submissions.
   const canSubmitSolve = solveGate(scenario, state, currentStreet, busy);
+  const solveReasons = solveGateReasons(scenario, state, currentStreet);
 
   const handLab = (
     <>
@@ -765,6 +778,7 @@ export default function Home() {
             compareLeft={compareLeft}
             compareRight={compareRight}
             comparison={comparison}
+            activeScenarioId={activeScenarioId}
             onRefresh={() => void loadSavedScenarios()}
             onLoad={loadSaved}
             onLoadHistory={(record) => void loadAnalysisHistory(record)}
@@ -790,13 +804,44 @@ export default function Home() {
 
         <main className="table-area">
           <section className="panel table-panel">
-            <PokerTable seats={tableSeats} board={scenario.board} pot={state?.pot ?? null} />
+            <div className="table-toolbar">
+              <span className="muted small">金额单位</span>
+              <div className="unit-toggle" role="group" aria-label="金额单位">
+                <button
+                  type="button"
+                  className={displayUnit === "bb" ? "unit-toggle__active" : ""}
+                  onClick={() => setDisplayUnit("bb")}
+                  aria-pressed={displayUnit === "bb"}
+                >
+                  BB
+                </button>
+                <button
+                  type="button"
+                  className={displayUnit === "chips" ? "unit-toggle__active" : ""}
+                  onClick={() => setDisplayUnit("chips")}
+                  aria-pressed={displayUnit === "chips"}
+                >
+                  Chips
+                </button>
+              </div>
+            </div>
+            <PokerTable
+              seats={tableSeats}
+              board={scenario.board}
+              pot={state?.pot ?? null}
+              unit={displayUnit}
+              bigBlind={scenario.bigBlind}
+            />
             <ActionBar
               legal={legal ?? null}
               currentStreet={currentStreet}
               busy={busy}
               boardLength={scenario.board.length}
               raiseAmount={raiseAmount}
+              pot={state?.pot ?? null}
+              actorPosition={actorPosition}
+              unit={displayUnit}
+              bigBlind={scenario.bigBlind}
               onRaiseAmountChange={setRaiseAmount}
               onAction={(actionType, requestedAmount) => void appendAction(actionType, requestedAmount)}
               onDeal={(street) => void deal(street)}
@@ -853,6 +898,7 @@ export default function Home() {
         heroHoleCards={heroCards(scenario)}
         seats={scenario.seats}
         heroSeat={scenario.heroSeat}
+        solveGate={solveReasons}
         onSolveSubmit={() => void submitSolve()}
         onSolveCancel={() => void cancelSolve()}
         onPracticeAnswer={(action) => void answerPractice(action)}
@@ -863,12 +909,19 @@ export default function Home() {
   const solverView = (
     <div className="focused-view">
       <section className="panel table-panel">
-        <PokerTable seats={tableSeats} board={scenario.board} pot={state?.pot ?? null} />
+        <PokerTable
+          seats={tableSeats}
+          board={scenario.board}
+          pot={state?.pot ?? null}
+          unit={displayUnit}
+          bigBlind={scenario.bigBlind}
+        />
       </section>
       <SolverWorkspace
         solveJob={solveJob}
         canSubmit={canSubmitSolve}
         heroHoleCards={heroCards(scenario)}
+        gate={solveReasons}
         onSubmit={() => void submitSolve()}
         onCancel={() => void cancelSolve()}
       />
@@ -906,6 +959,7 @@ export default function Home() {
         compareLeft={compareLeft}
         compareRight={compareRight}
         comparison={comparison}
+        activeScenarioId={activeScenarioId}
         onRefresh={() => void loadSavedScenarios()}
         onLoad={loadSaved}
         onLoadHistory={(record) => void loadAnalysisHistory(record)}

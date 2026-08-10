@@ -9,6 +9,34 @@ import type { Scenario } from "../../types/scenario";
 
 const POSTFLOP_STREETS = new Set(["flop", "turn", "river"]);
 
+export type SolveGateReasons = {
+  postflop: boolean;
+  twoActive: boolean;
+  ranges: boolean;
+};
+
+/** Per-condition check for the solve gate (drives the disabled explanation). */
+export function solveGateReasons(
+  scenario: Scenario,
+  state: FinalState | null,
+  street: string,
+): SolveGateReasons {
+  const foldedSeats = state?.foldedSeats ?? [];
+  const activeSeats = scenario.seats
+    .map((seat) => seat.seatId)
+    .filter((seatId) => !foldedSeats.includes(seatId));
+  const rangesBySeat = scenario.rangesBySeat ?? {};
+  const ranges =
+    Boolean(scenario.heroRange && scenario.villainRange) ||
+    (Object.keys(rangesBySeat).length >= 2 &&
+      activeSeats.every((seatId) => Boolean(rangesBySeat[String(seatId)])));
+  return {
+    postflop: POSTFLOP_STREETS.has(street),
+    twoActive: activeSeats.length === 2,
+    ranges,
+  };
+}
+
 export function canSubmitSolve(
   scenario: Scenario,
   state: FinalState | null,
@@ -16,16 +44,6 @@ export function canSubmitSolve(
   busy: boolean,
 ): boolean {
   if (busy) return false;
-  if (!POSTFLOP_STREETS.has(street)) return false;
-  const foldedSeats = state?.foldedSeats ?? [];
-  const activeSeats = scenario.seats
-    .map((seat) => seat.seatId)
-    .filter((seatId) => !foldedSeats.includes(seatId));
-  if (activeSeats.length !== 2) return false;
-  if (scenario.heroRange && scenario.villainRange) return true;
-  const rangesBySeat = scenario.rangesBySeat ?? {};
-  return (
-    Object.keys(rangesBySeat).length >= 2 &&
-    activeSeats.every((seatId) => Boolean(rangesBySeat[String(seatId)]))
-  );
+  const reasons = solveGateReasons(scenario, state, street);
+  return reasons.postflop && reasons.twoActive && reasons.ranges;
 }

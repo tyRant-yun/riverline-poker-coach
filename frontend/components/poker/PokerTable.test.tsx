@@ -9,11 +9,18 @@ const POSITIONS = ["button", "small_blind", "big_blind", "utg", "utg+1", "mp", "
 
 describe("PokerTable", () => {
   it("renders two seats for a HU fixture", () => {
-    render(<PokerTable seats={seatsFixture(2, 0, 1)} board={BOARD_3} pot={200} />);
+    render(<PokerTable seats={seatsFixture(2, 0, 1)} board={BOARD_3} pot={200} unit="chips" />);
     expect(screen.getByLabelText("seat 0 button")).toBeInTheDocument();
     expect(screen.getByLabelText("seat 1 small_blind")).toBeInTheDocument();
     expect(screen.getAllByLabelText(/board card/)).toHaveLength(3);
     expect(screen.getByText("200")).toBeInTheDocument();
+  });
+
+  it("shows the pot and stacks in big blinds by default", () => {
+    render(<PokerTable seats={seatsFixture(2, 0)} board={BOARD_3} pot={200} />);
+    expect(screen.getByText("2 BB")).toBeInTheDocument();
+    // Seat stacks format in BB too (9900 -> 99 BB).
+    expect(screen.getByText("99 BB")).toBeInTheDocument();
   });
 
   it("renders six seats without losing the hero anchor", () => {

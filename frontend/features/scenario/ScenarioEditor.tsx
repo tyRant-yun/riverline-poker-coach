@@ -135,7 +135,7 @@ export default function ScenarioEditor({
               <input
                 value={villainUnknown ? "" : villainHoleCards.join(" ")}
                 disabled={villainUnknown}
-                placeholder={villainUnknown ? "对手手牌未知（复盘模式）" : undefined}
+                placeholder={villainUnknown ? "未知" : undefined}
                 onChange={(event) =>
                   onUpdateScenario({
                     villainHoleCards: event.target.value.split(/\s+/).filter(Boolean).slice(0, 2),
@@ -157,20 +157,23 @@ export default function ScenarioEditor({
         )}
       </div>
       {isHeadsUp && (
-        <label className="hero-only-toggle">
-          <input
-            type="checkbox"
-            checked={heroOnlyMode}
-            onChange={(event) => {
-              const enabled = event.target.checked;
-              setHeroOnlyMode(enabled);
-              if (enabled) {
-                onUpdateScenario({ villainHoleCards: undefined });
-              }
-            }}
-          />
-          复盘模式 · 只填自己的手牌（对手手牌未知）
-        </label>
+        <div className="review-mode">
+          <label className="hero-only-toggle">
+            <input
+              type="checkbox"
+              checked={heroOnlyMode}
+              onChange={(event) => {
+                const enabled = event.target.checked;
+                setHeroOnlyMode(enabled);
+                if (enabled) {
+                  onUpdateScenario({ villainHoleCards: undefined });
+                }
+              }}
+            />
+            复盘模式
+          </label>
+          <p className="muted small">对手手牌未知，只填写 Hero 手牌</p>
+        </div>
       )}
       <div className="settings-grid">
         <label>

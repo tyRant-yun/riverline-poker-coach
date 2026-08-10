@@ -1,6 +1,8 @@
 // Workspace actions: validate / analyze / teach / practice / save / import /
 // export plus the status notice. Extracted from the page monolith; state and
-// handlers stay in the workspace.
+// handlers stay in the workspace. Buttons are layered by weight: primary
+// (analyze), secondary (validate / teach), tertiary (practice / save),
+// utility (import / export JSON).
 
 import type { ChangeEvent } from "react";
 
@@ -36,7 +38,7 @@ export default function AnalyzeActions({
   onImportFile,
 }: Props) {
   return (
-    <section className="panel compact-panel">
+    <section className="panel compact-panel panel--subtle">
       <div className="panel-heading">
         <div>
           <p className="eyebrow">03 · ANALYZE</p>
@@ -44,7 +46,8 @@ export default function AnalyzeActions({
         </div>
         <span className="source-tag green">grounded</span>
       </div>
-      <p className="muted">编辑完成后重新分析。没有可靠策略数据时，结果只提供数学与原理层证据。</p>
+      <p className="muted small">分析只引用结构化 Evidence。</p>
+      <p className="muted small">缺少可靠策略数据时不会伪造频率。</p>
       <div className="teaching-controls">
         <label>
           教学深度
@@ -69,25 +72,25 @@ export default function AnalyzeActions({
         />
       </label>
       <div className="primary-actions">
-        <button onClick={onValidate} disabled={busy}>
-          校验场景
-        </button>
-        <button onClick={onAnalyze} disabled={busy}>
+        <button className="primary-button" onClick={onAnalyze} disabled={busy}>
           生成分析
         </button>
-        <button onClick={onTeach} disabled={busy}>
+        <button className="action-button" onClick={onValidate} disabled={busy}>
+          校验场景
+        </button>
+        <button className="action-button" onClick={onTeach} disabled={busy}>
           教学解释
         </button>
-        <button onClick={onPractice} disabled={busy}>
+        <button className="quiet-button" onClick={onPractice} disabled={busy}>
           生成练习
         </button>
-        <button className="secondary-button" onClick={onSave} disabled={busy}>
+        <button className="quiet-button" onClick={onSave} disabled={busy}>
           保存场景
         </button>
-        <button className="secondary-button" onClick={onExport} disabled={busy}>
+        <button className="quiet-button" onClick={onExport} disabled={busy}>
           导出 JSON
         </button>
-        <label className="secondary-button import-button">
+        <label className="quiet-button import-button">
           导入 JSON
           <input
             type="file"

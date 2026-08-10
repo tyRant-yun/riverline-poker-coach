@@ -5,6 +5,7 @@
 
 import { useMemo, useState } from "react";
 import type { SolveJob, SolverNodePayload } from "../../types/api";
+import type { SolveGateReasons } from "../../lib/poker/solve";
 import {
   ACTIVE_SOLVE_STATUSES,
   solveStatus,
@@ -19,6 +20,8 @@ type Props = {
   solveJob: SolveJob | null;
   canSubmit: boolean;
   heroHoleCards: string[];
+  /** Per-condition gate state, shown when submit is disabled. */
+  gate?: SolveGateReasons | null;
   onSubmit: () => void;
   onCancel: () => void;
 };
@@ -34,7 +37,7 @@ const MODE_OPTIONS: { id: StrategyGridMode; label: string }[] = [
   { id: "equity", label: "Equity" },
 ];
 
-export default function SolverWorkspace({ solveJob, canSubmit, heroHoleCards, onSubmit, onCancel }: Props) {
+export default function SolverWorkspace({ solveJob, canSubmit, heroHoleCards, gate, onSubmit, onCancel }: Props) {
   const [nodeId, setNodeId] = useState<"root" | "response">("root");
   const [mode, setMode] = useState<StrategyGridMode>("strategy");
   const [activeCell, setActiveCell] = useState<string | null>(null);
@@ -79,6 +82,19 @@ export default function SolverWorkspace({ solveJob, canSubmit, heroHoleCards, on
             需要两个仍在局中的玩家的范围（HU 用 Hero/Villain 范围，多人桌用 rangesBySeat）。求解约 1–3 分钟。
             {status !== "idle" && solveJob?.error ? ` · ${solveJob.error}` : ""}
           </p>
+          {gate && !canSubmit && (
+            <ul className="solve-gate" aria-label="solver 提交条件">
+              <li className={gate.postflop ? "solve-gate__ok" : "solve-gate__no"}>
+                {gate.postflop ? "✓" : "✗"} 翻后节点（flop / turn / river）
+              </li>
+              <li className={gate.twoActive ? "solve-gate__ok" : "solve-gate__no"}>
+                {gate.twoActive ? "✓" : "✗"} 仅剩 2 位 active players
+              </li>
+              <li className={gate.ranges ? "solve-gate__ok" : "solve-gate__no"}>
+                {gate.ranges ? "✓" : "✗"} 两位玩家范围就绪
+              </li>
+            </ul>
+          )}
         </div>
       ) : status === "queued" || status === "running" || status === "cancellation_requested" ? (
         <div className="solve-progress">

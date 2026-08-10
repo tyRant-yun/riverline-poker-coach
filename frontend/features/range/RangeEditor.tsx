@@ -44,6 +44,7 @@ export default function RangeEditor({
           <h2>{rangeSide === "heroRange" ? "Hero" : "Villain"} 范围</h2>
         </div>
         <div className="heading-actions">
+          <span className="source-tag">假设</span>
           {expanded ? (
             <button className="text-button" onClick={() => setExpanded(false)} aria-label="收起范围矩阵">
               收起矩阵
@@ -53,7 +54,6 @@ export default function RangeEditor({
               编辑范围
             </button>
           )}
-          <span className="source-tag">假设</span>
         </div>
       </div>
       {!expanded ? (
@@ -115,12 +115,13 @@ export default function RangeEditor({
           RANKS.map((column, columnIndex) => {
             const cell = matrixCell(rowIndex, columnIndex);
             const weight = rangeMatrix[cell];
+            const weightClass = weight ? `matrix-cell--w${Math.round(Number(weight) * 100)}` : "";
             return (
               <button
                 type="button"
-                className={`matrix-cell ${weight ? "active" : ""}`}
+                className={`matrix-cell ${weight ? "active" : ""} ${weightClass}`}
                 key={cell}
-                title={weight ? `${cell} · ${weight}` : `${cell} · empty`}
+                title={weight ? `${cell} · Weight ${weight}` : `${cell} · empty`}
                 aria-label={`${cell} weight`}
                 onClick={() => onCycleCell(cell)}
               >

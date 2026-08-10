@@ -54,7 +54,7 @@ describe("ScenarioEditor review mode (hero-only)", () => {
     fireEvent.click(screen.getByLabelText(/复盘模式/));
     expect(onUpdateScenario).toHaveBeenCalledWith({ villainHoleCards: undefined });
     expect(screen.getByLabelText("Villain 手牌")).toBeDisabled();
-    expect(screen.getByPlaceholderText("对手手牌未知（复盘模式）")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("未知")).toBeInTheDocument();
   });
 
   it("keeps keyboard input working for the hero hand", () => {
