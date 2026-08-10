@@ -55,7 +55,10 @@ class AppConfig:
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str | None = None
     llm_model: str = "gpt-4o-mini"
-    llm_timeout_seconds: float = 60.0
+    # External teaching models can take 60-120s on large evidence prompts
+    # (json_object mode), so the default must exceed the old 60s ceiling
+    # that made the teacher randomly degrade to the local template.
+    llm_timeout_seconds: float = 180.0
 
     @classmethod
     def from_environment(cls) -> AppConfig:

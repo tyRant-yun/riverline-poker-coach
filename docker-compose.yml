@@ -39,6 +39,14 @@ services:
       POKER_COACH_DATABASE_URL: postgresql://coach:coach@postgres:5432/coach
       POKER_COACH_REDIS_URL: redis://redis:6379/0
       POKER_COACH_REDIS_WORKER_IN_PROCESS: "0"
+      # Teaching agent: the evidence-bound external LLM teacher activates
+      # only when a key is present. Values are interpolated from the compose
+      # project .env (or the shell environment); absent -> empty string ->
+      # the local principle-only teacher stays the fallback (unchanged).
+      POKER_COACH_LLM_API_KEY: ${POKER_COACH_LLM_API_KEY:-}
+      POKER_COACH_LLM_BASE_URL: ${POKER_COACH_LLM_BASE_URL:-}
+      POKER_COACH_LLM_MODEL: ${POKER_COACH_LLM_MODEL:-}
+      POKER_COACH_LLM_TIMEOUT_SECONDS: ${POKER_COACH_LLM_TIMEOUT_SECONDS:-180}
     ports:
       - "8000:8000"
     depends_on:
