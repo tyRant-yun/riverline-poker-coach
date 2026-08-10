@@ -243,10 +243,22 @@ class TestHonestBoundaries:
         assert set(state.legal_actions.actions) == {"raise_to", "fold", "call", "all_in"}
 
     def test_multiway_solver_spot_is_unsupported(self):
+        # A flop with three live players is not a heads-up decision point.
         scenario = v2_scenario(
-            8,
+            6,
+            heroSeat=2,
+            knownHoleCardsBySeat={2: ["As", "Kd"]},
             board=["2c", "7d", "Jh"],
-            decisionPoint={"street": "flop", "actorSeat": 0, "afterSequence": 0},
+            actionHistory=[
+                {"actionId": "a1", "sequence": 1, "street": "preflop", "actorSeat": 3, "actionType": "raise_to", "amount": 300, "amountType": "to"},
+                {"actionId": "a2", "sequence": 2, "street": "preflop", "actorSeat": 4, "actionType": "call", "amount": 300, "amountType": "cost"},
+                {"actionId": "a3", "sequence": 3, "street": "preflop", "actorSeat": 5, "actionType": "fold"},
+                {"actionId": "a4", "sequence": 4, "street": "preflop", "actorSeat": 0, "actionType": "fold"},
+                {"actionId": "a5", "sequence": 5, "street": "preflop", "actorSeat": 1, "actionType": "fold"},
+                {"actionId": "a6", "sequence": 6, "street": "preflop", "actorSeat": 2, "actionType": "call", "amount": 200, "amountType": "cost"},
+                {"actionId": "a7", "sequence": 7, "street": "flop", "actorSeat": 1, "actionType": "deal_flop"},
+            ],
+            decisionPoint={"street": "flop", "actorSeat": 2, "afterSequence": 7},
         )
         with pytest.raises(SolverUnsupportedError, match="heads-up"):
             build_spot(scenario)
@@ -347,9 +359,20 @@ class TestApiContract:
 
         client = TestClient(create_app())
         payload = v2_scenario(
-            8,
+            6,
+            heroSeat=2,
+            knownHoleCardsBySeat={2: ["As", "Kd"]},
             board=["2c", "7d", "Jh"],
-            decisionPoint={"street": "flop", "actorSeat": 0, "afterSequence": 0},
+            actionHistory=[
+                {"actionId": "a1", "sequence": 1, "street": "preflop", "actorSeat": 3, "actionType": "raise_to", "amount": 300, "amountType": "to"},
+                {"actionId": "a2", "sequence": 2, "street": "preflop", "actorSeat": 4, "actionType": "call", "amount": 300, "amountType": "cost"},
+                {"actionId": "a3", "sequence": 3, "street": "preflop", "actorSeat": 5, "actionType": "fold"},
+                {"actionId": "a4", "sequence": 4, "street": "preflop", "actorSeat": 0, "actionType": "fold"},
+                {"actionId": "a5", "sequence": 5, "street": "preflop", "actorSeat": 1, "actionType": "fold"},
+                {"actionId": "a6", "sequence": 6, "street": "preflop", "actorSeat": 2, "actionType": "call", "amount": 200, "amountType": "cost"},
+                {"actionId": "a7", "sequence": 7, "street": "flop", "actorSeat": 1, "actionType": "deal_flop"},
+            ],
+            decisionPoint={"street": "flop", "actorSeat": 2, "afterSequence": 7},
         ).to_dict()
         response = client.post(
             "/v1/solve/jobs",

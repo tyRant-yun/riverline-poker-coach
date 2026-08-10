@@ -40,6 +40,9 @@ class SolverSpot(DomainModel):
     max_iterations: Annotated[int, Field(ge=1, le=50_000)] = 400
     target_exploitability_frac: Annotated[float, Field(gt=0.0, le=1.0)] = 0.005
     dump_response_to_action: Annotated[int, Field(ge=0)] = 1
+    # Explicit approximation flags (e.g. "bunching_ignored" when the spot is
+    # heads-up at a multiway table). Not part of the sidecar config payload.
+    assumptions: tuple[str, ...] = ()
 
 
 class SolveMetadata(DomainModel):

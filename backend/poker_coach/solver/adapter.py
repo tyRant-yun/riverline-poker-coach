@@ -79,17 +79,16 @@ def build_spot(
     max_iterations: int = 400,
     target_exploitability_frac: float = 0.005,
 ) -> SolverSpot:
-    """Map a postflop ScenarioSpec (plus ranges) to a normalized solver spot."""
+    """Map a postflop ScenarioSpec (plus ranges) to a normalized solver spot.
+
+    The sidecar is a heads-up postflop solver. A multiway table is solvable
+    when exactly two players remain at the decision point: the spot is built
+    from those two active players, and bunching effects (folded cards
+    influencing the remaining deck) are ignored as an explicit approximation.
+    """
     if scenario.decision_point.street not in (Street.FLOP, Street.TURN, Street.RIVER):
         raise SolverUnsupportedError(
             f"solver supports postflop only; got {scenario.decision_point.street.value}"
-        )
-    if scenario.table_size != 2:
-        # The sidecar is a heads-up postflop solver. A decision point with
-        # more than two active players is out of scope (multiway analysis is
-        # available, solver is not) — see Phase 8E for the HU bridge.
-        raise SolverUnsupportedError(
-            "solver supports heads-up decision points only; multiway spots are not solvable"
         )
     adapter = PokerKitAdapter()
     replay = replay or adapter.replay_to_decision(scenario)
@@ -97,9 +96,20 @@ def build_spot(
     if len(state.board) < 3:
         raise SolverUnsupportedError("solver requires at least a flop board")
 
-    oop_seat = 1 - scenario.button_seat if scenario.table_size == 2 else None
+    active_seats = [seat for seat in state.stacks if seat not in state.folded_seats]
+    if len(active_seats) != 2:
+        raise SolverUnsupportedError(
+            "solver supports heads-up decision points only; "
+            f"{len(active_seats)} active players remain (bunching effects are ignored "
+            "for the two-player spots)"
+        )
+
     hero_seat = scenario.hero_seat
-    villain_seat = 1 - hero_seat if scenario.table_size == 2 else None
+    # Postflop, the out-of-position player is the first active seat clockwise
+    # from the button (the button itself acts last, so it is never OOP).
+    n = scenario.table_size
+    candidates = [seat for seat in active_seats if seat != scenario.button_seat] or active_seats
+    oop_seat = min(candidates, key=lambda seat: (seat - scenario.button_seat) % n)
 
     hero_range = hero_range or scenario.hero_range
     villain_range = villain_range or scenario.villain_range
@@ -118,7 +128,14 @@ def build_spot(
         rake_rate = scenario.rake_config.percent_bps / 10_000.0
         rake_cap = float(scenario.rake_config.cap)
 
-    effective_stack = min(state.stacks.values())
+    # Effective stack covers only the two active players; folded short stacks
+    # must not drag the spot below the real remaining money.
+    effective_stack = min(state.stacks[seat] for seat in active_seats)
+    assumptions = (
+        ("bunching_ignored",)
+        if scenario.table_size > 2
+        else ()
+    )
 
     return SolverSpot(
         street=scenario.decision_point.street,
@@ -135,6 +152,7 @@ def build_spot(
         raise_sizes=raise_sizes,
         max_iterations=max_iterations,
         target_exploitability_frac=target_exploitability_frac,
+        assumptions=assumptions,
     )
 
 
