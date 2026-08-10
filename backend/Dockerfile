@@ -8,7 +8,12 @@ WORKDIR /app
 COPY pyproject.toml requirements.lock ./
 COPY poker_coach ./poker_coach
 
-RUN pip install --no-cache-dir ".[postgres,redis]"
+# docker CLI so the solver worker can spawn sidecar containers via the
+# mounted docker socket (Linux deployments; Windows dev runs the worker on the host)
+RUN pip install --no-cache-dir ".[postgres,redis]" \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker.io \
+    && rm -rf /var/lib/apt/lists/*
 
 EXPOSE 8000
 

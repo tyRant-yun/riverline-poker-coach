@@ -48,5 +48,21 @@ services:
       redis:
         condition: service_healthy
 
+  # Solver worker: consumes solver solve jobs and spawns the isolated
+  # poker-coach-sidecar container per job (AGPL engine, never in this repo).
+  # Requires the docker socket; on Windows local dev run the worker on the
+  # host instead: py -3.13 -m poker_coach.solver --redis-url redis://127.0.0.1:56379/0
+  solver-worker:
+    build:
+      context: ./backend
+    command: ["python", "-m", "poker_coach.solver", "--redis-url", "redis://redis:6379/0"]
+    environment:
+      POKER_COACH_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      redis:
+        condition: service_healthy
+
 volumes:
   pgdata:

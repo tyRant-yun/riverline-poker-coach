@@ -8,7 +8,8 @@ code. The contracts in ``types`` are the only boundary crossing it.
 
 from .adapter import build_spot, parse_result, range_to_string, spot_to_config_json
 from .cache import SolveCache, solve_hash
-from .client import SidecarClient
+from .client import SidecarClient, SolverCancelled
+from .jobs import SolverJobQueue, SolverQueueUnavailable
 from .types import (
     SolveMetadata,
     SolverHand,
@@ -17,6 +18,7 @@ from .types import (
     SolverUnsupportedError,
     SolveResult,
 )
+from .worker import SolverWorker
 
 __all__ = [
     "build_spot",
@@ -24,8 +26,12 @@ __all__ = [
     "range_to_string",
     "spot_to_config_json",
     "SidecarClient",
+    "SolverCancelled",
     "SolveCache",
     "solve_hash",
+    "SolverJobQueue",
+    "SolverQueueUnavailable",
+    "SolverWorker",
     "SolverSpot",
     "SolveResult",
     "SolveMetadata",
