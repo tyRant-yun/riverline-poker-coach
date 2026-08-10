@@ -268,6 +268,93 @@ def test_live_learning_profile_and_practice_parity(pg_store, tmp_path):
         sqlite.close()
 
 
+def test_live_pooled_store_crud_and_parity(pg_store):
+    """The pooled store must behave identically to the single-connection store."""
+    from poker_coach.persistence import PooledPostgresStore
+
+    pooled = PooledPostgresStore(PG_URL)
+    try:
+        scenario = scenario_at_flop()
+        created = pooled.create_scenario(scenario, title="pooled", tags=("pool",))
+        updated = pooled.update_scenario(
+            created["scenarioId"], scenario, title="pooled v2"
+        )
+        assert updated["revisionNo"] == 2
+
+        result = analyze_scenario(scenario, adapter=PokerKitAdapter())
+        saved = pooled.save_analysis(
+            created["scenarioId"], result, raw_scenario=scenario, execution_ms=5.0
+        )
+        assert saved["status"] == "completed"
+        assert len(pooled.list_analyses(created["scenarioId"])) == 1
+
+        profile = pooled.get_or_create_profile("pooled-profile")
+        assert profile.profile_id == "pooled-profile"
+        assert pooled.get_scenario(created["scenarioId"])["revisionNo"] == 2
+    finally:
+        pooled.close()
+
+
+def test_live_pool_keeps_connections_bounded(pg_store):
+    from poker_coach.persistence import PooledPostgresStore
+
+    pooled = PooledPostgresStore(PG_URL, min_size=1, max_size=3)
+    try:
+        for index in range(20):
+            pooled.get_or_create_profile(f"pooled-{index}")
+        stats = pooled._pool.get_stats()
+        assert stats.get("connections_num", 0) <= 3
+        assert pooled.get_profile("pooled-7").profile_id == "pooled-7"
+    finally:
+        pooled.close()
+
+
+def test_live_alembic_migration_upgrade_and_downgrade(pg_store):
+    """Alembic must create and drop the full schema on a live database."""
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    config.set_main_option("sqlalchemy.url", PG_URL)
+
+    command.downgrade(config, "base")
+    command.upgrade(config, "head")
+
+    import psycopg
+
+    with psycopg.connect(PG_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+            )
+            tables = {row[0] for row in cursor.fetchall()}
+            cursor.execute("SELECT version_num FROM alembic_version")
+            version = cursor.fetchone()[0]
+    assert {"scenarios", "analysis_runs", "learning_profiles"} <= tables
+    assert version == "0001"
+
+    # The migrated schema must satisfy the store contract.
+    store = PostgresStore(PG_URL)
+    try:
+        created = store.create_scenario(scenario_at_flop(), title="migrated")
+        assert store.get_scenario(created["scenarioId"])["revisionNo"] == 1
+    finally:
+        store.close()
+
+    command.downgrade(config, "base")
+    with psycopg.connect(PG_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"
+            )
+            remaining = cursor.fetchone()[0]
+    assert remaining == 1  # only alembic_version survives downgrade
+
+
 def test_live_api_flow_over_postgres(pg_store):
     app = create_app(config=AppConfig(), store=pg_store)
     client = TestClient(app)
