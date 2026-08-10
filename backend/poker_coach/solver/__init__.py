@@ -6,7 +6,7 @@ isolated sidecar container; nothing here imports or ships solver-engine
 code. The contracts in ``types`` are the only boundary crossing it.
 """
 
-from .adapter import build_spot, parse_result, range_to_string, spot_to_config_json
+from .adapter import build_spot, parse_result, postflop_seat_pair, range_to_string, spot_to_config_json
 from .analyzer import HandAnalysis, NodeAnalysis, SolverAnalysis, analyze, classify_hand
 from .artifact import hero_node_of, solve_result_to_artifact
 from .cache import SolveCache, solve_hash, solve_with_cache
@@ -27,6 +27,7 @@ from .worker import SolverWorker
 __all__ = [
     "build_spot",
     "parse_result",
+    "postflop_seat_pair",
     "range_to_string",
     "spot_to_config_json",
     "analyze",

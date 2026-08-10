@@ -12,7 +12,7 @@ the trace is marked unavailable with the reason code.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from decimal import Decimal
 
 from poker_coach.domain.models import (
@@ -65,14 +65,18 @@ def build_range_trace(
     *,
     prior_range: RangeSpec,
     provider: ActionPolicyProvider | None = None,
+    providers: Sequence[ActionPolicyProvider] = (),
     max_sequence: int | None = None,
     pot_provider: Callable[[int], int | None] | None = None,
 ) -> RangeBeliefTrace:
     """Rebuild the seat's belief chain over scenario.action_history.
 
-    ``max_sequence`` defaults to the scenario's decision point. When a step
-    cannot be grounded (no policy / unsupported action / zero probability),
-    the chain stops and the trace reports the reason.
+    ``max_sequence`` defaults to the scenario's decision point. ``provider``
+    (single) or ``providers`` (ordered list, e.g. a preflop fixture followed
+    by the postflop solver adapter) supply the action frequencies; the first
+    provider that covers a node wins. When a step cannot be grounded (no
+    policy / unsupported action / zero probability), the chain stops and the
+    trace reports the reason.
     """
     if max_sequence is None:
         max_sequence = scenario.decision_point.after_sequence
@@ -81,6 +85,7 @@ def build_range_trace(
         for event in scenario.action_history
         if event.sequence <= max_sequence
     ]
+    provider_chain = tuple(providers) if providers else ((provider,) if provider is not None else ())
     known_cards = _known_cards(scenario)
 
     snapshot = snapshot_from_range(
@@ -111,20 +116,29 @@ def build_range_trace(
         if event.action_type.value not in POLICY_ACTION_TYPES or event.actor_seat != seat_id:
             continue
         # The tracked seat acts: the belief must be updated through a policy.
-        if provider is None:
+        if not provider_chain:
             return _stalled(
                 seat_id, chain, "no_policy",
                 f"no grounded action policy is available for this node (seat {seat_id} at sequence {event.sequence})",
                 event.sequence,
             )
-        try:
-            policy = provider.get_action_frequencies(
-                scenario, seat_id, event.sequence, tuple(snapshot.combos)
+        policy = None
+        for candidate in provider_chain:
+            try:
+                policy = candidate.get_action_frequencies(
+                    scenario, seat_id, event.sequence, tuple(snapshot.combos)
+                )
+                break
+            except NoPolicyError:
+                continue
+            except RangeBeliefError as exc:
+                return _stalled(seat_id, chain, exc.code, str(exc), event.sequence)
+        if policy is None:
+            return _stalled(
+                seat_id, chain, "no_policy",
+                f"no grounded action policy is available for this node (seat {seat_id} at sequence {event.sequence})",
+                event.sequence,
             )
-        except NoPolicyError as exc:
-            return _stalled(seat_id, chain, "no_policy", str(exc), event.sequence)
-        except RangeBeliefError as exc:
-            return _stalled(seat_id, chain, exc.code, str(exc), event.sequence)
         try:
             pot_before = pot_provider(event.sequence) if pot_provider else None
             board = _board_at_sequence(scenario, event.sequence)

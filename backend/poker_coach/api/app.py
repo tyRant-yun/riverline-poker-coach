@@ -33,8 +33,24 @@ from poker_coach.jobs import InProcessJobBackend, RedisJobBackend
 from poker_coach.learning import LearningService, PracticeUnavailable
 from poker_coach.persistence import PostgresStore, SQLiteStore
 from poker_coach.persistence.sqlite_store import StoreNotFound
+from poker_coach.ranges import (
+    FixturePolicyProvider,
+    InvalidPolicyError,
+    NoPriorRangeError,
+    RangeBeliefError,
+    SolverPolicyAdapter,
+    build_belief_view,
+    build_range_trace,
+)
 from poker_coach.rules import PokerKitAdapter, ReplayError
-from poker_coach.solver import SolverJobQueue, SolverSpot, SolverUnsupportedError, build_spot
+from poker_coach.solver import (
+    SolverJobQueue,
+    SolverSpot,
+    SolverUnsupportedError,
+    build_spot,
+    parse_result,
+    postflop_seat_pair,
+)
 from poker_coach.strategy.catalog import StrategyCatalog
 from poker_coach.strategy.ranges import default_preflop_ranges
 
@@ -957,6 +973,83 @@ def create_app(
             "combos": [combo.to_dict() for combo in combos],
         }
 
+    @app.post("/v1/ranges/belief")
+    async def range_belief(request: Request):
+        """Combo-level action-conditioned belief for one seat.
+
+        Payload: ``{scenario, seatId?, afterSequence?, policy?}``. ``policy``
+        may be ``{source: "fixture", frequencies}`` (deterministic override),
+        ``{source: "solver", result}`` (a SolveResult payload, e.g. from
+        ``GET /v1/solve/jobs/{id}``), or absent/null (prior only). When no
+        grounded policy covers the node the response reports
+        ``available=false`` with a reason — numbers are never fabricated.
+        """
+        scenario, seat_id, after_sequence, provider = _belief_request(
+            await request.json()
+        )
+        _set_scenario_context(request, scenario)
+        prior_range = _prior_range_for(scenario, seat_id)
+        pot_cache: dict[int, int | None] = {}
+
+        def pot_before(sequence: int) -> int | None:
+            if sequence not in pot_cache:
+                pot_cache[sequence] = _pot_before_sequence(scenario, sequence, adapter)
+            return pot_cache[sequence]
+
+        try:
+            trace = build_range_trace(
+                scenario,
+                seat_id,
+                prior_range=prior_range,
+                providers=provider,
+                max_sequence=after_sequence,
+                pot_provider=pot_before,
+            )
+        except NoPriorRangeError as exc:
+            raise ApiError("no_prior_range", str(exc)) from exc
+        view = build_belief_view(trace)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            **view.to_dict(),
+        }
+
+    @app.post("/v1/ranges/trace")
+    async def range_trace(request: Request):
+        """Full snapshot chain for one seat up to ``afterSequence``."""
+        scenario, seat_id, after_sequence, provider = _belief_request(
+            await request.json()
+        )
+        _set_scenario_context(request, scenario)
+        prior_range = _prior_range_for(scenario, seat_id)
+        pot_cache: dict[int, int | None] = {}
+
+        def pot_before(sequence: int) -> int | None:
+            if sequence not in pot_cache:
+                pot_cache[sequence] = _pot_before_sequence(scenario, sequence, adapter)
+            return pot_cache[sequence]
+
+        try:
+            trace = build_range_trace(
+                scenario,
+                seat_id,
+                prior_range=prior_range,
+                providers=provider,
+                max_sequence=after_sequence,
+                pot_provider=pot_before,
+            )
+        except NoPriorRangeError as exc:
+            raise ApiError("no_prior_range", str(exc)) from exc
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "seatId": trace.seat_id,
+            "available": trace.available,
+            "unavailableReason": trace.unavailable_reason,
+            "stalledAtSequence": trace.stalled_at_sequence,
+            "snapshots": [snapshot.to_dict() for snapshot in trace.snapshots],
+        }
+
     return app
 
 
@@ -1016,6 +1109,115 @@ def _public_practice(question) -> dict[str, Any]:
     result.pop("expectedAction", None)
     result.pop("expectedEvidenceReferences", None)
     return result
+
+
+def _belief_request(payload: Any) -> tuple[ScenarioSpec, int, int | None, Any | None]:
+    """Parse and validate a /v1/ranges/belief or /v1/ranges/trace payload.
+
+    Returns ``(scenario, seat_id, after_sequence, policy_provider)``.
+    ``after_sequence`` is None when the caller should default to the
+    scenario's decision point; ``policy_provider`` is None when no policy
+    was supplied (prior-only, current belief unavailable).
+    """
+    if not isinstance(payload, dict):
+        raise ApiError("invalid_request", "request body must be a JSON object")
+    scenario = _scenario_from_request(payload.get("scenario", payload))
+    seat_id = payload.get("seatId", scenario.hero_seat)
+    if not isinstance(seat_id, int):
+        raise ApiError("invalid_request", "seatId must be an integer")
+    seat_ids = {seat.seat_id for seat in scenario.seats}
+    if seat_id not in seat_ids:
+        raise ApiError("invalid_request", f"seatId {seat_id} is not a seat in this scenario")
+    after_sequence = payload.get("afterSequence")
+    if after_sequence is not None and (
+        not isinstance(after_sequence, int) or after_sequence < 0
+    ):
+        raise ApiError("invalid_request", "afterSequence must be a non-negative integer")
+    policy_payload = payload.get("policy")
+    providers: list[Any] = []
+    if policy_payload is not None:
+        policy_payloads = policy_payload if isinstance(policy_payload, list) else [policy_payload]
+        for item in policy_payloads:
+            provider = _belief_policy_provider(scenario, item, after_sequence)
+            if provider is not None:
+                providers.append(provider)
+    return scenario, seat_id, after_sequence, providers
+
+
+def _belief_policy_provider(
+    scenario: ScenarioSpec, policy_payload: Any, after_sequence: int | None
+):
+    if not isinstance(policy_payload, dict) or not isinstance(policy_payload.get("source"), str):
+        raise ApiError("invalid_policy", "policy.source must be a string")
+    source = policy_payload["source"]
+    if source == "manual":
+        return None
+    if source == "fixture":
+        frequencies = policy_payload.get("frequencies")
+        if not isinstance(frequencies, dict):
+            raise ApiError("invalid_policy", "fixture policy requires a frequencies table")
+        try:
+            return FixturePolicyProvider(frequencies)
+        except InvalidPolicyError as exc:
+            raise ApiError("invalid_policy", str(exc)) from exc
+    if source == "solver":
+        raw_result = policy_payload.get("result")
+        if not isinstance(raw_result, dict):
+            raise ApiError("invalid_policy", "solver policy requires a result object")
+        try:
+            result = parse_result(raw_result)
+        except (SolverUnsupportedError, KeyError, TypeError, ValidationError) as exc:
+            raise ApiError("invalid_policy", f"invalid solver result: {exc}") from exc
+        try:
+            oop_seat, ip_seat = postflop_seat_pair(scenario)
+        except SolverUnsupportedError as exc:
+            raise ApiError("invalid_policy", str(exc)) from exc
+        max_sequence = (
+            after_sequence if after_sequence is not None else scenario.decision_point.after_sequence
+        )
+        reference_pot = _pot_before_sequence(scenario, max_sequence, _REPLAY_ADAPTER)
+        return SolverPolicyAdapter(
+            result, oop_seat=oop_seat, ip_seat=ip_seat, reference_pot=reference_pot
+        )
+    raise ApiError("invalid_policy", f"unsupported policy source: {source!r}")
+
+
+def _prior_range_for(scenario: ScenarioSpec, seat_id: int) -> RangeSpec:
+    """Resolve the seat's prior range from rangesBySeat (canonical source)."""
+    prior = scenario.ranges_by_seat.get(seat_id)
+    if prior is None:
+        raise ApiError(
+            "no_prior_range",
+            f"no prior range is available for seat {seat_id} "
+            "(set rangesBySeat before requesting a belief)",
+        )
+    return prior
+
+
+def _pot_before_sequence(
+    scenario: ScenarioSpec, sequence: int, adapter: PokerKitAdapter
+) -> int | None:
+    """Pot before the action at ``sequence`` (None when unknown)."""
+    if sequence <= 0:
+        return None
+    truncated = scenario.model_copy(
+        update={
+            "action_history": scenario.action_history[: sequence - 1],
+            "decision_point": scenario.decision_point.model_copy(
+                update={"after_sequence": sequence - 1}
+            ),
+        }
+    )
+    try:
+        replay = adapter.replay(truncated)
+    except ReplayError:
+        return None
+    return int(replay.final_state.pot)
+
+
+# Module-level adapter for pot lookups inside _belief_policy_provider (the
+# per-request ``adapter`` closure lives in create_app).
+_REPLAY_ADAPTER = PokerKitAdapter()
 
 
 def _question_from_payload(payload: Any) -> str | None:
