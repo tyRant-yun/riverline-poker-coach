@@ -21,7 +21,7 @@ from .board import analyze_board
 from .equity import EquityEngine
 from .hand import analyze_hand
 from .math import calculate_metrics
-from .models import AnalysisResult, EquityResult, InvalidAnalysisInput
+from .models import AnalysisResult, EquityResult, InvalidAnalysisInput, MultiwayEquityResult
 from .range_analysis import analyze_range, compare_ranges
 
 ANALYSIS_VERSION = "analysis-core-0.1"
@@ -81,7 +81,13 @@ def analyze_scenario(
     )
     replay = adapter.replay_to_decision(scenario)
     snapshot = replay.final_state
-    villain_seat = next(seat.seat_id for seat in scenario.seats if seat.seat_id != scenario.hero_seat)
+    multiway = scenario.table_size > 2
+    if multiway:
+        villain_seat = None
+    else:
+        villain_seat = next(
+            seat.seat_id for seat in scenario.seats if seat.seat_id != scenario.hero_seat
+        )
     metrics = calculate_metrics(
         snapshot,
         hero_seat=scenario.hero_seat,
@@ -94,65 +100,86 @@ def analyze_scenario(
     strategy_match = (strategy_catalog or StrategyCatalog()).match(scenario)
     warnings: list[str] = []
     equity: EquityResult | None = None
+    multiway_equity: MultiwayEquityResult | None = None
     range_analysis = None
     range_comparison = None
-
-    if scenario.villain_range is not None:
-        range_analysis = analyze_range(
-            scenario.villain_range,
-            snapshot.board,
-            known_cards=tuple(scenario.hero_hole_cards) + snapshot.board,
-        )
-    elif scenario.villain_hole_cards is None:
-        warnings.append("villain hole cards and villain range are missing; equity is unavailable")
 
     algorithm = scenario.assumptions.equity_algorithm
     trials = scenario.assumptions.simulation_trials or 10_000
     seed = scenario.assumptions.random_seed
-    try:
-        if scenario.hero_range is not None and scenario.villain_range is not None:
-            equity = engine.evaluate_range_vs_range(
-                scenario.hero_range,
+
+    if multiway:
+        multiway_equity = _analyze_multiway_equity(
+            scenario,
+            snapshot,
+            engine,
+            algorithm=algorithm,
+            trials=trials,
+            random_seed=seed,
+            cancel_event=cancel_event,
+            timeout_seconds=timeout_seconds,
+        )
+        if multiway_equity is None:
+            warnings.append(
+                "multiway equity is unavailable: every active player needs "
+                "known hole cards or a range"
+            )
+    else:
+        if scenario.villain_range is not None:
+            range_analysis = analyze_range(
                 scenario.villain_range,
                 snapshot.board,
-                algorithm=algorithm,
-                trials=trials,
-                random_seed=seed,
-                cancel_event=cancel_event,
-                timeout_seconds=timeout_seconds,
+                known_cards=tuple(scenario.hero_hole_cards) + snapshot.board,
             )
-            range_comparison = compare_ranges(
-                scenario.hero_range,
-                scenario.villain_range,
-                snapshot.board,
-                hero_known_cards=tuple(scenario.hero_hole_cards),
-                villain_known_cards=tuple(scenario.villain_hole_cards or ()),
-                hero_equity=equity.hero_equity,
+        elif scenario.villain_hole_cards is None:
+            warnings.append(
+                "villain hole cards and villain range are missing; equity is unavailable"
             )
-        elif scenario.villain_hole_cards is not None:
-            equity = engine.evaluate_hand_vs_hand(
-                scenario.hero_hole_cards,
-                scenario.villain_hole_cards,
-                snapshot.board,
-                algorithm=algorithm,
-                trials=trials,
-                random_seed=seed,
-                cancel_event=cancel_event,
-                timeout_seconds=timeout_seconds,
-            )
-        elif scenario.villain_range is not None:
-            equity = engine.evaluate_hand_vs_range(
-                scenario.hero_hole_cards,
-                scenario.villain_range,
-                snapshot.board,
-                algorithm=algorithm,
-                trials=trials,
-                random_seed=seed,
-                cancel_event=cancel_event,
-                timeout_seconds=timeout_seconds,
-            )
-    except InvalidAnalysisInput:
-        raise
+
+        try:
+            if scenario.hero_range is not None and scenario.villain_range is not None:
+                equity = engine.evaluate_range_vs_range(
+                    scenario.hero_range,
+                    scenario.villain_range,
+                    snapshot.board,
+                    algorithm=algorithm,
+                    trials=trials,
+                    random_seed=seed,
+                    cancel_event=cancel_event,
+                    timeout_seconds=timeout_seconds,
+                )
+                range_comparison = compare_ranges(
+                    scenario.hero_range,
+                    scenario.villain_range,
+                    snapshot.board,
+                    hero_known_cards=tuple(scenario.hero_hole_cards),
+                    villain_known_cards=tuple(scenario.villain_hole_cards or ()),
+                    hero_equity=equity.hero_equity,
+                )
+            elif scenario.villain_hole_cards is not None:
+                equity = engine.evaluate_hand_vs_hand(
+                    scenario.hero_hole_cards,
+                    scenario.villain_hole_cards,
+                    snapshot.board,
+                    algorithm=algorithm,
+                    trials=trials,
+                    random_seed=seed,
+                    cancel_event=cancel_event,
+                    timeout_seconds=timeout_seconds,
+                )
+            elif scenario.villain_range is not None:
+                equity = engine.evaluate_hand_vs_range(
+                    scenario.hero_hole_cards,
+                    scenario.villain_range,
+                    snapshot.board,
+                    algorithm=algorithm,
+                    trials=trials,
+                    random_seed=seed,
+                    cancel_event=cancel_event,
+                    timeout_seconds=timeout_seconds,
+                )
+        except InvalidAnalysisInput:
+            raise
 
     builder = EvidenceBundleBuilder()
     _add_metrics(builder, metrics, rules_version=replay.rules_engine_version)
@@ -307,6 +334,18 @@ def analyze_scenario(
         )
     if equity is not None:
         _add_equity_evidence(builder, equity)
+    elif multiway_equity is not None:
+        builder.add(
+            "equity.multiway_by_seat",
+            "multiway_equity",
+            {
+                str(seat): str(share)
+                for seat, share in sorted(multiway_equity.equity_by_seat.items())
+            },
+            unit="equity_share",
+            source_level=multiway_equity.source_level,
+            description="Per-seat showdown equity shares across live players",
+        )
     else:
         builder.add(
             "equity.status",
@@ -329,14 +368,69 @@ def analyze_scenario(
         rangeAnalysis=range_analysis,
         rangeComparison=range_comparison,
         strategyMatch=strategy_match,
+        multiwayEquity=multiway_equity,
         evidence=builder.build(),
         warnings=tuple(warnings),
     )
 
 
+def _analyze_multiway_equity(
+    scenario: ScenarioSpec,
+    snapshot,
+    engine: EquityEngine,
+    *,
+    algorithm,
+    trials: int,
+    random_seed: int | None,
+    cancel_event=None,
+    timeout_seconds: float | None = None,
+) -> MultiwayEquityResult | None:
+    """N-player equity over the live seats at the decision point.
+
+    Every live player must contribute either known hole cards or a range;
+    a live player without either makes the result misleading, so the
+    calculation is skipped with a warning instead.
+    """
+    live = [seat for seat in snapshot.stacks if seat not in snapshot.folded_seats]
+    if scenario.hero_seat not in live:
+        return None
+    players: list[tuple[int, object]] = []
+    for seat in sorted(live):
+        cards = scenario.known_hole_cards_by_seat.get(seat)
+        if cards is not None and len(cards) == 2:
+            players.append((seat, tuple(cards)))
+            continue
+        seat_range = scenario.ranges_by_seat.get(seat)
+        if seat_range is not None:
+            players.append((seat, seat_range))
+            continue
+        return None
+    if len(players) < 2:
+        return None
+    try:
+        return engine.evaluate_multiway(
+            players,
+            snapshot.board,
+            algorithm=algorithm,
+            trials=trials,
+            random_seed=random_seed,
+            cancel_event=cancel_event,
+            timeout_seconds=timeout_seconds,
+        )
+    except InvalidAnalysisInput:
+        return None
+
+
 def _add_metrics(builder: EvidenceBundleBuilder, metrics, *, rules_version: str) -> None:
     values = (
         ("rules.pot", "pot", metrics.current_pot, "chips", "Current pot"),
+        (
+            "rules.active_players",
+            "active_player_count",
+            metrics.active_player_count,
+            "players",
+            "Players still live at the decision point",
+        ),
         ("rules.call_cost", "call_cost", metrics.call_cost, "chips", "Cost to call"),
         ("math.pot_after_call", "pot_after_call", metrics.pot_after_call, "chips", "Pot after calling"),
         ("math.effective_stack", "effective_stack", metrics.effective_stack, "chips", "Effective remaining stack"),

@@ -54,6 +54,7 @@ class BasicMetrics(DomainModel):
     spr: Decimal | None = Field(default=None, ge=0)
     risk_reward_ratio: Decimal | None = Field(default=None, ge=0)
     bet_to_pot_ratio: Decimal | None = Field(default=None, ge=0)
+    active_player_count: StrictInt | None = Field(default=None, ge=2)
 
 
 class HandAnalysis(DomainModel):
@@ -148,6 +149,39 @@ class EquityResult(DomainModel):
         return self
 
 
+class MultiwayEquityResult(DomainModel):
+    """N-player showdown equity, keyed by seat.
+
+    equity_by_seat values sum to one; a tie splits the mass equally among
+    the tied best hands. Seats are sorted for deterministic serialization.
+    """
+
+    algorithm: EquityAlgorithm
+    source_level: AnalysisLevel
+    equity_by_seat: dict[int, Ratio]
+    active_player_count: StrictInt = Field(ge=2)
+    tie_probability: Ratio
+    trials: StrictInt = Field(gt=0)
+    random_seed: StrictInt | None = Field(default=None, ge=0)
+    standard_errors_by_seat: dict[int, Decimal] | None = None
+    weighted: bool = False
+
+    @model_validator(mode="after")
+    def validate_probabilities(self) -> MultiwayEquityResult:
+        if len(self.equity_by_seat) != self.active_player_count:
+            raise ValueError("equity_by_seat must cover every analyzed player")
+        total = sum(self.equity_by_seat.values())
+        if abs(total - Decimal("1")) > Decimal("0.0000000001"):
+            raise ValueError(f"equities must sum to one; got {total}")
+        if self.algorithm is EquityAlgorithm.MONTE_CARLO and self.random_seed is None:
+            raise ValueError("Monte Carlo results require a random_seed")
+        if self.standard_errors_by_seat is not None and len(
+            self.standard_errors_by_seat
+        ) != len(self.equity_by_seat):
+            raise ValueError("standard_errors_by_seat must cover every analyzed player")
+        return self
+
+
 class AnalysisResult(DomainModel):
     analysis_version: str
     scenario_hash: str
@@ -159,6 +193,7 @@ class AnalysisResult(DomainModel):
     range_analysis: RangeAnalysis | None = None
     range_comparison: RangeComparison | None = None
     strategy_match: StrategyMatch | None = None
+    multiway_equity: MultiwayEquityResult | None = None
     evidence: EvidenceBundle
     warnings: tuple[str, ...] = ()
 

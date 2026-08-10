@@ -7,14 +7,21 @@ import random
 import time
 from dataclasses import dataclass
 from decimal import Decimal, localcontext
-from itertools import combinations
+from itertools import combinations, product
 from threading import Event
 from typing import Iterable
 
 from poker_coach.domain.models import AnalysisLevel, Card, EquityAlgorithm, RangeSpec
 
 from .cards import best_hand_key, deck, sort_cards
-from .models import AnalysisCancelled, AnalysisTimeout, EquityResult, InvalidAnalysisInput, WeightedCombo
+from .models import (
+    AnalysisCancelled,
+    AnalysisTimeout,
+    EquityResult,
+    InvalidAnalysisInput,
+    MultiwayEquityResult,
+    WeightedCombo,
+)
 from .range_analysis import expand_range
 
 
@@ -47,6 +54,33 @@ class _Accumulator:
             self.villain_mass += weight
         else:
             self.tie_mass += weight
+
+
+class _MultiwayAccumulator:
+    """Per-seat win mass for N-player showdowns (ties split equally)."""
+
+    def __init__(self, *, weighted: bool):
+        self.weighted = weighted
+        self.trials = 0
+        self.total_mass = Decimal("0")
+        self.tie_mass = Decimal("0")
+        self.wins: dict[int, Decimal] = {}
+
+    def add(
+        self,
+        keys: list[tuple[int, object]],
+        weight: Decimal = Decimal("1"),
+    ) -> None:
+        self.trials += 1
+        max_key = max(key for _, key in keys)
+        winners = [seat for seat, key in keys if key == max_key]
+        share = weight / len(winners)
+        for seat in winners:
+            self.wins[seat] = self.wins.get(seat, Decimal("0")) + share
+        if len(winners) > 1:
+            self.tie_mass += weight
+        if self.weighted:
+            self.total_mass += weight
 
 
 class EquityEngine:
@@ -233,6 +267,170 @@ class EquityEngine:
             weighted=True,
         )
 
+    def evaluate_multiway(
+        self,
+        players: Iterable[tuple[int, tuple[Card, Card] | RangeSpec]],
+        board: tuple[Card, ...] = (),
+        *,
+        algorithm: EquityAlgorithm = EquityAlgorithm.EXACT_ENUMERATION,
+        trials: int = 10_000,
+        random_seed: int | None = None,
+        cancel_event: Event | None = None,
+        timeout_seconds: float | None = None,
+    ) -> MultiwayEquityResult:
+        """N-player showdown equity keyed by seat.
+
+        Each entry is ``(seat, hole_cards)`` or ``(seat, RangeSpec)``; a
+        concrete hand is a single weight-one combo. Ties split the mass
+        equally among the tied best hands.
+        """
+        board = tuple(sort_cards(board))
+        self._validate_cards(board)
+        normalized: list[tuple[int, tuple[WeightedCombo, ...], bool]] = []
+        for seat, spec in players:
+            if isinstance(spec, RangeSpec):
+                combos = expand_range(spec, dead_cards=board)
+                weighted = True
+            else:
+                combos = (
+                    WeightedCombo(cards=tuple(sort_cards(spec)), weight=Decimal("1")),
+                )
+                weighted = False
+            if not combos:
+                raise InvalidAnalysisInput(
+                    f"seat {seat} has no playable combos after dead-card removal"
+                )
+            for combo in combos:
+                self._validate_cards(board + combo.cards)
+            normalized.append((seat, combos, weighted))
+        if len(normalized) < 2:
+            raise InvalidAnalysisInput("multiway equity requires at least two players")
+        any_weighted = any(weighted for _, _, weighted in normalized)
+        combo_lists = [combos for _, combos, _ in normalized]
+
+        def _trial_weight(combo_tuple: tuple[WeightedCombo, ...]) -> Decimal:
+            if not any_weighted:
+                return Decimal("1")
+            return _prod_weights(combo_tuple)
+
+        if algorithm is EquityAlgorithm.EXACT_ENUMERATION:
+            operations = 0
+            for combo_tuple in product(*combo_lists):
+                cards = tuple(board)
+                for combo in combo_tuple:
+                    if set(cards).intersection(combo.cards):
+                        break
+                    cards = cards + combo.cards
+                else:
+                    operations += math.comb(len(deck(cards)), 5 - len(board))
+            self._ensure_workload(operations)
+            accumulator = _MultiwayAccumulator(weighted=any_weighted)
+            started_at = time.monotonic()
+            for combo_tuple in product(*combo_lists):
+                cards = tuple(board)
+                for combo in combo_tuple:
+                    if set(cards).intersection(combo.cards):
+                        break
+                    cards = cards + combo.cards
+                else:
+                    weight = _trial_weight(combo_tuple)
+                    for runout in _iter_runouts(deck(cards), 5 - len(board)):
+                        self._checkpoint(
+                            accumulator.trials, cancel_event, timeout_seconds, started_at
+                        )
+                        accumulator.add(
+                            [
+                                (seat, best_hand_key(combo.cards + board + tuple(runout)))
+                                for (seat, _, _), combo in zip(normalized, combo_tuple)
+                            ],
+                            weight,
+                        )
+            return self._multiway_result(
+                accumulator,
+                algorithm,
+                normalized,
+                random_seed=random_seed,
+                weighted=any_weighted,
+            )
+        self._require_sampling(trials, random_seed)
+        rng = random.Random(random_seed)
+        accumulator = _MultiwayAccumulator(weighted=any_weighted)
+        started_at = time.monotonic()
+        for _ in range(trials):
+            self._checkpoint(accumulator.trials, cancel_event, timeout_seconds, started_at)
+            sampled: list[tuple[int, WeightedCombo]] = []
+            cards = tuple(board)
+            for seat, combos, _ in normalized:
+                for _ in range(100):
+                    combo = _weighted_choice(rng, combos)
+                    if not set(cards).intersection(combo.cards):
+                        break
+                else:
+                    raise InvalidAnalysisInput(
+                        "could not sample non-overlapping multiway combos"
+                    )
+                cards = cards + combo.cards
+                sampled.append((seat, combo))
+            runout = tuple(rng.sample(deck(cards), 5 - len(board)))
+            accumulator.add(
+                [
+                    (seat, best_hand_key(combo.cards + board + runout))
+                    for seat, combo in sampled
+                ],
+                _trial_weight(tuple(combo for _, combo in sampled)),
+            )
+        return self._multiway_result(
+            accumulator,
+            algorithm,
+            normalized,
+            random_seed=random_seed,
+            weighted=any_weighted,
+        )
+
+    def _multiway_result(
+        self,
+        accumulator: _MultiwayAccumulator,
+        algorithm: EquityAlgorithm,
+        normalized: list[tuple[int, tuple[WeightedCombo, ...], bool]],
+        *,
+        random_seed: int | None,
+        weighted: bool,
+    ) -> MultiwayEquityResult:
+        if accumulator.trials == 0 or (weighted and accumulator.total_mass == 0):
+            raise InvalidAnalysisInput("equity calculation produced no trials")
+        seats = [seat for seat, _, _ in normalized]
+        with localcontext() as context:
+            context.prec = 28
+            total = accumulator.total_mass if weighted else Decimal(accumulator.trials)
+            equities = {
+                seat: accumulator.wins.get(seat, Decimal("0")) / total for seat in seats
+            }
+            tie_probability = accumulator.tie_mass / total
+        standard_errors = None
+        if algorithm is EquityAlgorithm.MONTE_CARLO:
+            standard_errors = {}
+            for seat, equity in equities.items():
+                p = float(equity)
+                variance = max(0.0, p * (1 - p))
+                standard_errors[seat] = Decimal(
+                    str(math.sqrt(variance / accumulator.trials))
+                )
+        return MultiwayEquityResult(
+            algorithm=algorithm,
+            source_level=(
+                AnalysisLevel.ENUMERATED
+                if algorithm is EquityAlgorithm.EXACT_ENUMERATION
+                else AnalysisLevel.SIMULATED
+            ),
+            equity_by_seat={seat: equities[seat] for seat in sorted(seats)},
+            active_player_count=len(seats),
+            tie_probability=tie_probability,
+            trials=accumulator.trials,
+            random_seed=random_seed,
+            standard_errors_by_seat=standard_errors,
+            weighted=weighted,
+        )
+
     def _sample_non_overlapping_pair(self, rng, hero_combos, villain_combos):
         for _ in range(100):
             hero = _weighted_choice(rng, hero_combos)
@@ -375,3 +573,10 @@ def _weighted_choice(rng: random.Random, combos: tuple[WeightedCombo, ...]) -> W
         if target < cursor:
             return combo
     return combos[-1]
+
+
+def _prod_weights(combos: Iterable[WeightedCombo]) -> Decimal:
+    result = Decimal("1")
+    for combo in combos:
+        result *= combo.weight
+    return result

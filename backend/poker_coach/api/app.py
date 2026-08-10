@@ -610,6 +610,16 @@ def create_app(
             timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
         )
         if result.equity is None:
+            if result.multiway_equity is not None:
+                return {
+                    "schemaVersion": scenario.schema_version,
+                    "requestId": request.state.request_id,
+                    "analysisVersion": result.analysis_version,
+                    "executionMs": elapsed_ms,
+                    "equity": None,
+                    "multiwayEquity": result.multiway_equity.to_dict(),
+                    "evidence": result.evidence.to_dict(),
+                }
             raise ApiError(
                 "equity_unavailable",
                 "equity requires a concrete villain hand or a non-empty villain range",

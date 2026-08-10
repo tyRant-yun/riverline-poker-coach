@@ -47,4 +47,5 @@ def calculate_metrics(
         spr=spr,
         risk_reward_ratio=risk_reward,
         bet_to_pot_ratio=bet_to_pot,
+        active_player_count=len(active_seats),
     )
