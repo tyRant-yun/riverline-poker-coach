@@ -5,6 +5,7 @@ description = "Deterministic domain contracts for a Texas Hold'em strategy coach
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "fastapi==0.139.2",
+    "httpx==0.28.1",
     "pokerkit==0.7.4",
     "pydantic==2.13.4",
     "uvicorn==0.51.0",
@@ -21,7 +22,6 @@ redis = [
 [dependency-groups]
 test = [
     "fakeredis==2.37.0",
-    "httpx==0.28.1",
     "pytest==9.1.1",
 ]
 

@@ -38,6 +38,8 @@ npm run dev
 
 分析任务默认在本进程内由线程池执行。设置 `POKER_COACH_REDIS_URL`（并安装可选依赖 `pip install -e ".[redis]"`）后切换为 Redis 队列：默认在同一进程内启动一个消费线程（本地便捷模式），部署独立 worker 时设置 `POKER_COACH_REDIS_WORKER_IN_PROCESS=0` 并另起 `py -3.13 -m poker_coach.jobs --redis-url <url>`。取消通过 Redis 标志协作生效，可跨进程终止运行中的 Equity 计算。
 
+教学默认使用本地确定性教师。设置 `POKER_COACH_LLM_API_KEY` 后切换为外部模型教师（OpenAI 兼容 chat-completions 端点）：可用 `POKER_COACH_LLM_BASE_URL`、`POKER_COACH_LLM_MODEL`、`POKER_COACH_LLM_TIMEOUT_SECONDS` 调整。外部教师只注入 Gateway 事实，非法行动与未引用证据的数字会被过滤，调用失败自动降级回本地教师（API 响应含 `provider` 与 `degraded` 字段）。
+
 API 默认限制单请求体为 1 MiB、单次分析超时为 120 秒、匿名会话每分钟 120 个请求；可用 `POKER_COACH_MAX_REQUEST_BYTES`、`POKER_COACH_MAX_TIMEOUT_SECONDS` 和 `POKER_COACH_RATE_LIMIT_PER_MINUTE` 调整，限流设为 `0` 可关闭（仅适合本地测试）。
 
 也可以使用 PowerShell 一键启动本地后端和前端：
@@ -56,6 +58,6 @@ API 默认限制单请求体为 1 MiB、单次分析超时为 120 秒、匿名�
 
 ## 当前边界
 
-PostgreSQL 适配已通过真实实例部署回归（PostgreSQL 16，见 `backend/tests/test_postgres_live.py`：schema 迁移、场景/修订/分析/学习记录与 SQLite 对拍、完整 HTTP 流程）；连接池和迁移回滚仍待生产化。Redis 异步任务已实现（`poker_coach.jobs`：进程内线程池兜底 + Redis 队列 + 协作式跨进程取消，fakeredis 单测 + 真实 Redis 跨进程 E2E 验证）；完整外部模型 Agent 仍待后续阶段。前端 E2E 已覆盖保存、修订、历史重分析和导入流程。当前教学服务只使用 EvidenceBundle 提供 principle-only 解释；没有可靠策略数据时不会输出虚假 GTO 频率。
+PostgreSQL 适配已通过真实实例部署回归（PostgreSQL 16，见 `backend/tests/test_postgres_live.py`：schema 迁移、场景/修订/分析/学习记录与 SQLite 对拍、完整 HTTP 流程）；连接池和迁移回滚仍待生产化。Redis 异步任务已实现（`poker_coach.jobs`：进程内线程池兜底 + Redis 队列 + 协作式跨进程取消，fakeredis 单测 + 真实 Redis 跨进程 E2E 验证）。外部模型 Agent 适配器已实现（`coach/external.py`：只读 Gateway 事实注入、非法行动过滤、证据引用净化、失败降级到本地 principle-only 教师），通过 `POKER_COACH_LLM_API_KEY` 等环境变量启用。前端 E2E 已覆盖保存、修订、历史重分析和导入流程。
 
 示例场景见 [examples/scenario-flop.json](examples/scenario-flop.json)，安全和运维边界见 [安全、隐私与运维](docs/security-privacy-operations.md)。编辑器支持 ScenarioSpec JSON 导入/导出；教学层的只读工具边界和评测见 [教学 Agent 评测基线](docs/agent-evaluation.md)。

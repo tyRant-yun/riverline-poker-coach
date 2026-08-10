@@ -31,6 +31,7 @@ class TeachingService:
 
     version = "teaching-core-0.1"
     prompt_version = "teaching-prompt-0.1"
+    provider = "local"
 
     def __init__(self, adapter: PokerKitAdapter | None = None):
         self.adapter = adapter or PokerKitAdapter()

@@ -46,6 +46,10 @@ class AppConfig:
     rate_limit_per_minute: int = 120
     redis_url: str | None = None
     redis_worker_in_process: bool = True
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_api_key: str | None = None
+    llm_model: str = "gpt-4o-mini"
+    llm_timeout_seconds: float = 60.0
 
     @classmethod
     def from_environment(cls) -> AppConfig:
@@ -66,6 +70,12 @@ class AppConfig:
             redis_url=getenv("POKER_COACH_REDIS_URL") or None,
             redis_worker_in_process=getenv("POKER_COACH_REDIS_WORKER_IN_PROCESS", "1").lower()
             in {"1", "true", "yes"},
+            llm_base_url=getenv("POKER_COACH_LLM_BASE_URL", cls.llm_base_url),
+            llm_api_key=getenv("POKER_COACH_LLM_API_KEY") or None,
+            llm_model=getenv("POKER_COACH_LLM_MODEL", cls.llm_model),
+            llm_timeout_seconds=_env_float(
+                "POKER_COACH_LLM_TIMEOUT_SECONDS", cls.llm_timeout_seconds, minimum=1.0
+            ),
         )
 
 
@@ -102,13 +112,32 @@ def _create_job_backend(
     return RedisJobBackend(queue)
 
 
-def create_app(config: AppConfig | None = None, store: SQLiteStore | PostgresStore | None = None) -> FastAPI:
+def _create_teacher(config: AppConfig, adapter: PokerKitAdapter) -> TeachingService:
+    """Select the teacher: local principle-only, or the external model adapter."""
+    if not config.llm_api_key:
+        return TeachingService(adapter)
+    from poker_coach.coach import ExternalModelTeacher
+
+    return ExternalModelTeacher(
+        base_url=config.llm_base_url,
+        api_key=config.llm_api_key,
+        model=config.llm_model,
+        timeout_seconds=config.llm_timeout_seconds,
+        adapter=adapter,
+    )
+
+
+def create_app(
+    config: AppConfig | None = None,
+    store: SQLiteStore | PostgresStore | None = None,
+    teacher: TeachingService | None = None,
+) -> FastAPI:
     config = config or AppConfig.from_environment()
     adapter = PokerKitAdapter()
     if store is None:
         database_url = getenv("POKER_COACH_DATABASE_URL")
         store = PostgresStore(database_url) if database_url else SQLiteStore(getenv("POKER_COACH_DB_PATH", ".data/poker_coach.sqlite3"))
-    teacher = TeachingService(adapter)
+    teacher = teacher or _create_teacher(config, adapter)
     learning = LearningService(adapter)
     strategy_catalog = StrategyCatalog()
     store.register_strategy_artifacts(strategy_catalog.artifacts)
@@ -501,6 +530,8 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | PostgresSto
             "requestId": request.state.request_id,
             "teacherVersion": teacher.version,
             "promptVersion": teacher.prompt_version,
+            "provider": getattr(teacher, "provider", "local"),
+            "degraded": getattr(teacher, "degraded", False),
             "response": response.to_dict(),
             "session": session,
         }
@@ -668,6 +699,8 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | PostgresSto
             "requestId": request.state.request_id,
             "teacherVersion": teacher.version,
             "promptVersion": teacher.prompt_version,
+            "provider": getattr(teacher, "provider", "local"),
+            "degraded": getattr(teacher, "degraded", False),
             "response": response.to_dict(),
             "session": session,
         }

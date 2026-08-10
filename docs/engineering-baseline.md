@@ -43,6 +43,7 @@
 8. SQLite 场景、版本、分析历史和复制/收藏/删除能力；
 9. Next.js 人工场景编辑器、Hero/Villain 范围矩阵/组合摘要、默认范围选择、分析结果展示、保存后生成修订和指定历史版本重分析。
 10. 策略场景 exact/compatible/approximate/no-match 匹配、6 组默认翻前范围，以及 A/K-high、低张连接、paired、monotone、turn barrel、river bluff catcher、thin value 和 blocker bluff 等策划教学条目；所有条目当前均不提供虚假频率。
-11. Playwright Chromium E2E 覆盖规则校验、显式发翻牌、分析、教学、双方范围标准化、保存修订和历史版本重分析；教学响应支持三档解释深度，学习画像记录街道、牌面纹理表现与最近训练。
+11. 外部模型教学适配器（`coach/external.py`）：只读 Gateway 注入事实、非法行动过滤、未知证据引用净化、无引用数字占位、失败自动降级本地 principle-only 教师，并通过 `POKER_COACH_LLM_*` 环境变量启用；Redis 作业队列（`poker_coach.jobs`）支持跨进程执行与协作式取消。
+12. Playwright Chromium E2E 覆盖规则校验、显式发翻牌、分析、教学、双方范围标准化、保存修订和历史版本重分析；教学响应支持三档解释深度，学习画像记录街道、牌面纹理表现与最近训练。
 
 这样可以在本地不依赖 PostgreSQL、Redis 或复杂集群的情况下验证规则、分析、策略来源和学习记录边界；生产数据库和异步执行仍需后续阶段补齐。
