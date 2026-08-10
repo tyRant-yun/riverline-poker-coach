@@ -8,7 +8,7 @@
       "docker compose build"
     ],
     "test": [
-      "pytest"
+      "set PYTHONPATH= && set PYTHONHOME= && C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python313\\python.exe -m pytest"
     ],
     "start": "docker compose up -d",
     "port": null,
