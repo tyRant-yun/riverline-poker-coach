@@ -93,23 +93,8 @@ def build_spot(
     adapter = PokerKitAdapter()
     replay = replay or adapter.replay_to_decision(scenario)
     state = replay.final_state
-    if len(state.board) < 3:
-        raise SolverUnsupportedError("solver requires at least a flop board")
-
-    active_seats = [seat for seat in state.stacks if seat not in state.folded_seats]
-    if len(active_seats) != 2:
-        raise SolverUnsupportedError(
-            "solver supports heads-up decision points only; "
-            f"{len(active_seats)} active players remain (bunching effects are ignored "
-            "for the two-player spots)"
-        )
-
-    # Postflop, the out-of-position player is the first active seat clockwise
-    # from the button (the button itself acts last, so it is never OOP).
-    n = scenario.table_size
-    candidates = [seat for seat in active_seats if seat != scenario.button_seat] or active_seats
-    oop_seat = min(candidates, key=lambda seat: (seat - scenario.button_seat) % n)
-    ip_seat = next(seat for seat in active_seats if seat != oop_seat)
+    oop_seat, ip_seat = postflop_seat_pair(scenario, replay=replay)
+    active_seats = (oop_seat, ip_seat)
 
     # Ranges: the canonical source is rangesBySeat (Schema v2). Legacy
     # heroRange/villainRange (v1) are normalized into rangesBySeat by the
@@ -154,7 +139,7 @@ def build_spot(
 
     # Effective stack covers only the two active players; folded short stacks
     # must not drag the spot below the real remaining money.
-    effective_stack = min(state.stacks[seat] for seat in active_seats)
+    effective_stack = min(state.stacks[seat] for seat in (oop_seat, ip_seat))
     assumptions = (
         ("bunching_ignored",)
         if scenario.table_size > 2
@@ -178,6 +163,38 @@ def build_spot(
         target_exploitability_frac=target_exploitability_frac,
         assumptions=assumptions,
     )
+
+
+def postflop_seat_pair(
+    scenario: ScenarioSpec,
+    *,
+    replay: Any | None = None,
+) -> tuple[int, int]:
+    """OOP/IP seats at a postflop decision point (shared by spot builders).
+
+    Requires a flop board and exactly two active players; the out-of-position
+    player is the first active seat clockwise from the button (the button
+    itself acts last, so it is never OOP). ``SolverUnsupportedError`` is
+    raised for preflop or non-heads-up decision points.
+    """
+    adapter = PokerKitAdapter()
+    replay = replay or adapter.replay_to_decision(scenario)
+    state = replay.final_state
+    if len(state.board) < 3:
+        raise SolverUnsupportedError("solver requires at least a flop board")
+
+    active_seats = [seat for seat in state.stacks if seat not in state.folded_seats]
+    if len(active_seats) != 2:
+        raise SolverUnsupportedError(
+            "solver supports heads-up decision points only; "
+            f"{len(active_seats)} active players remain (bunching effects are ignored "
+            "for the two-player spots)"
+        )
+    n = scenario.table_size
+    candidates = [seat for seat in active_seats if seat != scenario.button_seat] or active_seats
+    oop_seat = min(candidates, key=lambda seat: (seat - scenario.button_seat) % n)
+    ip_seat = next(seat for seat in active_seats if seat != oop_seat)
+    return oop_seat, ip_seat
 
 
 def _bet_sizes_from_scenario(scenario: ScenarioSpec, pot: int) -> str:

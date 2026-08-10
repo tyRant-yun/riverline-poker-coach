@@ -495,6 +495,43 @@ select { width: 100%; }
 .range-compact__name { font-size: 12px; font-weight: 800; }
 .range-matrix + .muted.small { margin-top: 8px; }
 
+/* ---- Range belief view (Prior / Current / Delta) ---- */
+.range-view-tabs { display: inline-flex; gap: 4px; margin-top: 10px; border: 1px solid var(--color-border); border-radius: 4px; padding: 2px; }
+.range-view-tab {
+  border: 0; border-radius: 3px; background: transparent; color: var(--color-text-muted);
+  font-size: 11px; font-weight: 700; padding: 3px 10px; cursor: pointer;
+}
+.range-view-tab:hover { color: var(--color-text); }
+.range-view-tab--active { background: var(--color-accent-soft); color: var(--color-accent); }
+.belief-view { margin-top: 10px; }
+.belief-meta { display: grid; gap: 3px; margin-bottom: 6px; }
+.belief-offtree { color: var(--color-warning); }
+.belief-unavailable {
+  margin-top: 10px; border: 1px dashed var(--color-border); border-radius: 6px;
+  padding: 10px; background: var(--color-surface-alt);
+}
+.belief-unavailable__title { font-size: 12px; font-weight: 800; color: var(--color-warning); margin-bottom: 4px; }
+.belief-unavailable__reason { margin-top: 4px; }
+.range-matrix--readonly { margin-top: 8px; }
+.matrix-cell--belief { cursor: pointer; }
+.matrix-cell--belief small { color: var(--color-text-muted); }
+/* Current mode: probability-mass intensity on the accent scale (derived
+   from --color-accent, same pattern as .matrix-cell--wXX). */
+.belief-cell--empty { opacity: 0.45; }
+.belief-cell--low { background: rgba(110, 163, 255, 0.12); }
+.belief-cell--mid { background: rgba(110, 163, 255, 0.28); }
+.belief-cell--high { background: rgba(110, 163, 255, 0.45); }
+/* Delta mode: subtle success/danger tints from the design tokens. */
+.belief-cell--flat { }
+.belief-cell--up { background: rgba(58, 214, 152, 0.16); }
+.belief-cell--down { background: rgba(255, 130, 116, 0.16); }
+.belief-cell--up small { color: var(--color-success); }
+.belief-cell--down small { color: var(--color-danger); }
+.belief-detail { margin-top: 8px; border-top: 1px solid var(--color-border); padding-top: 6px; }
+.belief-detail__cell { font-size: 12px; font-weight: 800; color: var(--color-accent); }
+.belief-detail .belief-cell--up { color: var(--color-success); }
+.belief-detail .belief-cell--down { color: var(--color-danger); }
+
 /* ---- History ---- */
 .saved-list { display: grid; gap: 6px; margin-top: 10px; }
 .saved-row {

@@ -21,6 +21,7 @@ import type {
   StateResponse,
   TeachingResponse,
 } from "../../types/api";
+import type { RangeBeliefTraceResponse, RangeBeliefView } from "../../types/rangeBelief";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -92,6 +93,11 @@ export const analysisApi = {
   run: (scenario: Scenario) => request<AnalysisResponse>("/v1/analysis", scenario),
 };
 
+export type BeliefPolicyPayload =
+  | { source: "fixture"; frequencies: Record<string, Record<string, Record<string, string>>> }
+  | { source: "solver"; result: NonNullable<SolveJob["result"]> }
+  | { source: "manual" };
+
 export const rangesApi = {
   defaults: () => requestGet<{ ranges: DefaultRanges }>("/v1/ranges/defaults"),
   parse: (notation: string, deadCards: string[]) =>
@@ -99,6 +105,19 @@ export const rangesApi = {
       "/v1/ranges/parse",
       { notation, deadCards },
     ),
+  /** Combo-level action-conditioned belief for one seat (prior/current/delta). */
+  belief: (payload: {
+    scenario: Scenario;
+    seatId: number;
+    afterSequence?: number;
+    policy?: BeliefPolicyPayload | BeliefPolicyPayload[];
+  }) => request<RangeBeliefView>("/v1/ranges/belief", payload),
+  trace: (payload: {
+    scenario: Scenario;
+    seatId: number;
+    afterSequence?: number;
+    policy?: BeliefPolicyPayload | BeliefPolicyPayload[];
+  }) => request<RangeBeliefTraceResponse>("/v1/ranges/trace", payload),
 };
 
 export const coachApi = {
