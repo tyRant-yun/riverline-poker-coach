@@ -14,9 +14,13 @@ dependencies = [
 postgres = [
     "psycopg[binary]==3.3.4",
 ]
+redis = [
+    "redis==8.1.0",
+]
 
 [dependency-groups]
 test = [
+    "fakeredis==2.37.0",
     "httpx==0.28.1",
     "pytest==9.1.1",
 ]

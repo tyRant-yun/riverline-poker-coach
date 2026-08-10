@@ -24,7 +24,7 @@
 
 ## 当前限制
 
-1. 当前本地默认使用 SQLite；PostgreSQL 已通过真实实例部署回归（`backend/tests/test_postgres_live.py`，PostgreSQL 16），但连接池、迁移回滚和 CI 化仍需生产化；Redis 仍待接入。
+1. 当前本地默认使用 SQLite；PostgreSQL 已通过真实实例部署回归（`backend/tests/test_postgres_live.py`，PostgreSQL 16），但连接池、迁移回滚和 CI 化仍需生产化。Redis 异步任务已接入（`poker_coach.jobs`：进程内线程池兜底、Redis 队列、协作式跨进程取消；fakeredis 单测 + 真实 Redis 跨进程 E2E 验证），多 worker 部署与资源配额仍需生产化。
 2. `villainHoleCards` 可以缺省以支持未摊牌场景；只有双方具体底牌都存在时才会完成摊牌比较和派奖，系统不会为未知底牌伪造赢家。
 3. `rakeConfig` 已进入领域合同，但 MVP 规则适配层明确拒绝启用抽水；当前结算使用无抽水假设。
 4. 分池和奇数筹码分配由 PokerKit 的 `ChipsPushing` 裁决；领域结果记录规则为底池顺序中第一位有资格获胜者取得余数，适配层不复制派奖算法。

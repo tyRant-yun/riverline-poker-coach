@@ -6,11 +6,12 @@ import hashlib
 import json
 import logging
 import math
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from os import getenv
-from threading import Event, Lock
+from threading import Lock
 from uuid import uuid4
 from typing import Any
 
@@ -23,6 +24,7 @@ from poker_coach.analysis import AnalysisCancelled, AnalysisTimeout, analyze_sce
 from poker_coach.analysis.models import AnalysisResult, InvalidAnalysisInput
 from poker_coach.coach import TeachingService
 from poker_coach.domain.models import ScenarioSpec
+from poker_coach.jobs import InProcessJobBackend, RedisJobBackend
 from poker_coach.learning import LearningService, PracticeUnavailable
 from poker_coach.persistence import PostgresStore, SQLiteStore
 from poker_coach.persistence.sqlite_store import StoreNotFound
@@ -42,6 +44,8 @@ class AppConfig:
     max_request_bytes: int = 1_000_000
     max_timeout_seconds: float = 120.0
     rate_limit_per_minute: int = 120
+    redis_url: str | None = None
+    redis_worker_in_process: bool = True
 
     @classmethod
     def from_environment(cls) -> AppConfig:
@@ -59,6 +63,9 @@ class AppConfig:
             rate_limit_per_minute=_env_int(
                 "POKER_COACH_RATE_LIMIT_PER_MINUTE", cls.rate_limit_per_minute, minimum=0
             ),
+            redis_url=getenv("POKER_COACH_REDIS_URL") or None,
+            redis_worker_in_process=getenv("POKER_COACH_REDIS_WORKER_IN_PROCESS", "1").lower()
+            in {"1", "true", "yes"},
         )
 
 
@@ -68,6 +75,31 @@ class ApiError(ValueError):
         self.details = details
         self.status_code = status_code
         super().__init__(message)
+
+
+def _create_job_backend(
+    config: AppConfig, adapter: PokerKitAdapter, executor
+) -> InProcessJobBackend | RedisJobBackend:
+    """Select the analysis job backend: in-process, or Redis with a worker thread."""
+    if not config.redis_url:
+        return InProcessJobBackend(
+            adapter, executor, default_timeout=config.max_timeout_seconds
+        )
+    from poker_coach.jobs import AnalysisWorker, RedisJobBackend, RedisJobQueue
+
+    queue = RedisJobQueue(config.redis_url)
+    if config.redis_worker_in_process:
+        # Local convenience: consume the queue in this process. Deployments
+        # with a dedicated worker set POKER_COACH_REDIS_WORKER_IN_PROCESS=0.
+        worker = AnalysisWorker(
+            queue, adapter=adapter, default_timeout=config.max_timeout_seconds
+        )
+        threading.Thread(
+            target=worker.run_forever,
+            daemon=True,
+            name="poker-analysis-redis-worker",
+        ).start()
+    return RedisJobBackend(queue)
 
 
 def create_app(config: AppConfig | None = None, store: SQLiteStore | PostgresStore | None = None) -> FastAPI:
@@ -84,7 +116,7 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | PostgresSto
     rate_limit_state: dict[str, list[float]] = {}
     rate_limit_lock = Lock()
     analysis_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="poker-analysis")
-    analysis_jobs: dict[str, dict[str, Any]] = {}
+    job_backend = _create_job_backend(config, adapter, analysis_executor)
     app = FastAPI(
         title="Poker Coach API",
         version=config.app_version,
@@ -558,47 +590,12 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | PostgresSto
     async def submit_analysis_job(request: Request):
         scenario = _scenario_from_request(await request.json())
         _set_scenario_context(request, scenario)
-        for stale_id, stale_job in list(analysis_jobs.items()):
-            if stale_job["status"] in {"completed", "failed", "cancelled", "timeout"}:
-                analysis_jobs.pop(stale_id, None)
-        if len(analysis_jobs) >= 64:
+        if job_backend.active_count() >= 64:
             raise ApiError("analysis_queue_full", "too many analysis jobs are active", status_code=429)
-        job_id = uuid4().hex
-        cancel_event = Event()
-        analysis_jobs[job_id] = {
-            "job_id": job_id,
-            "status": "queued",
-            "cancel_event": cancel_event,
-            "created_at": time.time(),
-            "result": None,
-            "error": None,
-        }
-
-        def run_job() -> None:
-            job = analysis_jobs[job_id]
-            job["status"] = "running"
-            started = time.perf_counter()
-            try:
-                result = analyze_scenario(
-                    scenario,
-                    adapter=adapter,
-                    cancel_event=cancel_event,
-                    timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
-                )
-                job["result"] = result
-                job["execution_ms"] = round((time.perf_counter() - started) * 1000, 3)
-                job["status"] = "completed"
-            except AnalysisCancelled as exc:
-                job["error"] = str(exc)
-                job["status"] = "cancelled"
-            except AnalysisTimeout as exc:
-                job["error"] = str(exc)
-                job["status"] = "timeout"
-            except Exception as exc:  # pragma: no cover - defensive worker boundary
-                job["error"] = str(exc)
-                job["status"] = "failed"
-
-        analysis_executor.submit(run_job)
+        job_id = job_backend.submit(
+            scenario,
+            timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
+        )
         return {
             "schemaVersion": scenario.schema_version,
             "requestId": request.state.request_id,
@@ -608,33 +605,25 @@ def create_app(config: AppConfig | None = None, store: SQLiteStore | PostgresSto
 
     @app.get("/v1/analysis/jobs/{job_id}")
     async def get_analysis_job(request: Request, job_id: str):
-        job = analysis_jobs.get(job_id)
-        if job is None:
-            raise StoreNotFound(job_id)
-        result = job.get("result")
+        job = job_backend.get(job_id)
         return {
             "schemaVersion": 1,
             "requestId": request.state.request_id,
             "jobId": job_id,
             "status": job["status"],
-            "executionMs": job.get("execution_ms"),
+            "executionMs": job.get("executionMs"),
             "error": job.get("error"),
-            "analysis": result.to_dict() if result is not None else None,
+            "analysis": job.get("analysis"),
         }
 
     @app.delete("/v1/analysis/jobs/{job_id}", status_code=202)
     async def cancel_analysis_job(request: Request, job_id: str):
-        job = analysis_jobs.get(job_id)
-        if job is None:
-            raise StoreNotFound(job_id)
-        if job["status"] in {"queued", "running"}:
-            job["cancel_event"].set()
-            job["status"] = "cancellation_requested"
+        status = job_backend.cancel(job_id)
         return {
             "schemaVersion": 1,
             "requestId": request.state.request_id,
             "jobId": job_id,
-            "status": job["status"],
+            "status": status,
         }
 
     @app.post("/v1/teaching")
