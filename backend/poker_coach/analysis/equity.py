@@ -20,6 +20,7 @@ from .range_analysis import expand_range
 
 @dataclass
 class _Accumulator:
+    weighted: bool = False
     hero_wins: int = 0
     villain_wins: int = 0
     ties: int = 0
@@ -33,14 +34,19 @@ class _Accumulator:
         self.trials += 1
         if hero_key > villain_key:
             self.hero_wins += 1
-            self.hero_mass += weight
         elif villain_key > hero_key:
             self.villain_wins += 1
-            self.villain_mass += weight
         else:
             self.ties += 1
-            self.tie_mass += weight
+        if not self.weighted:
+            return
         self.total_mass += weight
+        if hero_key > villain_key:
+            self.hero_mass += weight
+        elif villain_key > hero_key:
+            self.villain_mass += weight
+        else:
+            self.tie_mass += weight
 
 
 class EquityEngine:
@@ -120,7 +126,7 @@ class EquityEngine:
             missing = 5 - len(board)
             operations = sum(math.comb(len(deck(known + combo.cards)), missing) for combo in combos)
             self._ensure_workload(operations)
-            accumulator = _Accumulator()
+            accumulator = _Accumulator(weighted=True)
             started_at = time.monotonic()
             for combo in combos:
                 for runout in _iter_runouts(deck(known + combo.cards), missing):
@@ -135,7 +141,7 @@ class EquityEngine:
             return self._result(accumulator, algorithm, weighted=True)
         self._require_sampling(trials, random_seed)
         rng = random.Random(random_seed)
-        accumulator = _Accumulator()
+        accumulator = _Accumulator(weighted=True)
         started_at = time.monotonic()
         for _ in range(trials):
             self._checkpoint(accumulator.trials, cancel_event, timeout_seconds, started_at)
@@ -183,7 +189,7 @@ class EquityEngine:
                         5 - len(board),
                     )
             self._ensure_workload(operations)
-            accumulator = _Accumulator()
+            accumulator = _Accumulator(weighted=True)
             started_at = time.monotonic()
             for hero in hero_combos:
                 for villain in villain_combos:
@@ -206,7 +212,7 @@ class EquityEngine:
             return self._result(accumulator, algorithm, weighted=True)
         self._require_sampling(trials, random_seed)
         rng = random.Random(random_seed)
-        accumulator = _Accumulator()
+        accumulator = _Accumulator(weighted=True)
         started_at = time.monotonic()
         for _ in range(trials):
             self._checkpoint(accumulator.trials, cancel_event, timeout_seconds, started_at)
@@ -257,13 +263,25 @@ class EquityEngine:
         random_seed: int | None = None,
         weighted: bool,
     ) -> EquityResult:
-        if accumulator.trials == 0 or accumulator.total_mass == 0:
+        if accumulator.trials == 0 or (
+            accumulator.weighted and accumulator.total_mass == 0
+        ):
             raise InvalidAnalysisInput("equity calculation produced no trials")
+        if accumulator.weighted:
+            hero_mass = accumulator.hero_mass
+            villain_mass = accumulator.villain_mass
+            tie_mass = accumulator.tie_mass
+            total_mass = accumulator.total_mass
+        else:
+            hero_mass = Decimal(accumulator.hero_wins)
+            villain_mass = Decimal(accumulator.villain_wins)
+            tie_mass = Decimal(accumulator.ties)
+            total_mass = Decimal(accumulator.trials)
         with localcontext() as context:
             context.prec = 28
-            hero_equity = (accumulator.hero_mass + accumulator.tie_mass / 2) / accumulator.total_mass
-            villain_equity = (accumulator.villain_mass + accumulator.tie_mass / 2) / accumulator.total_mass
-            tie_probability = accumulator.tie_mass / accumulator.total_mass
+            hero_equity = (hero_mass + tie_mass / 2) / total_mass
+            villain_equity = (villain_mass + tie_mass / 2) / total_mass
+            tie_probability = tie_mass / total_mass
         confidence = standard_error = None
         if algorithm is EquityAlgorithm.MONTE_CARLO:
             p = float(hero_equity)

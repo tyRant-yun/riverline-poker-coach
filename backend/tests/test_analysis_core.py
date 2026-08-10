@@ -138,6 +138,45 @@ def test_best_hand_categories_cover_all_holdem_categories(
     assert analyze_hand(hole_cards, board).category.value == expected_category
 
 
+def test_fast_hand_evaluator_matches_bruteforce_reference():
+    """Differential test: cached direct evaluator == max over five-card subsets."""
+    import random
+
+    from poker_coach.analysis.cards import (
+        _best_hand_key_bruteforce,
+        best_hand_key,
+        deck,
+    )
+
+    rng = random.Random(20260810)
+    full_deck = deck()
+    for size in (5, 6, 7):
+        for _ in range(400):
+            cards = tuple(rng.sample(full_deck, size))
+            assert best_hand_key(cards) == _best_hand_key_bruteforce(cards), cards
+
+    # Category ordering spot checks.
+    straight_flush = ("As", "Ks", "Qs", "Js", "Ts", "2d", "3c")
+    quads = ("Ah", "Ad", "Ac", "As", "2c", "3c", "4c")
+    full_house = ("Ah", "Ad", "Ac", "Ks", "Kd", "2c", "3c")
+    flush = ("Ah", "Kh", "Qh", "2h", "3h", "4c", "5d")
+    straight = ("9s", "8d", "7c", "6h", "5s", "2c", "3d")
+    high_card = ("As", "Kd", "Qc", "Jh", "9s", "2c", "3d")
+    ordered = [
+        best_hand_key(straight_flush),
+        best_hand_key(quads),
+        best_hand_key(full_house),
+        best_hand_key(flush),
+        best_hand_key(straight),
+        best_hand_key(high_card),
+    ]
+    assert ordered == sorted(ordered, reverse=True)
+
+    # Ace-low straight is a five-high straight, not high-card.
+    assert best_hand_key(("As", "2d", "3c", "4h", "5s", "9c", "Jd"))[0] == 4
+    assert best_hand_key(("As", "2d", "3c", "4h", "5s", "9c", "Jd"))[1] == (5,)
+
+
 def test_double_gutter_and_counterfeit_risk_are_not_labeled_as_made_hands():
     double_gutter = analyze_hand(("2c", "4d"), ("5h", "6s", "8c"))
     assert "double_gutter" in [draw.value for draw in double_gutter.draws]

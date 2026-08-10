@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from functools import lru_cache
 from itertools import combinations
 from typing import Iterable
 
@@ -56,11 +57,15 @@ def ensure_unique(cards: Iterable[str], label: str = "cards") -> tuple[Card, ...
 
 
 def straight_high(ranks: Iterable[int]) -> int | None:
+    """Return the high card of the highest straight present, or None."""
     rank_set = set(ranks)
+    best: int | None = None
     for sequence in STRAIGHT_SEQUENCES:
         if set(sequence).issubset(rank_set):
-            return 5 if sequence == (14, 2, 3, 4, 5) else sequence[-1]
-    return None
+            high = 5 if sequence == (14, 2, 3, 4, 5) else sequence[-1]
+            if best is None or high > best:
+                best = high
+    return best
 
 
 def evaluate_five(cards: tuple[str, ...]) -> tuple[int, tuple[int, ...]]:
@@ -100,7 +105,12 @@ def evaluate_five(cards: tuple[str, ...]) -> tuple[int, tuple[int, ...]]:
     return 0, tuple(sorted(ranks, reverse=True))
 
 
-def best_hand_key(cards: Iterable[str]) -> tuple[int, tuple[int, ...]]:
+def _best_hand_key_bruteforce(cards: Iterable[str]) -> tuple[int, tuple[int, ...]]:
+    """Reference evaluator: maximum five-card key over all five-card subsets.
+
+    Kept as an independent oracle for differential tests of the fast
+    evaluator; production callers use ``best_hand_key``.
+    """
     normalized = tuple(cards)
     if len(normalized) < 5:
         counts = Counter(rank(card) for card in normalized)
@@ -115,6 +125,68 @@ def best_hand_key(cards: Iterable[str]) -> tuple[int, tuple[int, ...]]:
             return 1, (groups[0][1],)
         return 0, tuple(sorted((rank(card) for card in normalized), reverse=True))
     return max(evaluate_five(tuple(five)) for five in combinations(normalized, 5))
+
+
+@lru_cache(maxsize=131_072)
+def _best_hand_key_cached(cards: tuple[str, ...]) -> tuple[int, tuple[int, ...]]:
+    """Fast direct evaluator for 5-7 distinct cards (sorted canonical key).
+
+    Avoids enumerating the 21 five-card subsets per evaluation; cached so
+    postflop Monte Carlo trials that share runouts (few distinct boards)
+    hit the cache instead of re-evaluating.
+    """
+    ranks = [RANK_VALUE[card[0]] for card in cards]
+    rank_set = set(ranks)
+    counts = Counter(ranks)
+    groups = sorted(((count, value) for value, count in counts.items()), reverse=True)
+    flush_suit = next(
+        (suit_name for suit_name in SUITS if sum(card[1] == suit_name for card in cards) >= 5),
+        None,
+    )
+    if flush_suit is not None:
+        flush_ranks = sorted(
+            (RANK_VALUE[card[0]] for card in cards if card[1] == flush_suit),
+            reverse=True,
+        )
+        high = straight_high(flush_ranks)
+        if high is not None:
+            return 8, (high,)
+        return 5, tuple(flush_ranks[:5])
+    high = straight_high(rank_set)
+    if groups[0][0] == 4:
+        quad = groups[0][1]
+        kicker = max(value for value in rank_set if value != quad)
+        return 7, (quad, kicker)
+    if groups[0][0] == 3 and len(groups) > 1 and groups[1][0] == 2:
+        return 6, (groups[0][1], groups[1][1])
+    if high is not None:
+        return 4, (high,)
+    if groups[0][0] == 3:
+        trips = groups[0][1]
+        kickers = tuple(sorted((value for value in rank_set if value != trips), reverse=True))
+        return 3, (trips, *kickers[:2])
+    pairs = [value for count, value in groups if count == 2]
+    if len(pairs) >= 2:
+        top = tuple(sorted(pairs, reverse=True)[:2])
+        kicker = max(value for value in rank_set if value not in top)
+        return 2, (*top, kicker)
+    if pairs:
+        pair = pairs[0]
+        kickers = tuple(sorted((value for value in rank_set if value != pair), reverse=True))
+        return 1, (pair, *kickers[:3])
+    return 0, tuple(sorted(rank_set, reverse=True)[:5])
+
+
+def best_hand_key(cards: Iterable[str]) -> tuple[int, tuple[int, ...]]:
+    """Return a comparable best-hand key: category then tie breakers.
+
+    Hands with fewer than five cards use the short form; five to seven
+    cards use the cached direct evaluator.
+    """
+    normalized = tuple(cards)
+    if len(normalized) < 5:
+        return _best_hand_key_bruteforce(normalized)
+    return _best_hand_key_cached(tuple(sorted(normalized)))
 
 
 def category_name(category_value: int) -> str:
