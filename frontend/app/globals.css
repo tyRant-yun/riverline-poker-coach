@@ -129,10 +129,11 @@ strong { font-weight: 700; }
 .workspace {
   display: grid;
   grid-template-columns: 330px minmax(0, 1fr) 330px;
-  gap: 16px;
+  gap: 20px;
   align-items: start;
 }
-.left-rail, .right-rail { display: grid; gap: 16px; align-content: start; }
+.left-rail, .right-rail { display: grid; gap: 16px; align-content: start; min-width: 0; }
+.left-rail > *, .right-rail > * { min-width: 0; }
 .table-area { min-width: 0; }
 
 .panel {
@@ -415,8 +416,12 @@ select { width: 100%; }
 /* Cards stack single-column (roomy card fields); numeric settings stay 2-col. */
 .form-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-.card-inputs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 12px 0; }
-.card-inputs input { text-align: center; }
+.card-inputs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+.card-inputs input { text-align: center; min-width: 0; }
+/* Board cells are narrow (5 per rail column): stack the pick button under
+   the input instead of squeezing them side by side. */
+.card-inputs .card-slot { flex-direction: column; gap: 4px; }
+.card-inputs .pick-toggle { width: 100%; font-size: 9px; padding: 3px 4px; }
 
 /* Review mode: checkbox + title on one line, muted description below. */
 .review-mode { display: grid; gap: 3px; margin: 2px 0 10px; }
@@ -807,7 +812,7 @@ footer { color: var(--color-text-muted); font-size: 11px; padding: 20px 3px 0; }
 
 /* ---- Responsive ---- */
 @media (max-width: 1299px) {
-  .workspace { grid-template-columns: 290px minmax(0, 1fr) 290px; gap: 12px; }
+  .workspace { grid-template-columns: 290px minmax(0, 1fr) 290px; gap: 16px; }
   .left-rail, .right-rail { gap: 12px; }
 }
 @media (max-width: 900px) {
