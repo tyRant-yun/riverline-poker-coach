@@ -10,6 +10,7 @@ from poker_coach.analysis.models import InvalidAnalysisInput
 from poker_coach.api import create_app
 from poker_coach.domain.models import (
     EquityAlgorithm,
+    RangeSpec,
     ScenarioSpec,
     positions_for_table,
 )
@@ -177,6 +178,86 @@ class TestMultiwayEquityEngine:
                 [(0, ("As", "Kd")), (1, ("As", "Kd"))],
                 ("2c", "7d", "Jh", "9s", "3h"),
             )
+
+
+def _weighted_range(label: str, entries: dict[str, str]) -> RangeSpec:
+    return RangeSpec.model_validate(
+        {
+            "rangeId": f"test-{label}",
+            "name": label,
+            "version": "1",
+            "source": "user_defined",
+            "matrix169": entries,
+        }
+    )
+
+
+class TestWeightedMultiwayMonteCarloParity:
+    """Weighted MC must converge to the exact joint-distribution equity.
+
+    The spot is small enough to enumerate exactly (4 legal combo tuples on a
+    flop). Weights are deliberately lopsided (0.9 vs 0.1) so the old buggy
+    implementation — which sampled by weight and then re-multiplied the same
+    weights into the accumulator — visibly diverges from the exact result.
+    """
+
+    # Board 2c 7d Jh. Seat 0 holds As Ks. Seat 1 is a weighted range of
+    # Qh Qc (0.9, strong top pair) vs 6h 6c (0.1, dominated underpair);
+    # seat 2 likewise 8h 8c (0.9) vs 4h 4c (0.1). No cross-seat overlaps,
+    # so acceptance is 1.0 and the test isolates the weighting bias.
+    WEIGHTED_SPOT = [
+        (0, ("As", "Ks")),
+        (1, _weighted_range("seat1", {"QQ": "0.9", "66": "0.1"})),
+        (2, _weighted_range("seat2", {"88": "0.9", "44": "0.1"})),
+    ]
+    BOARD = ("2c", "7d", "Jh")
+    TRIALS = 50_000
+    TOLERANCE = Decimal("0.02")
+
+    def test_exact_enumeration_is_the_reference(self):
+        result = ENGINE.evaluate_multiway(self.WEIGHTED_SPOT, self.BOARD)
+        assert result.weighted
+        assert result.algorithm is EquityAlgorithm.EXACT_ENUMERATION
+        assert abs(sum(result.equity_by_seat.values()) - Decimal("1")) < Decimal("1e-9")
+        # The 0.9-weight combos dominate; QQ must beat 66 in equity.
+        assert result.equity_by_seat[1] > result.equity_by_seat[0]
+        assert result.equity_by_seat[1] > Decimal("0.5")
+
+    def test_monte_carlo_converges_to_exact_for_every_seat(self):
+        exact = ENGINE.evaluate_multiway(self.WEIGHTED_SPOT, self.BOARD)
+        sampled = ENGINE.evaluate_multiway(
+            self.WEIGHTED_SPOT,
+            self.BOARD,
+            algorithm=EquityAlgorithm.MONTE_CARLO,
+            trials=self.TRIALS,
+            random_seed=1234,
+        )
+        assert sampled.algorithm is EquityAlgorithm.MONTE_CARLO
+        assert sampled.weighted
+        assert sampled.trials == self.TRIALS
+        for seat, share in exact.equity_by_seat.items():
+            assert abs(sampled.equity_by_seat[seat] - share) < self.TOLERANCE, (
+                f"seat {seat}: MC {sampled.equity_by_seat[seat]} vs exact {share}"
+            )
+        assert abs(sum(sampled.equity_by_seat.values()) - Decimal("1")) < Decimal("1e-9")
+
+    def test_weighted_monte_carlo_is_seed_deterministic(self):
+        first = ENGINE.evaluate_multiway(
+            self.WEIGHTED_SPOT,
+            self.BOARD,
+            algorithm=EquityAlgorithm.MONTE_CARLO,
+            trials=self.TRIALS,
+            random_seed=99,
+        )
+        second = ENGINE.evaluate_multiway(
+            self.WEIGHTED_SPOT,
+            self.BOARD,
+            algorithm=EquityAlgorithm.MONTE_CARLO,
+            trials=self.TRIALS,
+            random_seed=99,
+        )
+        assert first.equity_by_seat == second.equity_by_seat
+        assert first.trials == second.trials == self.TRIALS
 
 
 class TestMultiwayAnalysisApi:

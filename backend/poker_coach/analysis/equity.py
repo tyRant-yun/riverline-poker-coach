@@ -25,6 +25,13 @@ from .models import (
 from .range_analysis import expand_range
 
 
+# Retry budget for whole-tuple rejection sampling. Each attempt draws one
+# weighted combo per seat, so 10k attempts is cheap; hitting the cap means
+# the legal joint space is effectively empty (e.g. ranges that cannot be
+# dealt non-overlapping).
+_MAX_SAMPLING_ATTEMPTS = 10_000
+
+
 @dataclass
 class _Accumulator:
     weighted: bool = False
@@ -358,26 +365,21 @@ class EquityEngine:
         started_at = time.monotonic()
         for _ in range(trials):
             self._checkpoint(accumulator.trials, cancel_event, timeout_seconds, started_at)
-            sampled: list[tuple[int, WeightedCombo]] = []
+            sampled = self._sample_non_overlapping_multiway(rng, combo_lists, board)
             cards = tuple(board)
-            for seat, combos, _ in normalized:
-                for _ in range(100):
-                    combo = _weighted_choice(rng, combos)
-                    if not set(cards).intersection(combo.cards):
-                        break
-                else:
-                    raise InvalidAnalysisInput(
-                        "could not sample non-overlapping multiway combos"
-                    )
+            for combo in sampled:
                 cards = cards + combo.cards
-                sampled.append((seat, combo))
             runout = tuple(rng.sample(deck(cards), 5 - len(board)))
+            # Each accepted joint sample is drawn from the exact legal joint
+            # distribution (weights acted once, inside the proposal), so every
+            # trial contributes equal mass: re-weighting here would double-count
+            # the combo weights and polarize the estimate.
             accumulator.add(
                 [
                     (seat, best_hand_key(combo.cards + board + runout))
-                    for seat, combo in sampled
+                    for (seat, _, _), combo in zip(normalized, sampled)
                 ],
-                _trial_weight(tuple(combo for _, combo in sampled)),
+                Decimal("1"),
             )
         return self._multiway_result(
             accumulator,
@@ -432,12 +434,48 @@ class EquityEngine:
         )
 
     def _sample_non_overlapping_pair(self, rng, hero_combos, villain_combos):
-        for _ in range(100):
+        """Sample a legal hero/villain combo pair from the joint distribution.
+
+        Both seats are drawn independently from their own weighted combo
+        distributions; overlapping pairs are rejected wholesale and redrawn.
+        Accepted pairs are i.i.d. from P(h, v) ∝ weight(h) * weight(v) over
+        non-overlapping pairs, so each trial counts once with weight one.
+        """
+        for _ in range(_MAX_SAMPLING_ATTEMPTS):
             hero = _weighted_choice(rng, hero_combos)
             villain = _weighted_choice(rng, villain_combos)
             if not set(hero.cards).intersection(villain.cards):
                 return hero, villain
         raise InvalidAnalysisInput("could not sample non-overlapping range combos")
+
+    @staticmethod
+    def _sample_non_overlapping_multiway(
+        rng: random.Random,
+        combo_lists: list[tuple[WeightedCombo, ...]],
+        board: tuple[Card, ...],
+    ) -> tuple[WeightedCombo, ...]:
+        """Sample a legal joint combo tuple from the exact joint distribution.
+
+        Each seat is drawn independently from its own weighted combo
+        distribution (proposal P ∝ ∏ weight_i); tuples with any overlapping
+        cards are rejected wholesale and redrawn. This is standard rejection
+        sampling: accepted draws are i.i.d. from the conditional distribution
+        Q(tuple | legal) ∝ ∏ weight_i(combo_i) over legal non-overlapping
+        tuples, which is exactly the target joint distribution. Unlike
+        seat-by-seat conditional rejection, this is unbiased regardless of
+        how the per-seat ranges overlap.
+        """
+        board_cards = set(board)
+        for _ in range(_MAX_SAMPLING_ATTEMPTS):
+            sampled = tuple(_weighted_choice(rng, combos) for combos in combo_lists)
+            seen = set(board_cards)
+            for combo in sampled:
+                if seen.intersection(combo.cards):
+                    break
+                seen.update(combo.cards)
+            else:
+                return sampled
+        raise InvalidAnalysisInput("could not sample non-overlapping multiway combos")
 
     def _add_showdown(
         self,
