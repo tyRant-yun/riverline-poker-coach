@@ -23,6 +23,12 @@ redis = [
     "redis==8.1.0",
 ]
 
+# migrations/ lives beside poker_coach/ at the backend root; exclude it from
+# the editable install (flat-layout would otherwise fail the build).
+[tool.setuptools.packages.find]
+include = ["poker_coach*"]
+exclude = ["migrations*", "tests*"]
+
 [dependency-groups]
 test = [
     "fakeredis==2.37.0",
