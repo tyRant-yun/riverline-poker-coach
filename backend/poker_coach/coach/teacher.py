@@ -10,13 +10,15 @@ from poker_coach.domain.models import (
     EvidenceBundle,
     EvidenceReference,
     LegalActions,
-    PracticeQuestion,
     RecommendedAction,
     ScenarioSpec,
     TeachingResponse,
     TeachingText,
 )
 from poker_coach.rules import PokerKitAdapter
+from poker_coach.strategy.models import MatchLevel
+
+from .tools import TeachingToolGateway
 
 
 class TeachingService:
@@ -28,6 +30,7 @@ class TeachingService:
     """
 
     version = "teaching-core-0.1"
+    prompt_version = "teaching-prompt-0.1"
 
     def __init__(self, adapter: PokerKitAdapter | None = None):
         self.adapter = adapter or PokerKitAdapter()
@@ -40,14 +43,22 @@ class TeachingService:
         depth: str = "intermediate",
         user_question: str | None = None,
     ) -> TeachingResponse:
+        if depth not in {"beginner", "intermediate", "advanced"}:
+            raise ValueError("depth must be beginner, intermediate, or advanced")
         analysis = analysis or analyze_scenario(scenario, adapter=self.adapter)
-        evidence = analysis.evidence
-        legal_actions = self._legal_actions_at_node(scenario)
+        tools = TeachingToolGateway(scenario, analysis, adapter=self.adapter)
+        scenario = tools.get_normalized_scenario()
+        evidence = tools.get_evidence_bundle()
+        legal_actions = tools.get_legal_actions()
         refs = _refs
         pot_ref = refs("rules.pot")
         equity_ref = refs("equity.hero") if analysis.equity else None
         required_ref = refs("math.required_equity")
         spr_ref = refs("math.spr") if analysis.metrics.spr is not None else None
+        strategy_match = tools.get_strategy_match()
+        strategy_level_ref = refs("strategy.match_level") if strategy_match else None
+        strategy_difference_ref = refs("strategy.differences") if strategy_match else None
+        strategy_recommendation_ref = refs("strategy.recommendations") if strategy_match else None
 
         if analysis.equity is None:
             summary = TeachingText(
@@ -86,6 +97,43 @@ class TeachingService:
                 ),
             )
 
+        strategy_recommendations = ()
+        legal_action_names = {action.value for action in legal_actions.actions}
+        if (
+            strategy_match
+            and strategy_match.level in {MatchLevel.EXACT, MatchLevel.COMPATIBLE}
+            and strategy_match.recommendations
+        ):
+            strategy_recommendations = tuple(
+                RecommendedAction(
+                    action=item.action,
+                    frequency=item.frequency if strategy_match.can_quote_frequencies else None,
+                    ev=item.ev if strategy_match.can_quote_frequencies else None,
+                    evidenceReferences=(strategy_recommendation_ref,),
+                )
+                for item in strategy_match.recommendations
+                if strategy_recommendation_ref is not None and item.action in legal_action_names
+            )
+            if strategy_recommendations:
+                recommendation = strategy_recommendations
+                basis = basis + (
+                    TeachingText(
+                        text=(
+                            f"策略库返回 {strategy_match.level.value} 匹配；这些是带来源的策划建议，"
+                            "不是未提供的 Solver 频率。"
+                        ),
+                        evidenceReferences=tuple(
+                            ref
+                            for ref in (
+                                strategy_level_ref,
+                                strategy_recommendation_ref,
+                                strategy_difference_ref,
+                            )
+                            if ref is not None
+                        ),
+                    ),
+                )
+
         key_reasons = [
             TeachingText(
                 text=f"Hero 当前牌力分类为 {analysis.hand.made_hand}。",
@@ -103,7 +151,7 @@ class TeachingService:
                     evidenceReferences=[refs("hand.draws"), refs("hand.out_count")],
                 )
             )
-        if spr_ref:
+        if spr_ref and depth != "beginner":
             key_reasons.append(
                 TeachingText(
                     text=f"SPR 为 {analysis.metrics.spr:.3f}，它描述有效筹码相对于底池的结构，不单独决定行动。",
@@ -111,23 +159,46 @@ class TeachingService:
                     evidenceReferences=[spr_ref],
                 )
             )
+        if depth == "advanced" and analysis.range_analysis is not None:
+            key_reasons.append(
+                TeachingText(
+                    text=(
+                        f"范围包含 {analysis.range_analysis.total_combos} 个有效组合，"
+                        f"其中价值组合分类为 {analysis.range_analysis.value_combos} 个；"
+                        "这些分类是当前启发式范围分析，不是 Solver 频率。"
+                    ),
+                    containsNumbers=True,
+                    evidenceReferences=(
+                        refs("range.total_combos"),
+                        refs("range.value_combos"),
+                        refs("range.heuristic"),
+                    ),
+                )
+            )
 
         uncertainty = TeachingText(
             text=(
-                "没有匹配的 Solver 策略数据；所有行动建议都应理解为基于当前证据的原则教学。"
-                if analysis.equity is not None
-                else "缺少对手范围或具体底牌，策略结论不确定性较高。"
+                (
+                    f"策略库匹配等级为 {strategy_match.level.value}；当前没有可引用的精确 Solver 频率，"
+                    "建议仅作为带来源的原则或策划教学。"
+                )
+                if strategy_match
+                else (
+                    "没有匹配的 Solver 策略数据；所有行动建议都应理解为基于当前证据的原则教学。"
+                    if analysis.equity is not None
+                    else "缺少对手范围或具体底牌，策略结论不确定性较高。"
+                )
             ),
-            evidenceReferences=[refs("equity.status")] if analysis.equity is None else [refs("assumptions.equity_algorithm")],
-        )
-        practice = PracticeQuestion(
-            prompt=TeachingText(
-                text="如果对手范围变得更强，你会优先重新检查哪一个证据：底池赔率、牌力类别还是范围组合？",
-                evidenceReferences=(refs("rules.pot"), refs("hand.category")),
+            evidenceReferences=(
+                [strategy_level_ref, strategy_difference_ref]
+                if strategy_match and strategy_level_ref and strategy_difference_ref
+                else [refs("equity.status")]
+                if analysis.equity is None
+                else [refs("assumptions.equity_algorithm")]
             ),
-            expectedEvidenceReferences=(refs("rules.pot"), refs("hand.category")),
         )
         response = TeachingResponse(
+            explanationDepth=depth,
             summary=summary,
             recommendedActions=recommendation,
             recommendationBasis=basis,
@@ -158,7 +229,7 @@ class TeachingService:
             uncertainty=uncertainty,
             evidenceReferences=tuple(item for item in (equity_ref, required_ref, pot_ref) if item),
             followUpQuestion=user_question or "你想把哪个假设改成反事实场景？",
-            practiceQuestion=practice,
+            practiceQuestion=None,
         )
         response.validate_evidence_references(evidence)
         return response
