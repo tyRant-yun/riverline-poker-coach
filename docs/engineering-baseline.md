@@ -19,7 +19,7 @@
 - API、数据库和前端不得暴露 PokerKit 类型。
 - 金额使用整数最小筹码单位，不使用浮点数存储筹码。
 - 确定性计算、枚举、模拟、策划策略、Solver 结果和原理教学必须标明来源等级。
-- 不引入 TexasSolver 或 postflop-solver 的 AGPL 源代码。
+- 不引入 TexasSolver 或 postflop-solver 的 AGPL 源代码（用户已放宽：项目非商用、无收益；AGPL 引入仅限"整体 AGPL 许可"或"隔离 API 服务"两条路径，见 docs/dependency-inventory.md 许可证政策；路径选定前维持只读研究）。
 - 首版不实现动态 Solver、视觉输入、第三方牌桌接入、真钱和多人桌。
 
 ## 当前限制

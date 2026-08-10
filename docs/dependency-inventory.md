@@ -52,8 +52,12 @@
 - 每次新增或升级依赖必须记录名称、版本、许可证、来源和用途。
 - 直接依赖和锁文件解析出的间接依赖都必须进入自动化清单。
 - 必须标记 MIT、Apache-2.0、BSD、AGPL 等许可证，并在引入前审查传染性义务。
-- 不复制或直接集成 TexasSolver、postflop-solver 的 AGPL 源代码；它们只能作为行为和界面参考。
-- OpenSpiel、RLCard、RoboPoker、rs-poker 不进入 MVP 生产部署依赖；研究验证要放在隔离环境并单独记录。
+- **项目定位**：用户明确本项目**非商用、无收益**，可以适当放宽复用边界（2026-08-10 确认）。但注意 AGPL 的传染性义务**不以商用为前提**：无论是否营利，把 AGPL 代码并入本项目都会要求合并作品按 AGPL 分发并提供源码。因此 AGPL 的引入路径只有两条：
+  1. **隔离服务路径（推荐）**：AGPL 引擎（如 TexasSolver）作为独立进程/HTTP 服务运行，与主项目仅通过 API 交互（不构成衍生作品），主项目保持宽松许可。solver 输出数据（求解结果 JSON）不属于代码，可自由导入。
+  2. **整体 AGPL 路径**：项目整体采用 AGPL-3.0 许可证，可把 TexasSolver/postflop-solver 代码直接集成进求解服务；代价是项目永远以 AGPL 分发（未来无法闭源销售或嵌入）。非商用定位与 AGPL 义务兼容。
+- 许可干净、可直接复用的候选（无需上述任一路径）：TexasHoldemSolverJava（MIT）、rs-poker（Apache-2.0）、krukah/robopoker（MIT，MCTS，仅训练桌 bot 方向）。
+- 在用户选定第 1 或第 2 条路径之前，TexasSolver / postflop-solver 的 AGPL 源代码维持"只读研究"状态（ADR-0004）。
+- OpenSpiel、RLCard 不进入生产部署依赖；研究验证放在隔离环境并单独记录。
 - 上游版本升级必须重新跑金标牌谱、属性测试和许可证检查。
 
 ## 待办
