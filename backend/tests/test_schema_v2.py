@@ -230,14 +230,17 @@ class TestSchemaV2:
 
 
 class TestHonestBoundaries:
-    def test_8max_replay_raises_until_phase_8b(self):
+    def test_8max_scenario_replays_without_a_hero_villain_pair(self):
+        # Phase 8B: multiway replay works; no single villain is required.
         scenario = v2_scenario(8)
-        with pytest.raises(ValueError, match="table_size=2"):
-            PokerKitAdapter().replay(scenario)
-        # The error is a structured ReplayError (422), not a bare 500.
-        with pytest.raises(Exception) as exc_info:
-            PokerKitAdapter().replay(scenario)
-        assert exc_info.value.code == "multiway_not_supported"
+        result = PokerKitAdapter().replay(scenario)
+        state = result.final_state
+        assert len(state.stacks) == 8
+        assert state.hand_in_progress is True
+        assert state.pot == 150  # blinds posted
+        # Preflop first actor is UTG (seat 3 with button on seat 0).
+        assert state.actor_seat == 3
+        assert set(state.legal_actions.actions) == {"raise_to", "fold", "call", "all_in"}
 
     def test_multiway_solver_spot_is_unsupported(self):
         scenario = v2_scenario(
@@ -320,16 +323,22 @@ class TestApiContract:
         assert normalized["schemaVersion"] == 2
         assert normalized["knownHoleCardsBySeat"]["0"] == ["Kd", "As"]
 
-    def test_validate_rejects_multiway_replay_with_structured_error(self):
+    def test_validate_accepts_multiway_scenario(self):
         from fastapi.testclient import TestClient
 
         from poker_coach.api import create_app
 
         client = TestClient(create_app())
-        payload = v2_scenario(8).to_dict()
+        payload = v2_scenario(
+            8,
+            decisionPoint={"street": "preflop", "actorSeat": 3, "afterSequence": 0},
+        ).to_dict()
         response = client.post("/v1/scenarios/validate", json=payload)
-        assert response.status_code == 422
-        assert response.json()["error"]["code"] == "multiway_not_supported"
+        assert response.status_code == 200
+        body = response.json()
+        assert body["valid"] is True
+        assert len(body["finalState"]["stacks"]) == 8
+        assert body["finalState"]["actorSeat"] == 3
 
     def test_solve_jobs_reject_multiway_spot(self):
         from fastapi.testclient import TestClient

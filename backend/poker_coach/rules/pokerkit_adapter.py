@@ -161,26 +161,22 @@ class PokerKitAdapter:
     def _create_initial_state(self, scenario: ScenarioSpec) -> tuple[Any, _SeatMap]:
         from pokerkit import Automation, Mode, NoLimitTexasHoldem
 
-        if scenario.table_size != 2:
-            # Phase 8A accepts multiway schemas; the HU replay pipeline is
-            # extended to 2-8 seats in Phase 8B. Reject loudly rather than
-            # silently replaying with the wrong player set.
-            raise ReplayError(
-                "multiway_not_supported",
-                "replay currently supports table_size=2 (multiway replay arrives in a later phase)",
-            )
-        big_blind_seat = next(
-            seat.seat_id for seat in scenario.seats if seat.position.value == "big_blind"
-        )
+        n = scenario.table_size
         button_seat = scenario.button_seat
+        # PokerKit orders players from the small blind around to the button:
+        # player 0 = seat left of the button, ..., player n-1 = button seat.
+        # Heads-up is the same formula (player 0 = the non-button seat), and
+        # PokerKit internally reverses the blind amounts for two players.
+        player_to_seat = {index: (button_seat + index + 1) % n for index in range(n)}
+        seat_to_player = {seat: index for index, seat in player_to_seat.items()}
         seat_map = _SeatMap(
-            seat_to_player={big_blind_seat: 0, button_seat: 1},
-            player_to_seat={0: big_blind_seat, 1: button_seat},
-            big_blind_seat=big_blind_seat,
+            seat_to_player=seat_to_player,
+            player_to_seat=player_to_seat,
+            big_blind_seat=player_to_seat[1] if n > 2 else player_to_seat[0],
             button_seat=button_seat,
         )
         stacks_by_seat = {seat.seat_id: seat.starting_stack for seat in scenario.seats}
-        starting_stacks = (stacks_by_seat[big_blind_seat], stacks_by_seat[button_seat])
+        starting_stacks = tuple(stacks_by_seat[player_to_seat[i]] for i in range(n))
         automations = [
             Automation.BET_COLLECTION,
             Automation.RUNOUT_COUNT_SELECTION,
@@ -198,24 +194,33 @@ class PokerKitAdapter:
             (scenario.small_blind, scenario.big_blind),
             scenario.big_blind,
             starting_stacks,
-            2,
+            n,
             mode=Mode.CASH_GAME,
         )
-
-        # PokerKit's two-player ordering is BB at index 0 and BTN/SB at index 1.
+        # Small blind first, then big blind (PokerKit assigns the amounts,
+        # reversing them internally for heads-up).
         state.post_blind_or_straddle(0)
         state.post_blind_or_straddle(1)
-        hero_player = seat_map.seat_to_player[scenario.hero_seat]
-        villain_player = 1 - hero_player
-        hole_cards_by_player: dict[int, str] = {
-            hero_player: "".join(scenario.hero_hole_cards),
-            villain_player: "????"
-            if scenario.villain_hole_cards is None
-            else "".join(scenario.villain_hole_cards),
-        }
-        for player_index in (0, 1):
-            state.deal_hole(hole_cards_by_player[player_index], player_index=player_index)
+        for player_index in range(n):
+            seat_id = player_to_seat[player_index]
+            cards = scenario.known_hole_cards_by_seat.get(seat_id)
+            if cards is not None and len(cards) == 2:
+                state.deal_hole("".join(cards), player_index=player_index)
+            else:
+                state.deal_hole("????", player_index=player_index)
         return state, seat_map
+
+    def _blind_schedule(
+        self, scenario: ScenarioSpec, seat_map: _SeatMap
+    ) -> list[tuple[int, int]]:
+        """Expected forced blind events, in posting order (player 0 then 1)."""
+        if scenario.table_size == 2:
+            amounts = (scenario.big_blind, scenario.small_blind)
+        else:
+            amounts = (scenario.small_blind, scenario.big_blind)
+        return [
+            (seat_map.player_to_seat[index], amounts[index]) for index in (0, 1)
+        ]
 
     def _consume_forced_blind_events(
         self,
@@ -223,10 +228,7 @@ class PokerKitAdapter:
         scenario: ScenarioSpec,
         seat_map: _SeatMap,
     ) -> int:
-        expected = (
-            (seat_map.big_blind_seat, scenario.big_blind),
-            (seat_map.button_seat, scenario.small_blind),
-        )
+        expected = self._blind_schedule(scenario, seat_map)
         cursor = 0
         for event in events:
             if event.action_type is not ActionType.POST_BLIND:
@@ -379,14 +381,27 @@ class PokerKitAdapter:
         scenario: ScenarioSpec,
         seat_map: _SeatMap,
     ) -> None:
-        if scenario.villain_hole_cards is None:
+        if event.actor_seat not in seat_map.seat_to_player:
+            raise ReplayError("unknown_actor", f"seat {event.actor_seat} is not in this table", event.sequence)
+        # A showdown comparison requires the hole cards of every player who
+        # is still live (folded players mucked and do not need cards).
+        folded_players = {
+            operation.player_index
+            for operation in state.operations
+            if type(operation).__name__ == "Folding"
+        }
+        missing = [
+            seat_map.player_to_seat[player_index]
+            for player_index in seat_map.player_to_seat
+            if player_index not in folded_players
+            and len(scenario.known_hole_cards_by_seat.get(seat_map.player_to_seat[player_index], ())) != 2
+        ]
+        if missing:
             raise ReplayError(
                 "showdown_requires_hole_cards",
-                "showdown requires villain_hole_cards in ScenarioSpec",
+                f"showdown requires hole cards for live seats {sorted(missing)}",
                 event.sequence,
             )
-        if event.actor_seat not in seat_map.seat_to_player:
-            raise ReplayError("unknown_actor", f"seat {event.actor_seat} is not in this HU table", event.sequence)
         # With the settlement automations, PokerKit emits showdown and payout
         # operations as soon as the terminal action is replayed. The explicit
         # event is retained as an auditable marker and verified here.
@@ -405,7 +420,7 @@ class PokerKitAdapter:
 
     def _verify_or_award_pot(self, state: Any, event: ActionEvent, seat_map: _SeatMap) -> None:
         if event.actor_seat not in seat_map.seat_to_player:
-            raise ReplayError("unknown_actor", f"seat {event.actor_seat} is not in this HU table", event.sequence)
+            raise ReplayError("unknown_actor", f"seat {event.actor_seat} is not in this table", event.sequence)
         payouts = self._operation_payouts(state, seat_map)
         payout = payouts.get(event.actor_seat, 0)
         if state.all_in_status and state.status and state.actor_index is None:
@@ -432,7 +447,7 @@ class PokerKitAdapter:
         except KeyError as exc:
             raise ReplayError(
                 "unknown_actor",
-                f"seat {event.actor_seat} is not in this HU table",
+                f"seat {event.actor_seat} is not in this table",
                 event.sequence,
             ) from exc
         if state.actor_index != player_index:
@@ -550,8 +565,14 @@ class PokerKitAdapter:
         completed = not state.status and state.total_pot_amount == 0
         if not completed:
             return SettlementResult(completed=False)
-        folded = any(type(operation).__name__ == "Folding" for operation in state.operations)
-        reason = "fold" if folded else "showdown"
+        # A showdown is authoritative for the reason: if PokerKit compared
+        # cards (multiway or heads-up), the pot was won at showdown even when
+        # other players folded earlier in the hand.
+        showdown = any(
+            type(operation).__name__ == "HoleCardsShowingOrMucking"
+            for operation in state.operations
+        )
+        reason = "showdown" if showdown else "fold"
         winners = tuple(sorted(seat for seat, amount in payouts.items() if amount > 0))
         return SettlementResult(
             completed=True,
