@@ -10,7 +10,7 @@ import json
 import re
 from decimal import Decimal
 from enum import Enum
-from typing import Annotated, Any, ClassVar, Mapping
+from typing import Annotated, Any, ClassVar, Literal, Mapping
 
 from pydantic import (
     BaseModel,
@@ -25,6 +25,7 @@ from pydantic import (
 
 
 SCENARIO_SCHEMA_VERSION = 1
+MAX_MONTE_CARLO_TRIALS = 1_000_000
 _CARD_PATTERN = re.compile(r"^(?:[2-9TJQKA][shdc])$")
 _STARTING_HAND_PATTERN = re.compile(r"^(?:[2-9TJQKA])(?:[2-9TJQKA])(?:[so])?$")
 _RANK_ORDER = {rank: index for index, rank in enumerate("23456789TJQKA")}
@@ -328,7 +329,7 @@ class AnalysisAssumptions(DomainModel):
     allow_donk: bool = True
     allow_raise: bool = True
     equity_algorithm: EquityAlgorithm = EquityAlgorithm.EXACT_ENUMERATION
-    simulation_trials: Annotated[StrictInt, Field(gt=0)] | None = None
+    simulation_trials: Annotated[StrictInt, Field(gt=0, le=MAX_MONTE_CARLO_TRIALS)] | None = None
     random_seed: Annotated[StrictInt, Field(ge=0)] | None = None
     strategy_library_version: str | None = None
     solver_version: str | None = None
@@ -531,6 +532,7 @@ class PracticeQuestion(DomainModel):
 
 class TeachingResponse(DomainModel):
     response_version: str = "1"
+    explanation_depth: Literal["beginner", "intermediate", "advanced"] = "intermediate"
     summary: TeachingText
     recommended_actions: tuple[RecommendedAction, ...] = ()
     recommendation_basis: tuple[TeachingText, ...] = ()

@@ -164,6 +164,15 @@ def test_action_ids_must_be_unique_in_a_replay_history():
         )
 
 
+def test_monte_carlo_trials_have_a_hard_workload_limit():
+    with pytest.raises(ValidationError, match="less than or equal to 1000000"):
+        ScenarioSpec.model_validate(
+            minimal_scenario(
+                assumptions={"equityAlgorithm": "monte_carlo", "simulationTrials": 1_000_001, "randomSeed": 7}
+            )
+        )
+
+
 def test_evidence_references_are_checked_against_bundle():
     bundle = EvidenceBundle(
         items=[
