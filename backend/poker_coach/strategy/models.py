@@ -61,7 +61,7 @@ class StrategyArtifact(DomainModel):
     license: str = Field(min_length=1, max_length=128)
     creator: str = Field(min_length=1, max_length=128)
     game_variant: GameVariant = GameVariant.NLHE
-    table_size: StrictInt = Field(ge=2, le=6)
+    table_size: StrictInt = Field(ge=2, le=8)
     stack_min_bb: Decimal = Field(ge=0)
     stack_max_bb: Decimal = Field(ge=0)
     rake_signature: str = Field(min_length=1, max_length=128)

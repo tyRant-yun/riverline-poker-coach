@@ -62,7 +62,12 @@ def test_scenario_rejects_unknown_fields_and_unsupported_version():
         ScenarioSpec.model_validate({**minimal_scenario(), "notAField": True})
 
     with pytest.raises(ValueError, match="unsupported or missing schemaVersion"):
-        ScenarioSpec.from_json('{"schemaVersion": 2}')
+        ScenarioSpec.from_json('{"schemaVersion": 3}')
+
+    # v2 (seat-based) payloads are supported; v1 legacy remains accepted.
+    v2 = ScenarioSpec.model_validate({**minimal_scenario(), "schemaVersion": 2})
+    assert v2.schema_version == 2
+    assert v2.known_hole_cards_by_seat[0] == ("Kd", "As")
 
 
 def test_raise_to_and_bet_amount_semantics_are_distinct():
@@ -127,12 +132,12 @@ def test_known_cards_are_excluded_from_scenario_concrete_ranges():
 
 
 def test_both_hole_cards_and_board_cannot_repeat_known_cards():
-    with pytest.raises(ValidationError, match="hero, villain, and board cards cannot overlap"):
+    with pytest.raises(ValidationError, match="hole cards and board cards cannot overlap"):
         ScenarioSpec.model_validate(
             minimal_scenario(villainHoleCards=["As", "Qh"])
         )
 
-    with pytest.raises(ValidationError, match="hero, villain, and board cards cannot overlap"):
+    with pytest.raises(ValidationError, match="hole cards and board cards cannot overlap"):
         ScenarioSpec.model_validate(
             minimal_scenario(board=["As"], villainHoleCards=["Qh", "Jc"])
         )

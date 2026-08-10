@@ -84,6 +84,13 @@ def build_spot(
         raise SolverUnsupportedError(
             f"solver supports postflop only; got {scenario.decision_point.street.value}"
         )
+    if scenario.table_size != 2:
+        # The sidecar is a heads-up postflop solver. A decision point with
+        # more than two active players is out of scope (multiway analysis is
+        # available, solver is not) — see Phase 8E for the HU bridge.
+        raise SolverUnsupportedError(
+            "solver supports heads-up decision points only; multiway spots are not solvable"
+        )
     adapter = PokerKitAdapter()
     replay = replay or adapter.replay_to_decision(scenario)
     state = replay.final_state

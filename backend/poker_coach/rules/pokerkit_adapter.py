@@ -161,6 +161,14 @@ class PokerKitAdapter:
     def _create_initial_state(self, scenario: ScenarioSpec) -> tuple[Any, _SeatMap]:
         from pokerkit import Automation, Mode, NoLimitTexasHoldem
 
+        if scenario.table_size != 2:
+            # Phase 8A accepts multiway schemas; the HU replay pipeline is
+            # extended to 2-8 seats in Phase 8B. Reject loudly rather than
+            # silently replaying with the wrong player set.
+            raise ReplayError(
+                "multiway_not_supported",
+                "replay currently supports table_size=2 (multiway replay arrives in a later phase)",
+            )
         big_blind_seat = next(
             seat.seat_id for seat in scenario.seats if seat.position.value == "big_blind"
         )

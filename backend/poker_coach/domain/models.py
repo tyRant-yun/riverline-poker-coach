@@ -24,7 +24,10 @@ from pydantic import (
 )
 
 
-SCENARIO_SCHEMA_VERSION = 1
+SCENARIO_SCHEMA_VERSION = 2
+# v1 scenarios (hero/villain fields) are still accepted and normalized to the
+# seat-based canonical form on input.
+LEGACY_SCENARIO_SCHEMA_VERSION = 1
 MAX_MONTE_CARLO_TRIALS = 1_000_000
 _CARD_PATTERN = re.compile(r"^(?:[2-9TJQKA][shdc])$")
 _STARTING_HAND_PATTERN = re.compile(r"^(?:[2-9TJQKA])(?:[2-9TJQKA])(?:[so])?$")
@@ -84,7 +87,7 @@ StartingHand = Annotated[str, BeforeValidator(_normalize_starting_hand)]
 Weight = Annotated[Decimal, BeforeValidator(_normalize_weight)]
 ChipAmount = Annotated[StrictInt, Field(ge=0)]
 PositiveChipAmount = Annotated[StrictInt, Field(gt=0)]
-SeatNumber = Annotated[StrictInt, Field(ge=0, le=5)]
+SeatNumber = Annotated[StrictInt, Field(ge=0, le=7)]
 SequenceNumber = Annotated[StrictInt, Field(ge=1)]
 
 
@@ -132,7 +135,76 @@ class Street(str, Enum):
 
 class SeatPosition(str, Enum):
     BUTTON = "button"
+    SMALL_BLIND = "small_blind"
     BIG_BLIND = "big_blind"
+    UTG = "utg"
+    UTG_PLUS_1 = "utg+1"
+    MP = "mp"
+    HJ = "hj"
+    CUTOFF = "co"
+
+
+# Position order by table size, indexed by (seat_id - button_seat) % table_size.
+# Positions are DERIVED from tableSize + buttonSeat (single source of truth);
+# seat payloads may declare a position but it must match the derivation.
+_POSITION_ORDER_BY_TABLE_SIZE: dict[int, tuple[SeatPosition, ...]] = {
+    2: (SeatPosition.BUTTON, SeatPosition.BIG_BLIND),
+    3: (SeatPosition.BUTTON, SeatPosition.SMALL_BLIND, SeatPosition.BIG_BLIND),
+    4: (
+        SeatPosition.BUTTON,
+        SeatPosition.SMALL_BLIND,
+        SeatPosition.BIG_BLIND,
+        SeatPosition.CUTOFF,
+    ),
+    5: (
+        SeatPosition.BUTTON,
+        SeatPosition.SMALL_BLIND,
+        SeatPosition.BIG_BLIND,
+        SeatPosition.UTG,
+        SeatPosition.CUTOFF,
+    ),
+    6: (
+        SeatPosition.BUTTON,
+        SeatPosition.SMALL_BLIND,
+        SeatPosition.BIG_BLIND,
+        SeatPosition.UTG,
+        SeatPosition.MP,
+        SeatPosition.CUTOFF,
+    ),
+    7: (
+        SeatPosition.BUTTON,
+        SeatPosition.SMALL_BLIND,
+        SeatPosition.BIG_BLIND,
+        SeatPosition.UTG,
+        SeatPosition.MP,
+        SeatPosition.HJ,
+        SeatPosition.CUTOFF,
+    ),
+    8: (
+        SeatPosition.BUTTON,
+        SeatPosition.SMALL_BLIND,
+        SeatPosition.BIG_BLIND,
+        SeatPosition.UTG,
+        SeatPosition.UTG_PLUS_1,
+        SeatPosition.MP,
+        SeatPosition.HJ,
+        SeatPosition.CUTOFF,
+    ),
+}
+
+
+def positions_for_table(table_size: int) -> tuple[SeatPosition, ...]:
+    """Positions in seat order (offset 0 = button) for a given table size."""
+    try:
+        return _POSITION_ORDER_BY_TABLE_SIZE[table_size]
+    except KeyError as exc:
+        raise ValueError(f"unsupported table_size={table_size}") from exc
+
+
+def derive_position(table_size: int, button_seat: int, seat_id: int) -> SeatPosition:
+    """Derive a seat's position from tableSize + buttonSeat alone."""
+    offset = (seat_id - button_seat) % table_size
+    return positions_for_table(table_size)[offset]
 
 
 class ActionType(str, Enum):
@@ -346,16 +418,17 @@ class AnalysisAssumptions(DomainModel):
 class ScenarioSpec(DomainModel):
     schema_version: Annotated[StrictInt, Field(ge=1)] = SCENARIO_SCHEMA_VERSION
     game_variant: GameVariant = GameVariant.NLHE
-    table_size: Annotated[StrictInt, Field(ge=2, le=6)] = 2
+    table_size: Annotated[StrictInt, Field(ge=2, le=8)] = 2
     small_blind: PositiveChipAmount = 50
     big_blind: PositiveChipAmount = 100
     ante: ChipAmount = 0
     rake_config: RakeConfig = Field(default_factory=RakeConfig)
     button_seat: SeatNumber = 0
     hero_seat: SeatNumber = 0
-    seats: tuple[SeatSpec, ...] = Field(min_length=2, max_length=6)
-    hero_hole_cards: tuple[Card, Card]
+    seats: tuple[SeatSpec, ...] = Field(min_length=2, max_length=8)
+    hero_hole_cards: tuple[Card, Card] | None = None
     villain_hole_cards: tuple[Card, Card] | None = None
+    known_hole_cards_by_seat: dict[int, tuple[Card, ...]] = Field(default_factory=dict)
     board: tuple[Card, ...] = Field(default=(), max_length=5)
     action_history: tuple[ActionEvent, ...] = ()
     decision_point: DecisionPoint = Field(
@@ -363,6 +436,7 @@ class ScenarioSpec(DomainModel):
     )
     hero_range: RangeSpec | None = None
     villain_range: RangeSpec | None = None
+    ranges_by_seat: dict[int, RangeSpec] = Field(default_factory=dict)
     allowed_bet_sizes: tuple[BetSizeSpec, ...] = ()
     assumptions: AnalysisAssumptions = Field(default_factory=AnalysisAssumptions)
     source: ScenarioSource = ScenarioSource.MANUAL
@@ -370,7 +444,11 @@ class ScenarioSpec(DomainModel):
 
     @field_validator("hero_hole_cards")
     @classmethod
-    def validate_hole_cards(cls, cards: tuple[str, str]) -> tuple[str, str]:
+    def validate_hole_cards(
+        cls, cards: tuple[str, str] | None
+    ) -> tuple[str, str] | None:
+        if cards is None:
+            return None
         if cards[0] == cards[1]:
             raise ValueError("hero_hole_cards cannot contain duplicates")
         return tuple(sorted(cards, key=_card_sort_key))  # type: ignore[return-value]
@@ -402,14 +480,16 @@ class ScenarioSpec(DomainModel):
 
     @model_validator(mode="after")
     def validate_scenario(self) -> ScenarioSpec:
-        if self.schema_version != SCENARIO_SCHEMA_VERSION:
+        if self.schema_version not in (
+            SCENARIO_SCHEMA_VERSION,
+            LEGACY_SCENARIO_SCHEMA_VERSION,
+        ):
             raise ValueError(
-                f"unsupported schema_version={self.schema_version}; supported={SCENARIO_SCHEMA_VERSION}"
+                f"unsupported schema_version={self.schema_version}; "
+                f"supported={SCENARIO_SCHEMA_VERSION} (legacy {LEGACY_SCENARIO_SCHEMA_VERSION})"
             )
         if self.game_variant is not GameVariant.NLHE:
             raise ValueError("only NLHE is supported by the MVP")
-        if self.table_size != 2:
-            raise ValueError("MVP currently supports table_size=2; 6-max is a future extension")
         if self.big_blind <= self.small_blind:
             raise ValueError("big_blind must be greater than small_blind")
         if len(self.seats) != self.table_size:
@@ -419,11 +499,84 @@ class ScenarioSpec(DomainModel):
             raise ValueError("seat IDs must be unique")
         if self.hero_seat not in seat_ids or self.button_seat not in seat_ids:
             raise ValueError("hero_seat and button_seat must reference existing seats")
-        positions = {seat.position for seat in self.seats}
-        if positions != {SeatPosition.BUTTON, SeatPosition.BIG_BLIND}:
-            raise ValueError("HU seats must have exactly one button and one big_blind position")
-        if next(seat for seat in self.seats if seat.position is SeatPosition.BUTTON).seat_id != self.button_seat:
-            raise ValueError("button_seat does not match the button-position seat")
+
+        # Positions are DERIVED from tableSize + buttonSeat; any declared
+        # position must agree with the derivation (single source of truth).
+        for seat in self.seats:
+            derived = derive_position(self.table_size, self.button_seat, seat.seat_id)
+            if seat.position is not derived:
+                raise ValueError(
+                    f"seat {seat.seat_id} position must be {derived.value} "
+                    f"(derived from table_size+button_seat); got {seat.position.value}"
+                )
+
+        # Hole cards: canonical source is knownHoleCardsBySeat (v2); the
+        # legacy hero/villain fields are accepted (v1) and normalized into it.
+        known_by_seat = {
+            seat_id: tuple(sorted(cards, key=_card_sort_key))
+            for seat_id, cards in self.known_hole_cards_by_seat.items()
+        }
+        mutations: dict[str, Any] = {}
+        if known_by_seat:
+            if any(seat_id not in seat_ids for seat_id in known_by_seat):
+                raise ValueError("knownHoleCardsBySeat must reference existing seats")
+            hero_cards = known_by_seat.get(self.hero_seat)
+            if hero_cards is None:
+                raise ValueError("knownHoleCardsBySeat must include the hero seat")
+            if len(hero_cards) != 2:
+                raise ValueError(f"hero seat {self.hero_seat} must have exactly 2 hole cards")
+            mutations["hero_hole_cards"] = tuple(sorted(hero_cards, key=_card_sort_key))
+            if self.table_size == 2:
+                opponent_seat = next(seat for seat in seat_ids if seat != self.hero_seat)
+                opponent_cards = known_by_seat.get(opponent_seat)
+                if opponent_cards is not None:
+                    if len(opponent_cards) != 2:
+                        raise ValueError(f"seat {opponent_seat} must have 0 or 2 hole cards")
+                    mutations["villain_hole_cards"] = tuple(
+                        sorted(opponent_cards, key=_card_sort_key)
+                    )
+        else:
+            if self.hero_hole_cards is None:
+                raise ValueError(
+                    "heroHoleCards (v1) or knownHoleCardsBySeat (v2) is required"
+                )
+            known_by_seat[self.hero_seat] = tuple(self.hero_hole_cards)
+            if self.table_size == 2:
+                opponent_seat = next(seat for seat in seat_ids if seat != self.hero_seat)
+                if self.villain_hole_cards is not None:
+                    known_by_seat[opponent_seat] = tuple(self.villain_hole_cards)
+
+        # Ranges: canonical source is rangesBySeat (v2); legacy heroRange /
+        # villainRange (v1) are accepted and normalized into it.
+        ranges_by_seat = dict(self.ranges_by_seat)
+        if ranges_by_seat:
+            if any(seat_id not in seat_ids for seat_id in ranges_by_seat):
+                raise ValueError("rangesBySeat must reference existing seats")
+            mutations["hero_range"] = ranges_by_seat.get(self.hero_seat)
+            if self.table_size == 2:
+                opponent_seat = next(seat for seat in seat_ids if seat != self.hero_seat)
+                mutations["villain_range"] = ranges_by_seat.get(opponent_seat)
+        else:
+            if self.hero_range is not None:
+                ranges_by_seat[self.hero_seat] = self.hero_range
+            if self.table_size == 2:
+                opponent_seat = next(seat for seat in seat_ids if seat != self.hero_seat)
+                if self.villain_range is not None:
+                    ranges_by_seat[opponent_seat] = self.villain_range
+
+        all_known_cards: list[str] = []
+        for cards in known_by_seat.values():
+            all_known_cards.extend(cards)
+        all_known_cards.extend(self.board)
+        if len(all_known_cards) != len(set(all_known_cards)):
+            raise ValueError("hole cards and board cards cannot overlap")
+        known_cards = set(all_known_cards)
+        for seat_id, range_spec in ranges_by_seat.items():
+            for combo in range_spec.combos:
+                if known_cards.intersection(combo.cards):
+                    raise ValueError(
+                        f"seat {seat_id} range combo contains a known card: {combo.cards}"
+                    )
 
         sequences = [event.sequence for event in self.action_history]
         if sequences != list(range(1, len(sequences) + 1)):
@@ -434,26 +587,19 @@ class ScenarioSpec(DomainModel):
         if self.decision_point.after_sequence > len(self.action_history):
             raise ValueError("decision_point.after_sequence exceeds action_history")
 
-        all_known_cards = list(self.hero_hole_cards) + list(self.board)
-        if self.villain_hole_cards is not None:
-            all_known_cards.extend(self.villain_hole_cards)
-        if len(all_known_cards) != len(set(all_known_cards)):
-            raise ValueError("hero, villain, and board cards cannot overlap")
-        known_cards = set(all_known_cards)
-        for range_name, range_spec in (
-            ("hero_range", self.hero_range),
-            ("villain_range", self.villain_range),
-        ):
-            if range_spec is None:
-                continue
-            for combo in range_spec.combos:
-                if known_cards.intersection(combo.cards):
-                    raise ValueError(f"{range_name} combo contains a known card: {combo.cards}")
-
         labels = [size.label for size in self.allowed_bet_sizes]
         if len(set(labels)) != len(labels):
             raise ValueError("allowed_bet_sizes labels must be unique")
-        return self
+
+        # Deferred writes: mutating fields inside a model_validator re-enters
+        # validation (validate_assignment=True), so apply via model_copy.
+        return self.model_copy(
+            update={
+                **mutations,
+                "known_hole_cards_by_seat": known_by_seat,
+                "ranges_by_seat": ranges_by_seat,
+            }
+        )
 
     @classmethod
     def from_json(cls, payload: str | bytes | bytearray) -> ScenarioSpec:
@@ -464,9 +610,10 @@ class ScenarioSpec(DomainModel):
         if not isinstance(raw, Mapping):
             raise ValueError("scenario JSON must contain an object")
         version = raw.get("schemaVersion")
-        if version != SCENARIO_SCHEMA_VERSION:
+        if version not in (SCENARIO_SCHEMA_VERSION, LEGACY_SCENARIO_SCHEMA_VERSION):
             raise ValueError(
-                f"unsupported or missing schemaVersion={version!r}; supported={SCENARIO_SCHEMA_VERSION}"
+                f"unsupported or missing schemaVersion={version!r}; "
+                f"supported={SCENARIO_SCHEMA_VERSION} (legacy {LEGACY_SCENARIO_SCHEMA_VERSION})"
             )
         return cls.model_validate(raw)
 
