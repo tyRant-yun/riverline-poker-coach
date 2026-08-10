@@ -64,6 +64,8 @@ curl http://127.0.0.1:8000/health
 - [工程基线](docs/engineering-baseline.md)
 - [MVP 架构决策](docs/adr/0001-mvp-architecture-decisions.md)
 - [策略匹配边界](docs/adr/0003-strategy-match-frequency-boundary.md)
+- [Solver 技术评估](docs/adr/0004-solver-evaluation.md)
+- [Solver 输出导入规范](docs/solver-import-spec.md)
 - [依赖与许可证清单](docs/dependency-inventory.md)
 - [开发规范](AGENT.MD)
 
