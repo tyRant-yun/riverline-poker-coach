@@ -2,7 +2,7 @@
 
 版本：draft-1 · 日期：2026-08-10 · 状态：草案（待首个真实数据验证）
 
-本规范定义把**已验证、有来源**的求解器输出导入策略库为 `solver_backed` `StrategyArtifact` 的数据契约、校验规则与管线。它是独立设计，不复制任何 AGPL 项目代码（TexasSolver / postflop-solver 仅作为格式参考来源，见 ADR-0004）。
+本规范定义把**已验证、有来源**的求解器输出导入策略库为 `solver_backed` `StrategyArtifact` 的数据契约、校验规则与管线。求解引擎以 sidecar 隔离服务形态接入（见 docs/solver-integration-design.md）；本规范只描述**数据契约**：主项目不复制任何 AGPL 源码，solver 输出数据（JSON）不属于代码，可自由导入。
 
 ## 1. 目标与边界
 

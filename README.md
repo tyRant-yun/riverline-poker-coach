@@ -78,6 +78,7 @@ curl http://127.0.0.1:8000/health
 - [策略匹配边界](docs/adr/0003-strategy-match-frequency-boundary.md)
 - [Solver 技术评估](docs/adr/0004-solver-evaluation.md)
 - [Solver 输出导入规范](docs/solver-import-spec.md)
+- [Solver Integration Design Review](docs/solver-integration-design.md)
 - [BYO DeepSeek Key 端到端加密设计](docs/design-bring-your-own-key.md)
 - [依赖与许可证清单](docs/dependency-inventory.md)
 - [开发规范](AGENT.MD)
