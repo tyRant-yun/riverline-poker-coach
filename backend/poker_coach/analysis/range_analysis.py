@@ -69,6 +69,7 @@ def range_spec_from_notation(
     version: str = "1",
     source: RangeSource = RangeSource.IMPORTED,
     weight: Decimal = Decimal("1"),
+    dead_cards: tuple[Card, ...] = (),
 ) -> RangeSpec:
     return RangeSpec(
         rangeId=range_id,
@@ -76,6 +77,7 @@ def range_spec_from_notation(
         version=version,
         source=source,
         matrix169=parse_range_notation(notation, weight=weight),
+        deadCards=dead_cards,
     )
 
 

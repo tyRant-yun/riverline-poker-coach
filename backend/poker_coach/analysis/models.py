@@ -17,6 +17,7 @@ from poker_coach.domain.models import (
     EvidenceBundle,
     Weight,
 )
+from poker_coach.strategy.models import StrategyMatch
 
 
 class HandCategory(str, Enum):
@@ -157,6 +158,7 @@ class AnalysisResult(DomainModel):
     equity: EquityResult | None = None
     range_analysis: RangeAnalysis | None = None
     range_comparison: RangeComparison | None = None
+    strategy_match: StrategyMatch | None = None
     evidence: EvidenceBundle
     warnings: tuple[str, ...] = ()
 

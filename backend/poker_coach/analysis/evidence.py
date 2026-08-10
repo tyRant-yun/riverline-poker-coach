@@ -14,6 +14,8 @@ from poker_coach.domain.models import (
     ScenarioSpec,
 )
 from poker_coach.rules import PokerKitAdapter
+from poker_coach.strategy.catalog import StrategyCatalog
+from poker_coach.strategy.models import StrategyMatch
 
 from .board import analyze_board
 from .equity import EquityEngine
@@ -70,13 +72,14 @@ def analyze_scenario(
     equity_engine: EquityEngine | None = None,
     cancel_event=None,
     timeout_seconds: float | None = None,
+    strategy_catalog: StrategyCatalog | None = None,
 ) -> AnalysisResult:
     adapter = adapter or PokerKitAdapter()
     prefix_length = scenario.decision_point.after_sequence
     prefix_scenario = scenario.model_copy(
         update={"action_history": scenario.action_history[:prefix_length]}
     )
-    replay = adapter.replay(prefix_scenario)
+    replay = adapter.replay_to_decision(scenario)
     snapshot = replay.final_state
     villain_seat = next(seat.seat_id for seat in scenario.seats if seat.seat_id != scenario.hero_seat)
     metrics = calculate_metrics(
@@ -88,6 +91,7 @@ def analyze_scenario(
     hand = analyze_hand(scenario.hero_hole_cards, snapshot.board)
     board = analyze_board(snapshot.board)
     engine = equity_engine or EquityEngine()
+    strategy_match = (strategy_catalog or StrategyCatalog()).match(scenario)
     warnings: list[str] = []
     equity: EquityResult | None = None
     range_analysis = None
@@ -203,6 +207,21 @@ def analyze_scenario(
         source_level=AnalysisLevel.DETERMINISTIC,
         description="Candidate one-card outs under the current hand model",
     )
+    for evidence_id, kind, value, description in (
+        ("hand.overcards", "overcards", list(hand.overcards), "Hero hole cards above the current board high card"),
+        ("hand.straight_outs", "straight_outs", list(hand.straight_outs), "Cards that complete a detected straight path"),
+        ("hand.flush_outs", "flush_outs", list(hand.flush_outs), "Cards that complete a detected flush path"),
+        ("hand.out_cards", "out_cards", list(hand.out_cards), "Union of detected straight and flush outs"),
+        ("hand.counterfeit_risk", "counterfeit_risk_cards", list(hand.counterfeit_risk_cards), "Cards that may weaken or counterfeit the current made hand"),
+    ):
+        builder.add(
+            evidence_id,
+            kind,
+            value,
+            unit="cards",
+            source_level=AnalysisLevel.DETERMINISTIC,
+            description=description,
+        )
     builder.add(
         "board.labels",
         "board_texture",
@@ -235,6 +254,22 @@ def analyze_scenario(
         source_level=AnalysisLevel.ENUMERATED,
         description="Current concrete hand categories reachable as the board's best made hand",
     )
+    builder.add(
+        "board.next_street_change_cards",
+        "next_street_change_cards",
+        list(board.next_street_change_cards),
+        unit="cards",
+        source_level=AnalysisLevel.DETERMINISTIC,
+        description="Turn or river cards that change the detected board texture category",
+    )
+    builder.add(
+        "board.possible_nut_combos",
+        "possible_nut_combos",
+        [list(combo) for combo in board.possible_nut_combos],
+        unit="combos",
+        source_level=AnalysisLevel.ENUMERATED,
+        description="Concrete hole-card combinations producing the current top board-relative hand key",
+    )
     if range_analysis is not None:
         _add_range_evidence(builder, range_analysis)
     if range_comparison is not None:
@@ -254,6 +289,22 @@ def analyze_scenario(
             source_level=AnalysisLevel.PRINCIPLE_ONLY,
             description="Heuristic difference in high-made-hand range share",
         )
+        builder.add(
+            "range.equity_distribution",
+            "equity_distribution",
+            range_comparison.equity_distribution,
+            unit="ratio",
+            source_level=equity.source_level if equity else AnalysisLevel.PRINCIPLE_ONLY,
+            description="Distribution of value and draw shares across the two analyzed ranges",
+        )
+        builder.add(
+            "range.comparison_heuristic",
+            "range_comparison_heuristic",
+            range_comparison.heuristic,
+            unit=None,
+            source_level=AnalysisLevel.DETERMINISTIC,
+            description="Whether range comparison uses heuristic structure labels",
+        )
     if equity is not None:
         _add_equity_evidence(builder, equity)
     else:
@@ -265,6 +316,7 @@ def analyze_scenario(
             source_level=AnalysisLevel.PRINCIPLE_ONLY,
             description="Equity was not calculated because a villain hand or range is missing",
         )
+    _add_strategy_evidence(builder, strategy_match)
 
     return AnalysisResult(
         analysisVersion=ANALYSIS_VERSION,
@@ -276,6 +328,7 @@ def analyze_scenario(
         equity=equity,
         rangeAnalysis=range_analysis,
         rangeComparison=range_comparison,
+        strategyMatch=strategy_match,
         evidence=builder.build(),
         warnings=tuple(warnings),
     )
@@ -315,6 +368,9 @@ def _add_assumption_evidence(builder: EvidenceBundleBuilder, scenario: ScenarioS
         ("assumptions.bet_sizing", "bet_sizing_assumption", assumptions.bet_sizing_assumption, None),
         ("assumptions.allow_donk", "allow_donk", assumptions.allow_donk, None),
         ("assumptions.allow_raise", "allow_raise", assumptions.allow_raise, None),
+        ("assumptions.strategy_library_version", "strategy_library_version", assumptions.strategy_library_version, None),
+        ("assumptions.solver_version", "solver_version", assumptions.solver_version, None),
+        ("assumptions.similar_scenario_match", "similar_scenario_match", assumptions.similar_scenario_match, None),
     )
     for evidence_id, kind, value, unit in values:
         builder.add(
@@ -324,6 +380,27 @@ def _add_assumption_evidence(builder: EvidenceBundleBuilder, scenario: ScenarioS
             unit=unit,
             source_level=AnalysisLevel.DETERMINISTIC,
             description=f"Analysis assumption: {kind}",
+        )
+    for side, range_spec in (("hero", scenario.hero_range), ("villain", scenario.villain_range)):
+        if range_spec is None:
+            continue
+        builder.add(
+            f"assumptions.{side}_range_id",
+            "range_id",
+            range_spec.range_id,
+            unit=None,
+            source_level=AnalysisLevel.DETERMINISTIC,
+            description=f"{side.title()} range identifier",
+            source_version=range_spec.version,
+        )
+        builder.add(
+            f"assumptions.{side}_range_provenance",
+            "range_source",
+            range_spec.source.value,
+            unit=None,
+            source_level=AnalysisLevel.DETERMINISTIC,
+            description=f"{side.title()} range provenance",
+            source_version=range_spec.version,
         )
     if assumptions.simulation_trials is not None:
         builder.add(
@@ -353,6 +430,10 @@ def _add_range_evidence(builder: EvidenceBundleBuilder, analysis) -> None:
         ("range.bluff_combos", "bluff_combo_count", analysis.bluff_combos, "combos", "Heuristically classified bluff candidates"),
         ("range.draw_combos", "draw_combo_count", analysis.draw_combos, "combos", "Combos with a detected draw"),
         ("range.blocked_combos", "blocked_combo_count", analysis.blocked_combos, "combos", "Combos removed by known cards"),
+        ("range.blocked_weight", "blocked_weight", analysis.blocked_weight, "weighted_combos", "Range weight removed by known cards"),
+        ("range.blocker_cards", "blocker_cards", list(analysis.blocker_cards), "cards", "Known cards used for card-removal analysis"),
+        ("range.polarity", "range_polarity", analysis.polarity, None, "Heuristic value/bluff polarity classification"),
+        ("range.heuristic", "range_heuristic", analysis.heuristic, None, "Whether this range classification is heuristic"),
     ):
         builder.add(
             evidence_id,
@@ -397,6 +478,51 @@ def _add_equity_evidence(builder: EvidenceBundleBuilder, equity: EquityResult) -
             unit="ratio",
             source_level=source,
             description="Approximate 95% confidence interval for Hero equity",
+        )
+
+
+def _add_strategy_evidence(builder: EvidenceBundleBuilder, match: StrategyMatch) -> None:
+    source = match.source_level
+    for evidence_id, kind, value, description in (
+        (
+            "strategy.match_level",
+            "strategy_match_level",
+            match.level.value,
+            "Strategy catalog match level; approximate matches are not precise strategy data",
+        ),
+        (
+            "strategy.similarity",
+            "strategy_similarity",
+            match.similarity,
+            "Similarity score against the selected strategy artifact",
+        ),
+        (
+            "strategy.can_quote_frequencies",
+            "strategy_frequency_permission",
+            match.can_quote_frequencies,
+            "Whether this match may expose quantitative strategy data",
+        ),
+        (
+            "strategy.differences",
+            "strategy_differences",
+            [difference.to_dict() for difference in match.differences],
+            "Differences between the scenario and selected artifact",
+        ),
+        (
+            "strategy.recommendations",
+            "strategy_recommendations",
+            [recommendation.to_dict() for recommendation in match.recommendations],
+            "Recommendations supplied by the matched strategy artifact",
+        ),
+    ):
+        builder.add(
+            evidence_id,
+            kind,
+            value,
+            unit="ratio" if evidence_id == "strategy.similarity" else None,
+            source_level=source,
+            description=description,
+            source_version=match.library_version,
         )
 
 

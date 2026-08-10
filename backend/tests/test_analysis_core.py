@@ -193,6 +193,8 @@ def test_common_range_notation_normalizes_to_169_grid_cells():
     assert parsed["AKo"] == Decimal("0.5")
     imported = range_spec_from_notation("TT-QQ")
     assert set(imported.matrix_169) == {"TT", "JJ", "QQ"}
+    dead_filtered = range_spec_from_notation("AKs", dead_cards=("As", "Kd"))
+    assert dead_filtered.dead_cards == ("Kd", "As")
 
 
 def test_exact_equity_handles_known_cards_and_split_pots():
@@ -301,4 +303,34 @@ def test_analysis_scenario_builds_evidence_without_agent_or_api():
     assert result.scenario_hash
     assert result.warnings == ()
     assert "assumptions.equity_algorithm" in result.evidence.ids()
+    assert {
+        "hand.out_cards",
+        "hand.counterfeit_risk",
+        "board.next_street_change_cards",
+    } <= result.evidence.ids()
     assert result.evidence.to_json() == result.evidence.to_json()
+
+
+def test_analysis_scenario_binds_both_ranges_and_blocker_evidence():
+    scenario = scenario_at_flop().model_copy(
+        update={
+            "villain_hole_cards": None,
+            "hero_range": range_spec(AA="1"),
+            "villain_range": range_spec(QQ="1"),
+        }
+    )
+
+    result = analyze_scenario(scenario)
+
+    assert result.equity is not None
+    assert result.range_analysis is not None
+    assert result.range_comparison is not None
+    assert {
+        "assumptions.hero_range_id",
+        "assumptions.villain_range_id",
+        "assumptions.hero_range_provenance",
+        "assumptions.villain_range_provenance",
+        "range.blocked_weight",
+        "range.blocker_cards",
+        "range.equity_distribution",
+    } <= result.evidence.ids()
