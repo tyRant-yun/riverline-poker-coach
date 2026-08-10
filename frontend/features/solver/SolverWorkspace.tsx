@@ -64,13 +64,19 @@ export default function SolverWorkspace({ solveJob, canSubmit, heroHoleCards, on
         </div>
       </div>
 
+      {solveJob?.spot?.assumptions?.includes("bunching_ignored") && (
+        <p className="muted small solve-assumption">
+          近似假设：bunching_ignored — 本决策点源自多人桌，已弃牌玩家的手牌对剩余牌堆的影响被忽略（标准 HU 近似）。
+        </p>
+      )}
+
       {status === "idle" || status === "failed" || status === "cancelled" ? (
         <div className="action-buttons">
           <button onClick={onSubmit} disabled={!canSubmit}>
             提交 Solver 求解（独立容器）
           </button>
           <p className="muted small">
-            需要 Hero 与 Villain 范围（用上方范围面板选择默认范围或手动输入）。求解约 1–3 分钟。
+            需要两个仍在局中的玩家的范围（HU 用 Hero/Villain 范围，多人桌用 rangesBySeat）。求解约 1–3 分钟。
             {status !== "idle" && solveJob?.error ? ` · ${solveJob.error}` : ""}
           </p>
         </div>

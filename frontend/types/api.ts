@@ -110,11 +110,38 @@ export type SolverNodePayload = {
   hands: { combo: string; weight: number; equity: number; ev: number; strategy: Record<string, number> }[];
 };
 
+/** The spot echoed by POST /v1/solve/jobs (mirrors backend SolverSpot). */
+export type SolverSpotPayload = {
+  schemaVersion?: number;
+  street: string;
+  board: string[];
+  turn: string | null;
+  river: string | null;
+  oopRange: string;
+  ipRange: string;
+  startingPot: number;
+  effectiveStack: number;
+  rakeRate: number;
+  rakeCap: number;
+  betSizes: string;
+  raiseSizes: string;
+  addAllinThreshold?: number | null;
+  forceAllinThreshold?: number | null;
+  mergingThreshold?: number | null;
+  maxIterations: number;
+  targetExploitabilityFrac: number;
+  dumpResponseToAction?: number | null;
+  /** Explicit approximation flags, e.g. "bunching_ignored". */
+  assumptions?: string[] | null;
+};
+
 export type SolveJob = {
   jobId: string;
   status: string;
   error?: string | null;
   executionMs?: number | null;
+  /** Present on the submit response only; the spot the job was built from. */
+  spot?: SolverSpotPayload | null;
   result?: {
     metadata?: {
       solver: string;

@@ -17,6 +17,7 @@ import type {
   PracticeOutcome,
   PracticeQuestion,
   SolveJob,
+  SolverSpotPayload,
   StateResponse,
   TeachingResponse,
 } from "../../types/api";
@@ -107,7 +108,10 @@ export const coachApi = {
 
 export const solverApi = {
   submit: (scenario: Scenario) =>
-    request<{ jobId: string; status: string }>("/v1/solve/jobs", { scenario, maxIterations: 200 }),
+    request<{ jobId: string; status: string; spot?: SolverSpotPayload | null }>(
+      "/v1/solve/jobs",
+      { scenario, maxIterations: 200 },
+    ),
   get: (jobId: string) => requestGet<SolveJob>(`/v1/solve/jobs/${jobId}`),
   cancel: (jobId: string) =>
     request<{ jobId: string; status: string }>(`/v1/solve/jobs/${jobId}/cancel`, {}),

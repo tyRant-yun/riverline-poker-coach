@@ -1,5 +1,6 @@
 """Phase 8C: multiway analysis — equityBySeat, activePlayerCount, pot odds."""
 
+import math
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
@@ -178,6 +179,42 @@ class TestMultiwayEquityEngine:
                 [(0, ("As", "Kd")), (1, ("As", "Kd"))],
                 ("2c", "7d", "Jh", "9s", "3h"),
             )
+
+    def test_monte_carlo_split_tie_standard_error_is_zero(self):
+        # Complete board: seats 0 and 1 both play the board straight on every
+        # trial, seat 2 loses outright. The per-trial share is exactly 0.5
+        # for seats 0/1 and 0 for seat 2, so the estimator has zero variance.
+        # The old Bernoulli p(1-p) formula reported a phantom ~sqrt(0.25/N).
+        result = ENGINE.evaluate_multiway(
+            [(0, ("As", "Kd")), (1, ("Ah", "Kh")), (2, ("8c", "8h"))],
+            ("Qs", "Jc", "Ts", "2d", "3h"),
+            algorithm=EquityAlgorithm.MONTE_CARLO,
+            trials=5_000,
+            random_seed=11,
+        )
+        assert result.equity_by_seat[0] == Decimal("0.5")
+        assert result.equity_by_seat[1] == Decimal("0.5")
+        assert result.equity_by_seat[2] == Decimal("0")
+        assert result.standard_errors_by_seat is not None
+        assert result.standard_errors_by_seat[0] == Decimal("0")
+        assert result.standard_errors_by_seat[1] == Decimal("0")
+        assert result.standard_errors_by_seat[2] == Decimal("0")
+
+    def test_monte_carlo_standard_error_recovers_bernoulli_without_ties(self):
+        # No ties possible (AK vs QQ on 2c 7d Jh): the share is binary, so the
+        # variance must reduce to the Bernoulli p(1-p)/N formula.
+        result = ENGINE.evaluate_multiway(
+            [(0, ("As", "Kd")), (1, ("Qh", "Qc"))],
+            ("2c", "7d", "Jh"),
+            algorithm=EquityAlgorithm.MONTE_CARLO,
+            trials=50_000,
+            random_seed=5,
+        )
+        assert result.standard_errors_by_seat is not None
+        for seat, share in result.equity_by_seat.items():
+            p = float(share)
+            expected = math.sqrt(p * (1 - p) / 50_000)
+            assert abs(float(result.standard_errors_by_seat[seat]) - expected) < 5e-4
 
 
 def _weighted_range(label: str, entries: dict[str, str]) -> RangeSpec:

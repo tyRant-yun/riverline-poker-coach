@@ -72,6 +72,10 @@ class _MultiwayAccumulator:
         self.total_mass = Decimal("0")
         self.tie_mass = Decimal("0")
         self.wins: dict[int, Decimal] = {}
+        # Sum of squared per-trial shares, for the Monte Carlo variance of
+        # the equity estimator under split ties: Var(X) = E[X^2] - E[X]^2,
+        # where X is the per-trial share (0, 1, or 1/k on a k-way tie).
+        self.squared: dict[int, Decimal] = {}
 
     def add(
         self,
@@ -84,6 +88,7 @@ class _MultiwayAccumulator:
         share = weight / len(winners)
         for seat in winners:
             self.wins[seat] = self.wins.get(seat, Decimal("0")) + share
+            self.squared[seat] = self.squared.get(seat, Decimal("0")) + share * share
         if len(winners) > 1:
             self.tie_mass += weight
         if self.weighted:
@@ -412,8 +417,12 @@ class EquityEngine:
         if algorithm is EquityAlgorithm.MONTE_CARLO:
             standard_errors = {}
             for seat, equity in equities.items():
-                p = float(equity)
-                variance = max(0.0, p * (1 - p))
+                # Per-trial outcome is a share (0, 1, or 1/k under a k-way
+                # split tie), so the estimator variance is E[X^2] - E[X]^2,
+                # not the Bernoulli p(1-p) which assumes binary outcomes and
+                # would overstate the error whenever ties are split.
+                mean_square = accumulator.squared.get(seat, Decimal("0")) / total
+                variance = max(0.0, float(mean_square) - float(equity) ** 2)
                 standard_errors[seat] = Decimal(
                     str(math.sqrt(variance / accumulator.trials))
                 )

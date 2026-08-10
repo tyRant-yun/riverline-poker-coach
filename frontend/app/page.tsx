@@ -38,6 +38,7 @@ import {
   solverApi,
 } from "../lib/api/client";
 import { notationFromMatrix, notationFromMatrixExplicit } from "../lib/poker/matrix";
+import { canSubmitSolve as solveGate } from "../lib/poker/solve";
 import { buildSeatViewModels } from "../lib/poker/table";
 import { heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
 
@@ -266,7 +267,7 @@ export default function Home() {
     setRangeCombos([]);
   }
 
-  function loadSaved(record: SavedScenario) {
+  async function loadSaved(record: SavedScenario) {
     setPastScenarios([]);
     setFutureScenarios([]);
     setScenario(record.scenario);
@@ -278,7 +279,10 @@ export default function Home() {
     setAnalysis(null);
     setAnalysisStale(false);
     setTeaching(null);
-    setMessage(`已载入「${record.title}」第 ${record.revisionNo} 个版本。`);
+    await refreshState(
+      record.scenario,
+      `已载入「${record.title}」第 ${record.revisionNo} 个版本。`,
+    );
   }
 
   async function copySaved(record: SavedScenario) {
@@ -357,6 +361,7 @@ export default function Home() {
       setAnalysis(payload.analysis);
       setAnalysisStale(false);
       await loadAnalysisHistory(record);
+      await refreshState(record.scenario);
       setMessage(`已重新分析「${record.title}」；结果已写入历史。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "重新分析失败");
@@ -377,7 +382,10 @@ export default function Home() {
     setAnalysis(null);
     setAnalysisStale(false);
     setTeaching(null);
-    setMessage(`已载入第 ${revision.revisionNo} 个历史版本。`);
+    void refreshState(
+      revision.scenario,
+      `已载入第 ${revision.revisionNo} 个历史版本。`,
+    );
   }
 
   async function reanalyzeRevision(revision: ScenarioRevision, title: string) {
@@ -398,6 +406,7 @@ export default function Home() {
         revisionNo: revision.revisionNo,
         updatedAt: revision.createdAt,
       });
+      await refreshState(revision.scenario);
       setMessage(`已重新分析「${title}」第 ${revision.revisionNo} 个版本；结果已写入历史。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "历史版本重分析失败");
@@ -450,7 +459,7 @@ export default function Home() {
     }
   }
 
-  async function refreshState(nextScenario = scenario) {
+  async function refreshState(nextScenario = scenario, successMessage?: string) {
     setBusy(true);
     try {
       const payload = await scenariosApi.state(nextScenario);
@@ -463,7 +472,7 @@ export default function Home() {
           afterSequence: nextScenario.decisionPoint.afterSequence,
         },
       }));
-      setMessage("规则校验通过，当前状态已更新。");
+      setMessage(successMessage ?? "规则校验通过，当前状态已更新。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "规则校验失败");
     } finally {
@@ -637,7 +646,11 @@ export default function Home() {
     setBusy(true);
     try {
       const payload = await solverApi.submit(scenario);
-      setSolveJob({ jobId: payload.jobId, status: payload.status });
+      setSolveJob({
+        jobId: payload.jobId,
+        status: payload.status,
+        spot: payload.spot ?? null,
+      });
       void pollSolveJob(payload.jobId);
       setMessage("求解作业已提交（独立 Solver 容器执行，通常 1–3 分钟）。");
     } catch (error) {
@@ -718,20 +731,12 @@ export default function Home() {
     }
   }
 
-  // Solve is enabled when the ranges for the decision point are available:
-  // legacy hero/villain ranges (v1) or seat-based rangesBySeat (v2) covering
-  // the players still active. A valid Schema v2 spot must never be disabled
-  // just because the legacy fields are absent.
-  const foldedSeats = state?.foldedSeats ?? [];
-  const activeSeats = scenario.seats
-    .map((seat) => seat.seatId)
-    .filter((seatId) => !foldedSeats.includes(seatId));
-  const rangesBySeat = scenario.rangesBySeat ?? {};
-  const hasLegacyRanges = Boolean(scenario.heroRange && scenario.villainRange);
-  const hasSeatRanges =
-    Object.keys(rangesBySeat).length >= 2 &&
-    activeSeats.every((seatId) => Boolean(rangesBySeat[String(seatId)]));
-  const canSubmitSolve = !busy && (hasLegacyRanges || hasSeatRanges);
+  // Solve gate: the sidecar is a heads-up postflop solver, so submissions
+  // require a postflop decision point, exactly two active players, and
+  // ranges for them (legacy hero/villain or Schema v2 rangesBySeat). The
+  // backend re-validates every spot; this only blocks obviously invalid
+  // submissions.
+  const canSubmitSolve = solveGate(scenario, state, currentStreet, busy);
 
   const handLab = (
     <>
