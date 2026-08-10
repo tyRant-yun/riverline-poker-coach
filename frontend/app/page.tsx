@@ -37,14 +37,9 @@ import {
   scenariosApi,
   solverApi,
 } from "../lib/api/client";
-import { cardsToViewModels } from "../lib/poker/cards";
 import { notationFromMatrix, notationFromMatrixExplicit } from "../lib/poker/matrix";
-import { positionLabel } from "../lib/poker/positions";
-import {
-  getKnownCardsForSeat,
-  heroCards,
-  syncSeatSourcesFromLegacy,
-} from "../lib/poker/scenario";
+import { buildSeatViewModels } from "../lib/poker/table";
+import { heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
 
 import AppShell, { type WorkspaceView } from "../components/AppShell";
 import PokerTable from "../components/poker/PokerTable";
@@ -167,32 +162,7 @@ export default function Home() {
   const boardInput = useMemo(() => [...scenario.board, "", "", "", "", ""].slice(0, 5), [scenario.board]);
 
   const tableSeats = useMemo<SeatViewModel[]>(
-    () =>
-      scenario.seats.map((seat) => {
-        const isHero = seat.seatId === scenario.heroSeat;
-        const isDealer = seat.seatId === scenario.buttonSeat;
-        const isActor = state?.legalActions.actorSeat === seat.seatId;
-        const isFolded = state?.foldedSeats.includes(seat.seatId) ?? false;
-        const holeCards = getKnownCardsForSeat(scenario, seat.seatId);
-        return {
-          seatId: seat.seatId,
-          position: seat.position,
-          label: isHero
-            ? `${positionLabel(seat.position)} · Hero`
-            : `${positionLabel(seat.position)} · Seat ${seat.seatId}`,
-          stack: state?.stacks[String(seat.seatId)] ?? seat.startingStack,
-          bet: state?.bets[String(seat.seatId)] ?? null,
-          cards: cardsToViewModels(holeCards),
-          isHero,
-          isDealer,
-          isActor,
-          isFolded,
-          isAllIn: false,
-          // Active = still in the hand (not folded). The current actor is a
-          // separate concept (isActor) and may be null between streets.
-          isActive: state ? !isFolded : true,
-        };
-      }),
+    () => buildSeatViewModels(scenario, state),
     [scenario, state],
   );
 
