@@ -212,7 +212,7 @@ def update_range_belief(
         parent_snapshot_id=prior.snapshot_id,
         update=RangeUpdateMetadata(
             action_type=observed.action_type.value,
-            action_label=observed.action_type.value,
+            action_label=match.policy_action,
             observed_size=match.observed_size,
             mapped_size=match.mapped_size,
             off_tree=match.off_tree,
