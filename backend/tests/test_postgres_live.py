@@ -31,6 +31,7 @@ PG_URL = os.getenv("POKER_COACH_TEST_PG_URL")
 
 pytestmark = [
     pytest.mark.live,
+    pytest.mark.filterwarnings("ignore::DeprecationWarning"),
     pytest.mark.skipif(
         not PG_URL, reason="POKER_COACH_TEST_PG_URL is not set; no live PostgreSQL"
     ),
