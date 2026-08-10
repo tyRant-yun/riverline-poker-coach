@@ -273,7 +273,9 @@ def test_replay_deals_final_board_by_street_events():
 
     result = PokerKitAdapter().replay(scenario)
 
-    assert result.final_state.street.value == "turn"
+    # Only the flop is on the board, so the street is flop even though
+    # PokerKit's internal street index has advanced toward the turn.
+    assert result.final_state.street.value == "flop"
     assert result.final_state.pot == 600
     assert result.final_state.actor_seat is None
 

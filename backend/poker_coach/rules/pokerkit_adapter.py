@@ -675,9 +675,15 @@ def _card_code(card: Any) -> str:
 def _domain_street(state: Any) -> Street:
     if not state.status:
         return Street.COMPLETE
-    return {
-        0: Street.PREFLOP,
-        1: Street.FLOP,
-        2: Street.TURN,
-        3: Street.RIVER,
-    }.get(state.street_index, Street.SHOWDOWN)
+    # PokerKit's street_index advances as soon as the previous street's
+    # betting closes (e.g. preflop -> flop index with an empty board). The
+    # domain street must describe the cards actually on the board, so it is
+    # derived from the dealt board length instead.
+    board_length = len(_flatten_board(state.board_cards))
+    if board_length >= 5:
+        return Street.RIVER
+    if board_length == 4:
+        return Street.TURN
+    if board_length == 3:
+        return Street.FLOP
+    return Street.PREFLOP
