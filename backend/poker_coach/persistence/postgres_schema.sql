@@ -1,5 +1,3 @@
-PRAGMA foreign_keys = ON;
-
 CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL
@@ -12,13 +10,13 @@ CREATE TABLE IF NOT EXISTS scenarios (
     scenario_json TEXT NOT NULL,
     scenario_hash TEXT NOT NULL,
     tags_json TEXT NOT NULL,
-    favorite INTEGER NOT NULL DEFAULT 0,
+    favorite BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS scenario_revisions (
-    revision_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    revision_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     scenario_id TEXT NOT NULL REFERENCES scenarios(scenario_id) ON DELETE CASCADE,
     revision_no INTEGER NOT NULL,
     raw_scenario_json TEXT NOT NULL,
@@ -40,15 +38,15 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
     analysis_version TEXT,
     agent_version TEXT,
     prompt_version TEXT,
-    random_seed INTEGER,
-    execution_ms REAL,
+    random_seed BIGINT,
+    execution_ms DOUBLE PRECISION,
     status TEXT NOT NULL,
     error_json TEXT,
     created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS evidence_items (
-    evidence_row_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    evidence_row_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     analysis_id TEXT NOT NULL REFERENCES analysis_runs(analysis_id) ON DELETE CASCADE,
     evidence_id TEXT NOT NULL,
     kind TEXT NOT NULL,
@@ -78,6 +76,13 @@ CREATE TABLE IF NOT EXISTS strategy_artifacts (
     PRIMARY KEY (artifact_id, artifact_version)
 );
 
+CREATE TABLE IF NOT EXISTS learning_profiles (
+    profile_id TEXT PRIMARY KEY,
+    profile_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS teaching_sessions (
     session_id TEXT PRIMARY KEY,
     profile_id TEXT REFERENCES learning_profiles(profile_id) ON DELETE CASCADE,
@@ -97,13 +102,6 @@ CREATE TABLE IF NOT EXISTS teaching_messages (
     role TEXT NOT NULL,
     content_json TEXT NOT NULL,
     created_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS learning_profiles (
-    profile_id TEXT PRIMARY KEY,
-    profile_json TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS concept_progress (
@@ -140,7 +138,7 @@ CREATE TABLE IF NOT EXISTS practice_attempts (
     attempt_id TEXT PRIMARY KEY,
     question_id TEXT NOT NULL REFERENCES practice_questions(question_id) ON DELETE CASCADE,
     selected_action TEXT NOT NULL,
-    correct INTEGER NOT NULL,
+    correct BOOLEAN NOT NULL,
     rationale TEXT,
     evidence_json TEXT NOT NULL,
     created_at TEXT NOT NULL
