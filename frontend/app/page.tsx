@@ -4,7 +4,7 @@
 // and cross-feature wiring live here; rendering lives in features/components.
 // F2: AppShell + three-column workspace + tabbed result workspace.
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   SolveJob,
@@ -52,7 +52,7 @@ import AnalyzeActions from "../features/workspace/AnalyzeActions";
 import ResultWorkspace, { type ResultTab } from "../features/workspace/ResultWorkspace";
 import TeachingPanel from "../features/coach/TeachingPanel";
 import PracticePanel from "../features/practice/PracticePanel";
-import SolvePanel from "../features/solver/SolvePanel";
+import SolverWorkspace from "../features/solver/SolverWorkspace";
 
 const initialScenario: Scenario = {
   schemaVersion: 1,
@@ -109,12 +109,23 @@ export default function Home() {
   const [message, setMessage] = useState("先输入牌面，再使用合法动作按钮推进牌局。");
   const [activeView, setActiveView] = useState<WorkspaceView>("handlab");
   const [resultTab, setResultTab] = useState<ResultTab>("evidence");
+  // Generation token that supersedes stale solver poll loops (prevents
+  // duplicate/concurrent polling when a job is resubmitted or the page
+  // unmounts).
+  const solvePollToken = useRef(0);
 
   useEffect(() => {
     void loadSavedScenarios();
     void loadDefaultRanges();
     void refreshState(initialScenario);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Stop any in-flight solver polling when the workspace unmounts.
+  useEffect(() => {
+    return () => {
+      solvePollToken.current += 1;
+    };
   }, []);
 
   // The result workspace follows newly arrived results.
@@ -656,11 +667,28 @@ export default function Home() {
     }
   }
 
+  async function cancelSolve() {
+    if (!solveJob) return;
+    setBusy(true);
+    try {
+      const payload = await solverApi.cancel(solveJob.jobId);
+      setSolveJob((job) => (job ? { ...job, status: payload.status } : job));
+      setMessage(`求解取消请求已发送（${payload.status}）。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "取消请求失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function pollSolveJob(jobId: string) {
+    const token = ++solvePollToken.current;
     for (let attempt = 0; attempt < 120; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (solvePollToken.current !== token) return; // superseded by a newer poll
       try {
         const payload = await solverApi.get(jobId);
+        if (solvePollToken.current !== token) return;
         setSolveJob({
           jobId,
           status: payload.status,
@@ -826,6 +854,7 @@ export default function Home() {
         canSubmitSolve={canSubmitSolve}
         heroHoleCards={scenario.heroHoleCards}
         onSolveSubmit={() => void submitSolve()}
+        onSolveCancel={() => void cancelSolve()}
         onPracticeAnswer={(action) => void answerPractice(action)}
       />
     </>
@@ -836,11 +865,12 @@ export default function Home() {
       <section className="panel table-panel">
         <PokerTable seats={tableSeats} board={scenario.board} pot={state?.pot ?? null} />
       </section>
-      <SolvePanel
+      <SolverWorkspace
         solveJob={solveJob}
         canSubmit={canSubmitSolve}
         heroHoleCards={scenario.heroHoleCards}
         onSubmit={() => void submitSolve()}
+        onCancel={() => void cancelSolve()}
       />
     </div>
   );

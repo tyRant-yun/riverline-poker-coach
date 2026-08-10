@@ -425,6 +425,166 @@ select { width: 100%; }
 .practice-outcome.incorrect { color: var(--color-warning); background: var(--color-warning-soft); }
 .practice-outcome small { color: var(--color-text-muted); }
 
+/* ---- Solver workspace (F3) ---- */
+.solve-status {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 5px 11px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+}
+.solve-status--active { color: var(--color-accent); border-color: var(--color-accent-border); background: var(--color-accent-soft); }
+.solve-status--success { color: var(--color-success); border-color: rgba(52, 201, 141, 0.4); background: var(--color-success-soft); }
+.solve-status--danger { color: var(--color-danger); border-color: rgba(255, 114, 98, 0.4); background: rgba(255, 114, 98, 0.12); }
+.solve-status--warning { color: var(--color-warning); border-color: rgba(224, 179, 84, 0.4); background: var(--color-warning-soft); }
+.solve-cancel { border: 1px solid var(--color-border); background: var(--color-surface-alt); padding: 5px 11px; font-size: 11px; }
+.solve-progress { padding: 6px 2px; }
+.solve-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 9px;
+  margin: 12px 0;
+}
+.solve-metric {
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  padding: 9px 11px;
+  background: var(--color-surface-alt);
+  display: grid;
+  gap: 5px;
+}
+.solve-metric span { color: var(--color-text-muted); font-size: 10px; }
+.solve-metric strong { font-size: 12px; overflow-wrap: anywhere; }
+.solve-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
+.solve-controls__group { display: flex; gap: 4px; border: 1px solid var(--color-border); border-radius: 9px; padding: 3px; background: var(--color-surface-alt); }
+.solve-toggle {
+  background: transparent;
+  color: var(--color-text-muted);
+  border: 0;
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.solve-toggle--active { background: var(--color-surface-hover); color: var(--color-text); }
+.solve-grid-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+.solve-grid-scroll { overflow-x: auto; padding-bottom: 4px; }
+.solve-grid-hint { margin-top: 8px; }
+.solve-inspector-placeholder {
+  padding: 16px;
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+  margin: 0;
+}
+.solve-hero-line { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--color-border); }
+
+/* ---- 13x13 strategy / EV / equity grid ---- */
+.sg-grid {
+  display: grid;
+  grid-template-columns: 26px repeat(13, minmax(24px, 1fr));
+  gap: 2px;
+  min-width: 380px;
+}
+.sg-header {
+  display: grid;
+  place-items: center;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 800;
+}
+.sg-cell {
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  font-size: 9px;
+  padding: 2px;
+  cursor: pointer;
+}
+.sg-cell:hover { border-color: var(--color-accent-border); }
+.sg-cell--empty { background: rgba(26, 37, 54, 0.45); cursor: default; }
+.sg-cell--empty:hover { border-color: var(--color-border); }
+.sg-cell--active { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.sg-cell__actions { display: grid; gap: 1px; text-align: left; width: 100%; line-height: 1.2; }
+.sg-action { display: inline-flex; align-items: center; gap: 3px; font-weight: 700; white-space: nowrap; }
+.sg-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.sg-dot--fold { background: var(--action-fold); }
+.sg-dot--check { background: var(--action-check); }
+.sg-dot--call { background: var(--action-call); }
+.sg-dot--bet { background: var(--action-bet); }
+.sg-dot--raise { background: var(--action-raise); }
+.sg-dot--allin { background: var(--action-allin); }
+.sg-dot--neutral { background: var(--color-text-muted); }
+.sg-cell__actions--fold { color: var(--action-fold); }
+.sg-cell__actions--check { color: var(--action-check); }
+.sg-cell__actions--call { color: var(--action-call); }
+.sg-cell__actions--bet { color: var(--action-bet); }
+.sg-cell__actions--raise { color: var(--action-raise); }
+.sg-cell__actions--allin { color: var(--action-allin); }
+.sg-cell__actions--neutral { color: var(--color-text); }
+.sg-cell__value { font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* ---- Combo inspector ---- */
+.combo-inspector { border: 1px solid var(--color-border); border-radius: 10px; padding: 12px; background: var(--color-surface-alt); }
+.combo-list { display: grid; gap: 4px; margin-top: 8px; max-height: 420px; overflow-y: auto; }
+.combo-row { border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface); }
+.combo-row--open { border-color: var(--color-accent-border); }
+.combo-row__head {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  color: var(--color-text);
+  padding: 7px 10px;
+  font-size: 11px;
+  text-align: left;
+}
+.combo-row__head:hover { background: var(--color-surface-hover); }
+.combo-row__cards { font-weight: 800; font-size: 13px; }
+.combo-row__primary { display: inline-flex; align-items: center; gap: 4px; color: var(--color-text); }
+.combo-row__meta { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.combo-detail { padding: 2px 10px 10px; display: grid; gap: 10px; }
+.combo-detail__bars { display: grid; gap: 5px; }
+.combo-bar { display: grid; grid-template-columns: 84px 1fr 42px; gap: 8px; align-items: center; font-size: 10px; }
+.combo-bar__label { display: inline-flex; align-items: center; gap: 4px; color: var(--color-text); font-weight: 700; }
+.combo-bar__track { height: 8px; border-radius: 4px; background: var(--color-surface-hover); overflow: hidden; }
+.combo-bar__fill { height: 100%; border-radius: 4px; }
+.combo-bar__fill--fold { background: var(--action-fold); }
+.combo-bar__fill--check { background: var(--action-check); }
+.combo-bar__fill--call { background: var(--action-call); }
+.combo-bar__fill--bet { background: var(--action-bet); }
+.combo-bar__fill--raise { background: var(--action-raise); }
+.combo-bar__fill--allin { background: var(--action-allin); }
+.combo-bar__fill--neutral { background: var(--color-text-muted); }
+.combo-bar__value { text-align: right; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.combo-detail__stats { display: flex; gap: 14px; color: var(--color-text-muted); font-size: 10px; flex-wrap: wrap; }
+.combo-detail__stats strong { color: var(--color-text); }
+
+/* ---- Node navigator (boundary) ---- */
+.node-navigator {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+  display: grid;
+  gap: 6px;
+}
+.node-navigator__row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.node-navigator__tag { font-size: 10px; font-weight: 800; padding: 3px 8px; border-radius: 999px; }
+.node-navigator__tag--oop { color: var(--color-accent); background: var(--color-accent-soft); }
+.node-navigator__tag--ip { color: var(--color-success); background: var(--color-success-soft); }
+.node-navigator__actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.node-chip { font-size: 10px; font-weight: 700; padding: 3px 8px; border: 1px solid var(--color-border); border-radius: 999px; color: var(--color-text); }
+.node-navigator__edge { color: var(--color-text-muted); font-size: 10px; padding-left: 8px; }
+.node-navigator__note { margin-top: 2px; }
+
 /* ---- Focused views (Solver / Train / Library) ---- */
 .focused-view { display: grid; gap: 16px; align-content: start; }
 .view-placeholder { padding: 22px; border: 1px dashed var(--color-border); border-radius: 12px; }
@@ -443,6 +603,7 @@ footer { color: var(--color-text-muted); font-size: 11px; padding: 20px 3px 0; }
   .table-area { order: -1; }
   .felt { min-height: 340px; }
   .metric-grid { grid-template-columns: repeat(3, 1fr); }
+  .solve-grid-layout { grid-template-columns: 1fr; }
   .result-content > .panel { padding: 2px 0; }
 }
 @media (max-width: 600px) {

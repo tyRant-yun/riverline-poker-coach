@@ -15,7 +15,7 @@ import type {
 import AnalysisPanel from "../analysis/AnalysisPanel";
 import TeachingPanel from "../coach/TeachingPanel";
 import PracticePanel from "../practice/PracticePanel";
-import SolvePanel from "../solver/SolvePanel";
+import SolverWorkspace from "../solver/SolverWorkspace";
 
 export type ResultTab = "evidence" | "coach" | "practice" | "solver";
 
@@ -48,6 +48,7 @@ type Props = {
   canSubmitSolve: boolean;
   heroHoleCards: string[];
   onSolveSubmit: () => void;
+  onSolveCancel: () => void;
   onPracticeAnswer: (action: string) => void;
 };
 
@@ -66,6 +67,7 @@ export default function ResultWorkspace({
   canSubmitSolve,
   heroHoleCards,
   onSolveSubmit,
+  onSolveCancel,
   onPracticeAnswer,
 }: Props) {
   return (
@@ -109,7 +111,13 @@ export default function ResultWorkspace({
             <p className="muted">{PLACEHOLDERS.practice}</p>
           ))}
         {activeTab === "solver" && (
-          <SolvePanel solveJob={solveJob} canSubmit={canSubmitSolve} heroHoleCards={heroHoleCards} onSubmit={onSolveSubmit} />
+          <SolverWorkspace
+            solveJob={solveJob}
+            canSubmit={canSubmitSolve}
+            heroHoleCards={heroHoleCards}
+            onSubmit={onSolveSubmit}
+            onCancel={onSolveCancel}
+          />
         )}
       </div>
     </section>

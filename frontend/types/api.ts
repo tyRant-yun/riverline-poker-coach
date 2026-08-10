@@ -105,9 +105,14 @@ export type SolveJob = {
     metadata?: {
       solver: string;
       version: string;
+      street: string;
       exploitabilityChips: number;
+      targetExploitabilityChips: number;
       solveTimeMs: number;
       maxIterations: number;
+      memoryUsageGb: number;
+      memoryUsageCompressedGb: number;
+      compressed: boolean;
     };
     root?: SolverNodePayload;
     responseNode?: SolverNodePayload;
