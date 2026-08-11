@@ -131,9 +131,9 @@ RM-01 与 RM-02 文件边界基本独立，可并行。后续任务按 contract 
 | RM-01 | integrated | Terra `019ff0ed-7d88-7e52-8d13-bd19188c3914` | `a2e9e6f` → `eb1ba3c` | 2–8 seat、button/Hero、派生位置与 UI 构造门已转绿 |
 | RM-02 | integrated | Terra `019ff0ed-7d8d-7673-bd99-be5633258225` | `c539b49` → `e0aa99e` | HU 常见 2BB open 分支与原 8-max RFI policy 均可用 |
 | RM-03 | integrated | Terra `019ff116-d0ca-75f0-9927-41f18e3793f7` | `db74f24` → `e71ec37` | 每个真实行动返回同源 Range Trace 更新；主线完整后端门通过 |
-| RM-04 | active | Terra `019ff121-427d-75d0-b1e9-d1f49b9c35c7` | - | 独立 worktree；完成时主动回传 |
-| RM-05 | blocked_by_RM-04 | - | - | 消费最终 contract |
-| RM-06 | blocked_by_RM-05 | - | - | 最终发布门 |
+| RM-04 | integrated | Terra `019ff121-427d-75d0-b1e9-d1f49b9c35c7` | `f65d276` → `c7ea622` | configured Teacher 已逐决策接入；J10/J11 转绿 |
+| RM-05 | waiting_user_instruction | - | - | 未派发；本轮执行在 RM-04 收口后暂停 |
+| RM-06 | waiting_user_instruction | - | - | 未派发；等待下一轮指令 |
 
 ### Batch A 集成门结果
 
@@ -151,6 +151,15 @@ RM-01 与 RM-02 文件边界基本独立，可并行。后续任务按 contract 
 - RangeUpdate 复用共享 Range Trace，支持 curated HU/8-max policy 与 exact-node Solver artifact，未覆盖或错节点 artifact 诚实降级；
 - 行动前教学与行动后范围更新保持时序分离，早期节点无未来牌泄漏；
 - 主线 `backend/tests` 完整通过（保留 8 个既有 skip），`compileall` 与 `git diff --check` 通过。
+
+### RM-04 集成门结果
+
+- `/v1/hand-reviews` 使用 configured Teacher，每个真实决策按 actionId 顺序执行一次 bounded 调用，deal/state 事件排除；
+- external 输出沿用既有 schema/evidence 校验，单节点 timeout、transport、schema drift 或非法 evidence 会诚实降级，不污染其他节点；
+- per-decision 与整手聚合均返回可区分的 provider/version/promptVersion/sourceKind/degraded provenance，整手总结明确为 `aggregated_local`；
+- Agent/Teaching J10/J11 audit `11/11` 通过，完整后端测试 `370 passed, 8 skipped`，`compileall` 与 `git diff --check` 通过。
+
+按用户指令，本轮执行在 RM-04 集成完成后停止；未创建 RM-05/RM-06 任务，等待下一轮指令。
 
 ## 6. 回传与集成规则
 
