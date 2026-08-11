@@ -1,5 +1,5 @@
-// Action history timeline: clickable replay nodes. Selecting a node moves the
-// decision point back/forward; legality is always re-validated by the backend.
+// Action history timeline: selecting a player action asks the workspace to
+// derive its action-before decision projection; legality stays backend-owned.
 
 import type { ActionEvent } from "../../types/scenario";
 import { isPlayerAction } from "../../lib/poker/handReview";

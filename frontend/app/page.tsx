@@ -43,7 +43,7 @@ import { canSubmitSolve as solveGate, solveGateReasons } from "../lib/poker/solv
 import type { DisplayUnit } from "../lib/poker/format";
 import { buildSeatViewModels } from "../lib/poker/table";
 import { deadCardsForSeat, heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
-import { reconcileSelectedActionId, selectionForAction } from "../lib/poker/handReview";
+import { projectSelectedDecisionScenario, reconcileSelectedActionId, selectionForAction } from "../lib/poker/handReview";
 import { BeliefRequestGate } from "../lib/range/beliefRequest";
 import { applySolvePoll } from "../lib/solver/poll";
 
@@ -128,6 +128,7 @@ export default function Home() {
   // unmounts).
   const solvePollToken = useRef(0);
   const rangeBeliefRequestGate = useRef(new BeliefRequestGate());
+  const stateRefreshToken = useRef(0);
 
   useEffect(() => {
     void loadSavedScenarios();
@@ -162,30 +163,37 @@ export default function Home() {
     () => selectionForAction(scenario.actionHistory, selectedActionId),
     [scenario.actionHistory, selectedActionId],
   );
+  const selectedDecisionScenario = useMemo(
+    () => selectedAction ? projectSelectedDecisionScenario(scenario, selectedAction) : null,
+    [scenario, selectedAction],
+  );
+  // The editor always owns `scenario`. This projection is read-only and is
+  // the single scenario source for the selected decision workspace.
+  const workspaceScenario = selectedDecisionScenario ?? scenario;
 
-  const hasDealFlop = scenario.actionHistory.some((event) => event.actionType === "deal_flop");
-  const hasDealTurn = scenario.actionHistory.some((event) => event.actionType === "deal_turn");
-  const hasDealRiver = scenario.actionHistory.some((event) => event.actionType === "deal_river");
+  const hasDealFlop = workspaceScenario.actionHistory.some((event) => event.actionType === "deal_flop");
+  const hasDealTurn = workspaceScenario.actionHistory.some((event) => event.actionType === "deal_turn");
+  const hasDealRiver = workspaceScenario.actionHistory.some((event) => event.actionType === "deal_river");
   const pendingDealStreet = state?.actorSeat === null
-    ? (!hasDealFlop && scenario.board.length >= 3
+    ? (!hasDealFlop && workspaceScenario.board.length >= 3
       ? "preflop"
-      : !hasDealTurn && scenario.board.length >= 4
+      : !hasDealTurn && workspaceScenario.board.length >= 4
         ? "flop"
-        : !hasDealRiver && scenario.board.length >= 5
+        : !hasDealRiver && workspaceScenario.board.length >= 5
           ? "turn"
           : null)
     : null;
-  const currentStreet = pendingDealStreet ?? state?.street ?? scenario.decisionPoint.street;
+  const currentStreet = pendingDealStreet ?? state?.street ?? workspaceScenario.decisionPoint.street;
   const legal = state?.legalActions;
   const actorPosition =
     legal?.actorSeat != null
-      ? scenario.seats.find((seat) => seat.seatId === legal.actorSeat)?.position ?? null
+      ? workspaceScenario.seats.find((seat) => seat.seatId === legal.actorSeat)?.position ?? null
       : null;
   const boardInput = useMemo(() => [...scenario.board, "", "", "", "", ""].slice(0, 5), [scenario.board]);
 
   const tableSeats = useMemo<SeatViewModel[]>(
-    () => buildSeatViewModels(scenario, state),
-    [scenario, state],
+    () => buildSeatViewModels(workspaceScenario, state),
+    [workspaceScenario, state],
   );
 
   function updateScenario(patch: Partial<Scenario>) {
@@ -222,6 +230,7 @@ export default function Home() {
   function undo() {
     const previous = pastScenarios[pastScenarios.length - 1];
     if (!previous) return;
+    const restoredSelection = selectionForAction(previous.actionHistory, selectedActionId);
     setPastScenarios((past) => past.slice(0, -1));
     setFutureScenarios((future) => [scenario, ...future]);
     setScenario(previous);
@@ -232,11 +241,17 @@ export default function Home() {
     setPractice(null);
     setPracticeOutcome(null);
     invalidateDerivedAnalysisState();
+    void refreshState(
+      restoredSelection ? projectSelectedDecisionScenario(previous, restoredSelection) : previous,
+      undefined,
+      !restoredSelection,
+    );
   }
 
   function redo() {
     const next = futureScenarios[0];
     if (!next) return;
+    const restoredSelection = selectionForAction(next.actionHistory, selectedActionId);
     setFutureScenarios((future) => future.slice(1));
     setPastScenarios((past) => [...past, scenario]);
     setScenario(next);
@@ -247,6 +262,11 @@ export default function Home() {
     setPractice(null);
     setPracticeOutcome(null);
     invalidateDerivedAnalysisState();
+    void refreshState(
+      restoredSelection ? projectSelectedDecisionScenario(next, restoredSelection) : next,
+      undefined,
+      !restoredSelection,
+    );
   }
 
   async function resetScenario() {
@@ -262,7 +282,7 @@ export default function Home() {
     setAnalysis(null);
     setAnalysisStale(false);
     setMessage("场景已重置；原场景仍可通过撤销恢复。");
-    await refreshState(next);
+    await refreshState(next, undefined, true);
   }
 
   function updateBoard(index: number, value: string) {
@@ -580,24 +600,32 @@ export default function Home() {
     }
   }
 
-  async function refreshState(nextScenario = scenario, successMessage?: string) {
+  async function refreshState(
+    nextScenario = workspaceScenario,
+    successMessage?: string,
+    syncEditorDecision = !selectedAction,
+  ) {
+    const requestToken = ++stateRefreshToken.current;
     setBusy(true);
     try {
       const payload = await scenariosApi.state(nextScenario);
+      if (stateRefreshToken.current !== requestToken) return;
       setState(payload.finalState);
-      setScenario((current) => ({
-        ...current,
-        decisionPoint: {
-          street: payload.finalState.street,
-          actorSeat: payload.finalState.actorSeat ?? current.heroSeat,
-          afterSequence: nextScenario.decisionPoint.afterSequence,
-        },
-      }));
+      if (syncEditorDecision) {
+        setScenario((current) => ({
+          ...current,
+          decisionPoint: {
+            street: payload.finalState.street,
+            actorSeat: payload.finalState.actorSeat ?? current.heroSeat,
+            afterSequence: nextScenario.decisionPoint.afterSequence,
+          },
+        }));
+      }
       setMessage(successMessage ?? "规则校验通过，当前状态已更新。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "规则校验失败");
     } finally {
-      setBusy(false);
+      if (stateRefreshToken.current === requestToken) setBusy(false);
     }
   }
 
@@ -619,7 +647,7 @@ export default function Home() {
     commitScenario(next);
     setSelectedActionId(event.actionId);
     setBeliefSeatId(event.actorSeat);
-    await refreshState(next);
+    await refreshState(next, undefined, true);
   }
 
   async function deal(street: "deal_flop" | "deal_turn" | "deal_river") {
@@ -646,9 +674,16 @@ export default function Home() {
     const selection = selectionForAction(scenario.actionHistory, actionId);
     if (!selection) return;
     invalidateRangeBelief();
+    if (selectedActionId === selection.actionId) {
+      setSelectedActionId(null);
+      setBeliefSeatId(null);
+      void refreshState(scenario, undefined, true);
+      return;
+    }
     setSelectedActionId(selection.actionId);
     setBeliefSeatId(selection.actorSeat);
     setBeliefMode("current");
+    void refreshState(projectSelectedDecisionScenario(scenario, selection), undefined, false);
   }
 
   async function runAnalysis() {
@@ -668,10 +703,10 @@ export default function Home() {
         : activeScenarioId
           ? `/v1/scenarios/${activeScenarioId}/analyze`
           : "/v1/analysis";
-      const analysisPath = activeScenarioId && !savedScenarioDirty ? path : "/v1/analysis";
+      const analysisPath = !selectedAction && activeScenarioId && !savedScenarioDirty ? path : "/v1/analysis";
       const payload =
         analysisPath === "/v1/analysis"
-          ? await analysisApi.run(scenario)
+          ? await analysisApi.run(workspaceScenario)
           : historicalRevision
             ? await scenariosApi.analyzeRevision(activeScenarioId!, activeRevisionNo!)
             : await scenariosApi.analyze(activeScenarioId!);
@@ -754,7 +789,7 @@ export default function Home() {
   async function runTeaching() {
     setBusy(true);
     try {
-      const payload = await coachApi.explain({ scenario, depth: teachingDepth, question: teachingQuestion || undefined });
+      const payload = await coachApi.explain({ scenario: workspaceScenario, depth: teachingDepth, question: teachingQuestion || undefined });
       setTeaching(payload.response);
       setTeachingMeta({
         provider: payload.provider ?? "local",
@@ -772,7 +807,7 @@ export default function Home() {
   async function submitSolve() {
     setBusy(true);
     try {
-      const payload = await solverApi.submit(scenario);
+      const payload = await solverApi.submit(workspaceScenario);
       setSolveJob(payload);
       void pollSolveJob(payload.jobId);
       setMessage("求解作业已提交（独立 Solver 容器执行，通常 1–3 分钟）。");
@@ -840,7 +875,7 @@ export default function Home() {
   async function generatePractice() {
     setBusy(true);
     try {
-      const payload = await practiceApi.generate({ scenario, profileId: "local-browser", mistakeTag: "pot_odds" });
+      const payload = await practiceApi.generate({ scenario: workspaceScenario, profileId: "local-browser", mistakeTag: "pot_odds" });
       setPractice(payload.question);
       setPracticeOutcome(null);
       setMessage("验证练习已生成；先选择行动，再查看证据答案。");
@@ -870,8 +905,8 @@ export default function Home() {
   // ranges for them (legacy hero/villain or Schema v2 rangesBySeat). The
   // backend re-validates every spot; this only blocks obviously invalid
   // submissions.
-  const canSubmitSolve = solveGate(scenario, state, currentStreet, busy);
-  const solveReasons = solveGateReasons(scenario, state, currentStreet);
+  const canSubmitSolve = solveGate(workspaceScenario, state, currentStreet, busy);
+  const solveReasons = solveGateReasons(workspaceScenario, state, currentStreet);
 
   const handLab = (
     <>
@@ -949,7 +984,7 @@ export default function Home() {
             </div>
             <PokerTable
               seats={tableSeats}
-              board={scenario.board}
+              board={workspaceScenario.board}
               pot={state?.pot ?? null}
               unit={displayUnit}
               bigBlind={scenario.bigBlind}
@@ -957,8 +992,8 @@ export default function Home() {
             <ActionBar
               legal={legal ?? null}
               currentStreet={currentStreet}
-              busy={busy}
-              boardLength={scenario.board.length}
+              busy={busy || Boolean(selectedAction)}
+              boardLength={workspaceScenario.board.length}
               raiseAmount={raiseAmount}
               pot={state?.pot ?? null}
               actorPosition={actorPosition}
@@ -1027,9 +1062,9 @@ export default function Home() {
         busy={busy}
         solveJob={solveJob}
         canSubmitSolve={canSubmitSolve}
-        heroHoleCards={heroCards(scenario)}
-        seats={scenario.seats}
-        heroSeat={scenario.heroSeat}
+        heroHoleCards={heroCards(workspaceScenario)}
+        seats={workspaceScenario.seats}
+        heroSeat={workspaceScenario.heroSeat}
         solveGate={solveReasons}
         onSolveSubmit={() => void submitSolve()}
         onSolveCancel={() => void cancelSolve()}
@@ -1043,7 +1078,7 @@ export default function Home() {
       <section className="panel table-panel">
         <PokerTable
           seats={tableSeats}
-          board={scenario.board}
+          board={workspaceScenario.board}
           pot={state?.pot ?? null}
           unit={displayUnit}
           bigBlind={scenario.bigBlind}
@@ -1052,7 +1087,7 @@ export default function Home() {
       <SolverWorkspace
         solveJob={solveJob}
         canSubmit={canSubmitSolve}
-        heroHoleCards={heroCards(scenario)}
+        heroHoleCards={heroCards(workspaceScenario)}
         gate={solveReasons}
         onSubmit={() => void submitSolve()}
         onCancel={() => void cancelSolve()}
