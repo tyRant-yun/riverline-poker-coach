@@ -125,6 +125,8 @@ class RangeUpdateMetadata(DomainModel):
     off_tree: bool = False
     policy_source: PolicySource | None = None
     node: str | None = None
+    policy_version: str | None = None
+    assumptions: tuple[str, ...] = ()
 
 
 class RangeBeliefSnapshot(DomainModel):

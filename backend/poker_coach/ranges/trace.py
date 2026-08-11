@@ -129,13 +129,15 @@ def build_range_trace(
                 event.sequence,
             )
         policy = None
+        no_policy_message: str | None = None
         for candidate in provider_chain:
             try:
                 policy = candidate.get_action_frequencies(
                     scenario, seat_id, event.sequence, tuple(snapshot.combos)
                 )
                 break
-            except NoPolicyError:
+            except NoPolicyError as exc:
+                no_policy_message = str(exc)
                 continue
             except PolicySequenceMismatchError:
                 # A solver artifact is intentionally node-scoped. In an
@@ -147,7 +149,8 @@ def build_range_trace(
         if policy is None:
             return _stalled(
                 seat_id, chain, "no_policy",
-                f"no grounded action policy is available for this node (seat {seat_id} at sequence {event.sequence})",
+                no_policy_message
+                or f"no grounded action policy is available for this node (seat {seat_id} at sequence {event.sequence})",
                 event.sequence,
             )
         try:

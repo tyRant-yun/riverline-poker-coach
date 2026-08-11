@@ -219,5 +219,7 @@ def update_range_belief(
             off_tree=match.off_tree,
             policy_source=policy.source,
             node=policy.node,
+            policy_version=policy.version,
+            assumptions=policy.assumptions,
         ),
     )

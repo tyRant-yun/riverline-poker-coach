@@ -26,6 +26,8 @@ export type RangeBeliefUpdate = {
   offTree: boolean;
   policySource: string | null;
   node: string | null;
+  policyVersion?: string | null;
+  assumptions?: string[];
 };
 
 export type RangeBeliefView = {

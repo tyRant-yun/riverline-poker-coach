@@ -103,6 +103,8 @@ class PolicyResult(DomainModel):
     frequencies: dict[str, dict[str, Decimal]]
     likelihood_only: bool = False
     node: str | None = None
+    version: str | None = None
+    assumptions: tuple[str, ...] = ()
     reference_pot: Annotated[int, Field(ge=0)] | None = None
     confidence: str = "grounded"
 

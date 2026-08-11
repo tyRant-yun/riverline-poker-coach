@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { BeliefRequestGate } from "./beliefRequest";
+import { BeliefRequestGate, selectCuratedPreflopPolicy } from "./beliefRequest";
 
 describe("BeliefRequestGate", () => {
   it("accepts only the latest action response", async () => {
@@ -29,5 +29,13 @@ describe("BeliefRequestGate", () => {
     gate.invalidate();
 
     expect(gate.isCurrent(token)).toBe(false);
+  });
+});
+
+describe("selectCuratedPreflopPolicy", () => {
+  it("selects the backend-owned curated provider for HU and 8-max requests only", () => {
+    expect(selectCuratedPreflopPolicy(2)).toEqual({ source: "preflop_policy" });
+    expect(selectCuratedPreflopPolicy(8)).toEqual({ source: "preflop_policy" });
+    expect(selectCuratedPreflopPolicy(6)).toBeUndefined();
   });
 });

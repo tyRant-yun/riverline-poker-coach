@@ -1047,8 +1047,8 @@ def create_app(
 
         Payload: ``{scenario, seatId?, afterSequence?, policy?}``. ``policy``
           may be ``{source: "fixture", frequencies}`` (deterministic override),
-          ``{source: "preflop_policy"}`` (the built-in exact 8-max RFI
-          baseline),
+          ``{source: "preflop_policy"}`` (the built-in exact 8-max RFI and
+          narrow HU curated baselines),
         ``{source: "solver", jobId}`` (the preferred persisted artifact
         path). A raw ``result`` remains a compatibility path but is marked
         ``confidence=unverified``. When no grounded policy covers the node the response reports

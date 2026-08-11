@@ -151,6 +151,24 @@ def eight_max_rfi_payload() -> dict:
     }
 
 
+def hu_open_payload(*, amount: int = 200) -> dict:
+    payload = belief_scenario_payload(actions=1)
+    payload["board"] = []
+    payload["actionHistory"] = [
+        {
+            "actionId": "btn-open",
+            "sequence": 1,
+            "street": "preflop",
+            "actorSeat": 0,
+            "actionType": "raise_to",
+            "amount": amount,
+            "amountType": "to",
+        }
+    ]
+    payload["decisionPoint"] = {"street": "preflop", "actorSeat": 1, "afterSequence": 1}
+    return payload
+
+
 def solver_result_payload() -> dict:
     return {
         "metadata": {
@@ -262,6 +280,51 @@ def test_builtin_preflop_policy_rejects_unrecognized_extra_fields():
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_policy"
+
+
+def test_belief_with_builtin_hu_policy_exposes_curated_versioned_node_metadata():
+    client = TestClient(create_app())
+    response = client.post(
+        "/v1/ranges/belief",
+        json={
+            "scenario": hu_open_payload(),
+            "seatId": 0,
+            "policy": {"source": "preflop_policy"},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["source"] == "preflop_policy"
+    assert payload["confidence"] == "curated"
+    assert payload["update"]["node"] == "preflop-policy/hu-100bb-0.1/hu-btn-open-2bb"
+    assert payload["update"]["policyVersion"] == "hu-100bb-0.1"
+    assert payload["update"]["assumptions"] == [
+        "HU NLHE",
+        "100BB effective stacks",
+        "no ante / no rake",
+        "BTN open fixed to the product default 2BB",
+        "deterministic membership interpretation of default.btn_open.100bb",
+    ]
+    assert sum(Decimal(value["probability"]) for value in payload["combos"].values()) == Decimal("1")
+
+
+def test_hu_unsupported_size_preserves_the_specific_curated_policy_reason():
+    client = TestClient(create_app())
+    response = client.post(
+        "/v1/ranges/belief",
+        json={
+            "scenario": hu_open_payload(amount=220),
+            "seatId": 0,
+            "policy": {"source": "preflop_policy"},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["available"] is False
+    assert "exact 2BB" in payload["unavailableReason"]
 
 
 def test_belief_with_solver_result_policy():

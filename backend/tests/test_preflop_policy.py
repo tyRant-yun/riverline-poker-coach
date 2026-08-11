@@ -71,6 +71,54 @@ def rfi_scenario(*, actor_seat: int = 3, amount: int = 250, table_size: int = 8)
     )
 
 
+def hu_scenario(events: list[dict]) -> ScenarioSpec:
+    return ScenarioSpec.model_validate(
+        {
+            "schemaVersion": 2,
+            "gameVariant": "nlhe",
+            "tableSize": 2,
+            "smallBlind": 50,
+            "bigBlind": 100,
+            "buttonSeat": 0,
+            "heroSeat": 0,
+            "seats": [
+                {"seatId": 0, "startingStack": 10_000, "position": "button"},
+                {"seatId": 1, "startingStack": 10_000, "position": "big_blind"},
+            ],
+            "board": [],
+            "actionHistory": events,
+            "decisionPoint": {
+                "street": "preflop",
+                "actorSeat": events[-1]["actorSeat"],
+                "afterSequence": len(events),
+            },
+            "assumptions": {"rakeAssumption": "no_rake"},
+        }
+    )
+def hu_raise(sequence: int, actor_seat: int, amount: int) -> dict:
+    return {
+        "actionId": f"raise-{sequence}",
+        "sequence": sequence,
+        "street": "preflop",
+        "actorSeat": actor_seat,
+        "actionType": "raise_to",
+        "amount": amount,
+        "amountType": "to",
+    }
+
+
+def hu_call(sequence: int, actor_seat: int, amount: int) -> dict:
+    return {
+        "actionId": f"call-{sequence}",
+        "sequence": sequence,
+        "street": "preflop",
+        "actorSeat": actor_seat,
+        "actionType": "call",
+        "amount": amount,
+        "amountType": "cost",
+    }
+
+
 class TestPreflopPolicyProvider:
     def test_utg_rfi_returns_a_complete_curated_policy(self):
         scenario = rfi_scenario()
@@ -144,3 +192,98 @@ class TestPreflopPolicyProvider:
         )
         with pytest.raises(NoPolicyError, match="no earlier voluntary entry"):
             PreflopPolicyProvider().get_action_frequencies(scenario, 7, 2, ("AsAh",))
+
+
+class TestHuCuratedPolicy:
+    def test_btn_open_uses_the_project_owned_range_as_a_complete_2bb_table(self):
+        scenario = hu_scenario([hu_raise(1, 0, 200)])
+
+        policy = PreflopPolicyProvider().get_action_frequencies(
+            scenario, 0, 1, ("AsAh", "Jc4d")
+        )
+
+        assert policy.source is PolicySource.PREFLOP_POLICY
+        assert policy.confidence == "curated"
+        assert policy.version == "hu-100bb-0.1"
+        assert policy.actions == ("Raise(200)", "Fold")
+        assert policy.frequencies["AsAh"] == {"Raise(200)": Decimal("1"), "Fold": Decimal("0")}
+        assert policy.frequencies["Jc4d"] == {"Raise(200)": Decimal("0"), "Fold": Decimal("1")}
+        assert all(sum(table.values()) == Decimal("1") for table in policy.frequencies.values())
+        assert policy.assumptions == (
+            "HU NLHE",
+            "100BB effective stacks",
+            "no ante / no rake",
+            "BTN open fixed to the product default 2BB",
+            "deterministic membership interpretation of default.btn_open.100bb",
+        )
+        assert policy.node == "preflop-policy/hu-100bb-0.1/hu-btn-open-2bb"
+
+    def test_bb_defend_table_assigns_3bet_before_call_before_fold(self):
+        scenario = hu_scenario([hu_raise(1, 0, 200), hu_raise(2, 1, 300)])
+
+        policy = PreflopPolicyProvider().get_action_frequencies(
+            scenario, 1, 2, ("AsAh", "7s6s", "Jc4d")
+        )
+
+        assert policy.actions == ("Raise(300)", "Call", "Fold")
+        assert policy.frequencies["AsAh"] == {"Raise(300)": Decimal("1"), "Call": Decimal("0"), "Fold": Decimal("0")}
+        assert policy.frequencies["7s6s"] == {"Raise(300)": Decimal("0"), "Call": Decimal("1"), "Fold": Decimal("0")}
+        assert policy.frequencies["Jc4d"] == {"Raise(300)": Decimal("0"), "Call": Decimal("0"), "Fold": Decimal("1")}
+
+    def test_btn_facing_the_default_3bet_assigns_4bet_before_call_before_fold(self):
+        scenario = hu_scenario(
+            [hu_raise(1, 0, 200), hu_raise(2, 1, 300), hu_raise(3, 0, 400)]
+        )
+
+        policy = PreflopPolicyProvider().get_action_frequencies(
+            scenario, 0, 3, ("Ac5c", "KsQs", "Jc4d")
+        )
+
+        assert policy.actions == ("Raise(400)", "Call", "Fold")
+        assert policy.frequencies["Ac5c"]["Raise(400)"] == Decimal("1")
+        assert policy.frequencies["KsQs"]["Call"] == Decimal("1")
+        assert policy.frequencies["Jc4d"]["Fold"] == Decimal("1")
+        assert all(sum(table.values()) == Decimal("1") for table in policy.frequencies.values())
+
+    def test_bb_vs_4bet_stays_unsupported_when_the_asset_has_no_action_allocation(self):
+        scenario = hu_scenario(
+            [
+                hu_raise(1, 0, 200),
+                hu_raise(2, 1, 300),
+                hu_raise(3, 0, 400),
+                hu_call(4, 1, 100),
+            ]
+        )
+
+        with pytest.raises(NoPolicyError, match="continue range.*no action allocation"):
+            PreflopPolicyProvider().get_action_frequencies(scenario, 1, 4, ("AsAh",))
+
+    @pytest.mark.parametrize(
+        ("scenario", "seat_id", "sequence", "message"),
+        (
+            (hu_scenario([hu_raise(1, 0, 220)]), 0, 1, "exact 2BB"),
+            (hu_scenario([hu_call(1, 0, 50)]), 0, 1, "limp"),
+            (
+                hu_scenario(
+                    [
+                        hu_call(1, 0, 50),
+                        {
+                            "actionId": "bb-option",
+                            "sequence": 2,
+                            "street": "preflop",
+                            "actorSeat": 1,
+                            "actionType": "check",
+                        },
+                    ]
+                ),
+                1,
+                2,
+                "BB option",
+            ),
+        ),
+    )
+    def test_hu_unsupported_nodes_return_specific_no_policy_reasons(
+        self, scenario, seat_id, sequence, message
+    ):
+        with pytest.raises(NoPolicyError, match=message):
+            PreflopPolicyProvider().get_action_frequencies(scenario, seat_id, sequence, ("AsAh",))

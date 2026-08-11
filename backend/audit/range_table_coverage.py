@@ -25,7 +25,7 @@ POSITIONS = {
     6: ("button", "small_blind", "big_blind", "utg", "mp", "co"),
     8: ("button", "small_blind", "big_blind", "utg", "utg+1", "mp", "hj", "co"),
 }
-PRIOR = {"AA": "1", "KK": "1", "AKs": "1", "76s": "0.5"}
+PRIOR = {"AA": "1", "KK": "1", "AKs": "1", "76s": "0.5", "J4o": "0.2"}
 
 
 @dataclass
@@ -184,12 +184,13 @@ def main() -> int:
         rows.append(Evidence("J03" if table_size == 8 else "J08", f"{table_size}max all button/hero combinations ({valid}/{total})", valid == total, True, "rules", True, "grounded", None, None))
 
     # Real legal trajectories. These use no policy data; belief availability is
-    # expected to be honestly unavailable outside the narrow curated node.
+    # expected to be honestly unavailable outside the declared curated nodes.
+    curated_policy = {"source": "preflop_policy"}
     for size in (200, 220, 250, 300):
         payload = append(client, scenario(2), "raise_to", size)
-        rows.append(belief_evidence(client, "J01" if size == 200 else "J02", f"HU open {size / 100:g}BB", payload, 0))
-    fold_to_rfi = append(client, append(client, scenario(2), "raise_to", 250), "fold")
-    rows.append(belief_evidence(client, "J01", "HU fold-to-RFI", fold_to_rfi, 1))
+        rows.append(belief_evidence(client, "J01" if size == 200 else "J02", f"HU open {size / 100:g}BB", payload, 0, curated_policy))
+    fold_to_rfi = append(client, append(client, scenario(2), "raise_to", 200), "fold")
+    rows.append(belief_evidence(client, "J01", "HU fold-to-RFI", fold_to_rfi, 1, curated_policy))
     terminal_scenario = {
         **fold_to_rfi,
         "knownHoleCardsBySeat": {"0": ["As", "Ad"], "1": ["Kc", "Qd"]},
@@ -215,28 +216,30 @@ def main() -> int:
         )
     )
     limp = append(client, scenario(2), "call")
-    rows.append(belief_evidence(client, "J05", "HU limp", limp, 0))
+    rows.append(belief_evidence(client, "J05", "HU limp", limp, 0, curated_policy))
     bb_option = append(client, limp, "check")
-    rows.append(belief_evidence(client, "J05", "HU BB option after limp", bb_option, 1))
-    three_bet = append(client, append(client, scenario(2), "raise_to", 250), "raise_to")
-    rows.append(belief_evidence(client, "J05", "HU 3bet", three_bet, 1))
+    rows.append(belief_evidence(client, "J05", "HU BB option after limp", bb_option, 1, curated_policy))
+    three_bet = append(client, append(client, scenario(2), "raise_to", 200), "raise_to")
+    rows.append(belief_evidence(client, "J05", "HU 3bet", three_bet, 1, curated_policy))
     four_bet = append(client, three_bet, "raise_to")
-    rows.append(belief_evidence(client, "J05", "HU 4bet", four_bet, 0))
+    rows.append(belief_evidence(client, "J05", "HU 4bet", four_bet, 0, curated_policy))
+    bb_vs_four_bet = append(client, four_bet, "call")
+    rows.append(belief_evidence(client, "J05", "HU BB response vs 4bet", bb_vs_four_bet, 1, curated_policy))
 
     # Flop lines exercise action continuity after a real deal: check/check,
     # bet/call, and bet/raise/fold.  Every action is accepted only if backend
     # legalActions advertised it.
-    preflop = append(client, append(client, scenario(2, board=True), "raise_to", 250), "call")
+    preflop = append(client, append(client, scenario(2, board=True), "raise_to", 200), "call")
     flop = append(client, preflop, "deal_flop")
     check_check = append(client, append(client, flop, "check"), "check")
-    rows.append(belief_evidence(client, "J06", "HU flop check/check", check_check, 1))
+    rows.append(belief_evidence(client, "J06", "HU flop check/check", check_check, 1, curated_policy))
     bet_call = append(client, append(client, flop, "check"), "bet", 100)
     bet_call = append(client, bet_call, "call")
-    rows.append(belief_evidence(client, "J06", "HU flop check/bet/call", bet_call, 0))
+    rows.append(belief_evidence(client, "J06", "HU flop check/bet/call", bet_call, 0, curated_policy))
     bet_raise_fold = append(client, append(client, flop, "check"), "bet", 100)
     bet_raise_fold = append(client, bet_raise_fold, "raise_to", 300)
     bet_raise_fold = append(client, bet_raise_fold, "fold")
-    rows.append(belief_evidence(client, "J06", "HU flop check/bet/raise/fold", bet_raise_fold, 1))
+    rows.append(belief_evidence(client, "J06", "HU flop check/bet/raise/fold", bet_raise_fold, 1, curated_policy))
 
     # Exact genuine provider coverage: seven 8-max RFI positions. No fixtures.
     for target_position in ("utg", "utg+1", "mp", "hj", "co", "button", "small_blind"):
