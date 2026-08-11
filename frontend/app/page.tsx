@@ -4,7 +4,7 @@
 // and cross-feature wiring live here; rendering lives in features/components.
 // F2: AppShell + three-column workspace + tabbed result workspace.
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import type {
   SolveJob,
@@ -45,7 +45,13 @@ import { buildSeatViewModels } from "../lib/poker/table";
 import { deadCardsForSeat, heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
 import { projectSelectedDecisionScenario, reconcileSelectedActionId, selectionForAction } from "../lib/poker/handReview";
 import { BeliefRequestGate } from "../lib/range/beliefRequest";
-import { applySolvePoll } from "../lib/solver/poll";
+import {
+  emptySolveJobRegistry,
+  projectionFingerprint,
+  selectedSolveJob,
+  solveJobRegistryReducer,
+  type SolveJobNode,
+} from "../lib/solver/registry";
 
 import AppShell, { type WorkspaceView } from "../components/AppShell";
 import PokerTable from "../components/poker/PokerTable";
@@ -90,7 +96,7 @@ export default function Home() {
   const [analysisStale, setAnalysisStale] = useState(false);
   const [teaching, setTeaching] = useState<TeachingResponse["response"] | null>(null);
   const [teachingMeta, setTeachingMeta] = useState<TeachingMeta | null>(null);
-  const [solveJob, setSolveJob] = useState<SolveJob | null>(null);
+  const [solveJobs, dispatchSolveJob] = useReducer(solveJobRegistryReducer, emptySolveJobRegistry);
   const [practice, setPractice] = useState<PracticeQuestion | null>(null);
   const [practiceOutcome, setPracticeOutcome] = useState<PracticeOutcome | null>(null);
   const [teachingDepth, setTeachingDepth] = useState("intermediate");
@@ -123,10 +129,9 @@ export default function Home() {
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit>("bb");
   const [activeView, setActiveView] = useState<WorkspaceView>("handlab");
   const [resultTab, setResultTab] = useState<ResultTab>("evidence");
-  // Generation token that supersedes stale solver poll loops (prevents
-  // duplicate/concurrent polling when a job is resubmitted or the page
-  // unmounts).
-  const solvePollToken = useRef(0);
+  // Each action node owns a polling generation. Resubmitting or unmounting
+  // only supersedes that node's loop, never another action's job.
+  const solvePollTokens = useRef<Record<string, number>>({});
   const rangeBeliefRequestGate = useRef(new BeliefRequestGate());
   const stateRefreshToken = useRef(0);
 
@@ -140,7 +145,9 @@ export default function Home() {
   // Stop any in-flight solver polling when the workspace unmounts.
   useEffect(() => {
     return () => {
-      solvePollToken.current += 1;
+      for (const actionId of Object.keys(solvePollTokens.current)) {
+        solvePollTokens.current[actionId] += 1;
+      }
     };
   }, []);
 
@@ -154,10 +161,6 @@ export default function Home() {
   useEffect(() => {
     if (practice) setResultTab("practice");
   }, [practice]);
-  useEffect(() => {
-    if (solveJob) setResultTab("solver");
-  }, [solveJob]);
-
   const rangeText = rangeTextBySide[rangeSide];
   const selectedAction = useMemo(
     () => selectionForAction(scenario.actionHistory, selectedActionId),
@@ -167,6 +170,32 @@ export default function Home() {
     () => selectedAction ? projectSelectedDecisionScenario(scenario, selectedAction) : null,
     [scenario, selectedAction],
   );
+  const solveNodes = useMemo(() => {
+    return scenario.actionHistory.reduce<Record<string, SolveJobNode>>((nodes, event) => {
+      const selection = selectionForAction(scenario.actionHistory, event.actionId);
+      if (!selection) return nodes;
+      const projection = projectSelectedDecisionScenario(scenario, selection);
+      nodes[selection.actionId] = {
+        decisionSequence: selection.decisionSequence,
+        actorSeat: selection.actorSeat,
+        projectionFingerprint: projectionFingerprint(projection),
+      };
+      return nodes;
+    }, {});
+  }, [scenario]);
+  const selectedProjectionFingerprint = selectedAction
+    ? solveNodes[selectedAction.actionId]?.projectionFingerprint ?? null
+    : null;
+  const selectedSolveEntry = selectedAction ? solveJobs[selectedAction.actionId] ?? null : null;
+  const solveJob = selectedSolveJob(solveJobs, selectedActionId, selectedProjectionFingerprint);
+
+  useEffect(() => {
+    dispatchSolveJob({ type: "reconcile", actions: solveNodes });
+  }, [solveNodes]);
+
+  useEffect(() => {
+    if (solveJob) setResultTab("solver");
+  }, [solveJob]);
   // The editor always owns `scenario`. This projection is read-only and is
   // the single scenario source for the selected decision workspace.
   const workspaceScenario = selectedDecisionScenario ?? scenario;
@@ -203,9 +232,7 @@ export default function Home() {
   }
 
   function invalidateDerivedAnalysisState() {
-    solvePollToken.current += 1;
     invalidateRangeBelief();
-    setSolveJob(null);
   }
 
   function invalidateRangeBelief() {
@@ -380,7 +407,7 @@ export default function Home() {
     // Request identity is represented by the action id, selected seat and
     // ScenarioSpec. The gate above rejects a response from an older render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenario, selectedActionId, beliefSeatId]);
+  }, [scenario, selectedActionId, beliefSeatId, solveJob?.jobId, solveJob?.status]);
 
   function syncRangeEditor(nextScenario: Scenario) {
     setRangeTextBySide((current) => ({
@@ -805,11 +832,22 @@ export default function Home() {
   }
 
   async function submitSolve() {
+    if (!selectedAction || !selectedProjectionFingerprint) {
+      setMessage("请先在行动时间线中选择一条真实玩家行动，再求解此点。");
+      return;
+    }
     setBusy(true);
     try {
       const payload = await solverApi.submit(workspaceScenario);
-      setSolveJob(payload);
-      void pollSolveJob(payload.jobId);
+      dispatchSolveJob({
+        type: "submitted",
+        actionId: selectedAction.actionId,
+        decisionSequence: selectedAction.decisionSequence,
+        actorSeat: selectedAction.actorSeat,
+        projectionFingerprint: selectedProjectionFingerprint,
+        job: payload,
+      });
+      void pollSolveJob(selectedAction.actionId, payload);
       setMessage("求解作业已提交（独立 Solver 容器执行，通常 1–3 分钟）。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "求解提交失败");
@@ -819,11 +857,11 @@ export default function Home() {
   }
 
   async function cancelSolve() {
-    if (!solveJob) return;
+    if (!selectedAction || !selectedSolveEntry) return;
     setBusy(true);
     try {
-      const payload = await solverApi.cancel(solveJob.jobId);
-      setSolveJob((job) => (job ? { ...job, status: payload.status } : job));
+      const payload = await solverApi.cancel(selectedSolveEntry.job.jobId);
+      dispatchSolveJob({ type: "cancelled", actionId: selectedAction.actionId, status: payload.status });
       setMessage(`求解取消请求已发送（${payload.status}）。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "取消请求失败");
@@ -832,38 +870,26 @@ export default function Home() {
     }
   }
 
-  async function pollSolveJob(jobId: string) {
-    const token = ++solvePollToken.current;
+  async function pollSolveJob(actionId: string, submittedJob: SolveJob) {
+    const token = (solvePollTokens.current[actionId] ?? 0) + 1;
+    solvePollTokens.current[actionId] = token;
     for (let attempt = 0; attempt < 120; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 3000));
-      if (solvePollToken.current !== token) return; // superseded by a newer poll
+      if (solvePollTokens.current[actionId] !== token) return; // node was resubmitted or unmounted
       try {
-        const payload = await solverApi.get(jobId);
-        if (solvePollToken.current !== token) return;
+        const payload = await solverApi.get(submittedJob.jobId);
+        if (solvePollTokens.current[actionId] !== token) return;
         // Merge onto the previous job instead of replacing it: the submit
         // response's spot (assumptions -> bunching_ignored) must survive
         // every poll cycle.
-        const pollPayload = { ...payload, jobId };
-        const freshJob = applySolvePoll(solveJob, pollPayload);
-        // Use a functional merge for React state (the poll closure may have
-        // captured the initial null job), but use the freshly returned API
-        // payload for the belief request below.
-        setSolveJob((previous) => applySolvePoll(previous, pollPayload));
+        const pollPayload = { ...payload, jobId: submittedJob.jobId };
+        dispatchSolveJob({ type: "polled", actionId, job: pollPayload });
         if (["solved", "failed", "cancelled"].includes(payload.status)) {
           setMessage(
             payload.status === "solved"
               ? "求解完成；策略频率可作为 solver_backed 证据引用。"
               : `求解${payload.status}${payload.error ? `：${payload.error}` : ""}`,
           );
-          if (payload.status === "solved") {
-            if (selectedAction) {
-              void fetchRangeBelief({
-                seatId: beliefSeatId ?? selectedAction.actorSeat,
-                afterSequence: selectedAction.eventSequence,
-                job: freshJob,
-              });
-            }
-          }
           return;
         }
       } catch {
@@ -905,7 +931,7 @@ export default function Home() {
   // ranges for them (legacy hero/villain or Schema v2 rangesBySeat). The
   // backend re-validates every spot; this only blocks obviously invalid
   // submissions.
-  const canSubmitSolve = solveGate(workspaceScenario, state, currentStreet, busy);
+  const canSubmitSolve = Boolean(selectedAction) && solveGate(workspaceScenario, state, currentStreet, busy);
   const solveReasons = solveGateReasons(workspaceScenario, state, currentStreet);
 
   const handLab = (
@@ -956,6 +982,20 @@ export default function Home() {
               onSelectAction={selectAction}
               onRefresh={() => void refreshState()}
             />
+            {selectedAction && (
+              <p className="muted small">
+                {selectedSolveEntry?.stale
+                  ? "此行动的 Solver job 已过期：场景或节点 fingerprint 不再匹配，可重新提交。"
+                  : selectedSolveEntry
+                    ? `此行动的 Solver 状态：${selectedSolveEntry.job.status}`
+                    : "已选择行动前节点；点击「提交 Solver」仅求解此点。"}
+                {selectedSolveEntry?.stale && ["queued", "running", "cancellation_requested"].includes(selectedSolveEntry.job.status) && (
+                  <button className="text-button" onClick={() => void cancelSolve()}>
+                    取消求解
+                  </button>
+                )}
+              </p>
+            )}
           </section>
         </aside>
 
