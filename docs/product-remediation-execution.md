@@ -128,12 +128,22 @@ RM-01 与 RM-02 文件边界基本独立，可并行。后续任务按 contract 
 
 | 任务 | 状态 | 执行任务 | 提交 | 备注 |
 |---|---|---|---|---|
-| RM-01 | active | Terra `019ff0ed-7d88-7e52-8d13-bd19188c3914` | - | 独立 worktree，完成时回传 |
-| RM-02 | active | Terra `019ff0ed-7d8d-7673-bd99-be5633258225` | - | 独立 worktree，完成时回传 |
-| RM-03 | blocked_by_Batch_A | - | - | 依赖真实 policy |
+| RM-01 | integrated | Terra `019ff0ed-7d88-7e52-8d13-bd19188c3914` | `a2e9e6f` → `eb1ba3c` | 2–8 seat、button/Hero、派生位置与 UI 构造门已转绿 |
+| RM-02 | integrated | Terra `019ff0ed-7d8d-7673-bd99-be5633258225` | `c539b49` → `e0aa99e` | HU 常见 2BB open 分支与原 8-max RFI policy 均可用 |
+| RM-03 | ready | - | - | Batch A 已通过，下一任务 |
 | RM-04 | blocked_by_RM-03 | - | - | 同一 review contract 边界 |
 | RM-05 | blocked_by_RM-04 | - | - | 消费最终 contract |
 | RM-06 | blocked_by_RM-05 | - | - | 最终发布门 |
+
+### Batch A 集成门结果
+
+- backend：`348 passed, 8 skipped`，`compileall` 通过；
+- Range coverage harness：非 fixture `11/20` 可用；默认 HU 2BB open、BB fold/call/3bet、BTN fold/call/4bet 与 8-max 七个 RFI 节点有 curated provenance，未覆盖节点继续 `no_policy`；
+- frontend：Vitest `30 files / 157 tests`，`tsc --noEmit` 与 Next build 通过；
+- 普通 Playwright：隔离服务 `8/8` 通过；
+- capability Playwright：隔离服务 `3/3` 通过，HU 连续性、8-max UI 构造、HU Current Range 三个真实门全部转绿。
+
+验收使用当前主线 HEAD 的临时 detached worktree 与 13000/18000 一次性服务，强制 local Teacher，未复用 3000/8000 的长期联调服务。后者已确认启用 external Teacher，教学请求可超过 Playwright 的 15 秒客户端等待但最终返回 200；该现象属于联调服务时延，不计为 Batch A 产品回归。
 
 ## 6. 回传与集成规则
 
