@@ -42,7 +42,7 @@ from poker_coach.ranges import (
     build_belief_view,
     build_range_trace,
 )
-from poker_coach.review import build_hand_review
+from poker_coach.review import SolverAssessmentError, build_hand_review
 from poker_coach.rules import PokerKitAdapter, ReplayError
 from poker_coach.solver import (
     SolverJobQueue,
@@ -633,14 +633,24 @@ def create_app(
     async def hand_review(request: Request):
         """Return deterministic, node-scoped analysis for every player action."""
 
-        scenario = _scenario_from_request(await request.json())
+        payload = await request.json()
+        scenario, solver_job_ids = _hand_review_request(payload)
         _set_scenario_context(request, scenario)
         started = time.perf_counter()
-        review = build_hand_review(
-            scenario,
-            adapter=adapter,
-            timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
-        )
+        try:
+            review = build_hand_review(
+                scenario,
+                adapter=adapter,
+                timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
+                solver_job_ids=solver_job_ids,
+                solver_job_lookup=(
+                    (lambda job_id: _lookup_solver_job_for_review(_get_solver_queue(), job_id))
+                    if solver_job_ids is not None
+                    else None
+                ),
+            )
+        except SolverAssessmentError as exc:
+            raise ApiError(exc.code, str(exc), details=exc.details) from exc
         return {
             "schemaVersion": scenario.schema_version,
             "requestId": request.state.request_id,
@@ -1125,6 +1135,47 @@ def _scenario_from_request(payload: Any) -> ScenarioSpec:
             "invalid_scenario",
             "ScenarioSpec validation failed",
             details=_json_safe(exc.errors()),
+        ) from exc
+
+
+def _hand_review_request(payload: Any) -> tuple[ScenarioSpec, dict[str, str] | None]:
+    """Accept the original ScenarioSpec body or a solver-job wrapper.
+
+    ``solverJobs`` is intentionally optional so callers that adopted BE-02
+    retain its deterministic response.  ``solverJobsByActionId`` is accepted
+    as a descriptive wire alias while clients converge on the compact name.
+    """
+
+    if not isinstance(payload, dict):
+        raise ApiError("invalid_request", "request body must be a JSON object")
+    if "scenario" not in payload:
+        return _scenario_from_request(payload), None
+    allowed = {"scenario", "solverJobs", "solverJobsByActionId"}
+    extra = set(payload) - allowed
+    if extra:
+        raise ApiError("invalid_request", f"unsupported hand-review fields: {sorted(extra)}")
+    if "solverJobs" in payload and "solverJobsByActionId" in payload:
+        raise ApiError("invalid_request", "provide only one solver job mapping")
+    raw_jobs = payload.get("solverJobs", payload.get("solverJobsByActionId"))
+    if raw_jobs is None:
+        return _scenario_from_request(payload["scenario"]), None
+    if not isinstance(raw_jobs, dict) or not all(
+        isinstance(action_id, str)
+        and action_id.strip()
+        and isinstance(job_id, str)
+        and job_id.strip()
+        for action_id, job_id in raw_jobs.items()
+    ):
+        raise ApiError("invalid_request", "solver job mapping must be actionId -> non-empty jobId")
+    return _scenario_from_request(payload["scenario"]), dict(raw_jobs)
+
+
+def _lookup_solver_job_for_review(solver_queue, job_id: str):
+    try:
+        return solver_queue.get(job_id)
+    except StoreNotFound as exc:
+        raise SolverAssessmentError(
+            "solver_artifact_mismatch", f"solver job {job_id!r} was not found"
         ) from exc
 
 

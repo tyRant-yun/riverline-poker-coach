@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+from typing import Any
+
 from poker_coach.analysis import analyze_scenario
 from poker_coach.analysis.models import AnalysisResult
 from poker_coach.domain.models import DecisionPoint, ScenarioSpec
@@ -15,6 +18,7 @@ from .models import (
     HandReviewResponse,
     HandReviewSummary,
 )
+from .solver_assessment import assess_solver_action
 
 
 def build_hand_review(
@@ -22,6 +26,8 @@ def build_hand_review(
     *,
     adapter: PokerKitAdapter | None = None,
     timeout_seconds: float | None = None,
+    solver_job_ids: Mapping[str, str] | None = None,
+    solver_job_lookup: Callable[[str], Mapping[str, Any]] | None = None,
 ) -> HandReviewResponse:
     """Analyze every real action from its independently replayed pre-action node.
 
@@ -40,21 +46,32 @@ def build_hand_review(
             adapter=rules,
             timeout_seconds=timeout_seconds,
         )
-        reviews.append(
-            DecisionReview(
-                action_id=snapshot.action_id,
-                event_sequence=snapshot.event_sequence,
-                decision_sequence=snapshot.decision_sequence,
-                street=snapshot.street,
-                actor_seat=snapshot.actor_seat,
-                actual_action=actual_action,
-                state_before_action=snapshot.state_before_action,
-                analysis_summary=_summary_from(analysis),
-                evidence_bundle_id=f"decision:{snapshot.action_id}:evidence",
-                evidence_bundle=analysis.evidence,
-                warnings=analysis.warnings,
-            )
+        review = DecisionReview(
+            action_id=snapshot.action_id,
+            event_sequence=snapshot.event_sequence,
+            decision_sequence=snapshot.decision_sequence,
+            street=snapshot.street,
+            actor_seat=snapshot.actor_seat,
+            actual_action=actual_action,
+            state_before_action=snapshot.state_before_action,
+            analysis_summary=_summary_from(analysis),
+            evidence_bundle_id=f"decision:{snapshot.action_id}:evidence",
+            evidence_bundle=analysis.evidence,
+            warnings=analysis.warnings,
         )
+        if solver_job_ids is not None:
+            review = review.model_copy(
+                update={
+                    "solver_assessment": assess_solver_action(
+                        scenario,
+                        review,
+                        job_id=solver_job_ids.get(snapshot.action_id),
+                        job_lookup=solver_job_lookup,
+                        adapter=rules,
+                    )
+                }
+            )
+        reviews.append(review)
     uncertainty = tuple(dict.fromkeys(warning for review in reviews for warning in review.warnings))
     return HandReviewResponse(
         hand_summary=HandReviewSummary(

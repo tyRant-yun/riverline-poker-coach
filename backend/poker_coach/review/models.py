@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, StrictInt
+from pydantic import Field, StrictInt, model_serializer
 
 from poker_coach.analysis.models import (
     BasicMetrics,
@@ -59,12 +59,55 @@ class ReviewRangeUpdate(DomainModel):
     source: str | None = None
 
 
-class ReviewSolverAssessment(DomainModel):
-    """Explicitly unscored until BE-03 binds a verified solver artifact."""
+class ReviewSolverThresholdMetadata(DomainModel):
+    """A product explanation threshold, never a poker-theory assertion."""
 
-    status: Literal["unscored"] = "unscored"
-    reason: str = "solver assessment is not available in deterministic hand-review v1"
+    mixed_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 0.05
+    kind: Literal["product_interpretation"] = "product_interpretation"
+
+
+class ReviewSolverActionMapping(DomainModel):
+    """How an observed action relates to the artifact action vocabulary."""
+
+    status: Literal["exact", "nearest_size", "unsupported"]
+    policy_action: str = ""
+    observed_size: Annotated[float, Field(ge=0.0)] | None = None
+    mapped_size: Annotated[float, Field(ge=0.0)] | None = None
+    off_tree: bool = False
+
+
+class ReviewSolverAssessment(DomainModel):
+    """Actual-action frequency from one grounded, exact-node solver artifact."""
+
+    status: Literal["primary", "mixed", "rare", "absent", "unscored"] = "unscored"
+    reason: str | None = "solver assessment is not available in deterministic hand-review v1"
     source: str | None = None
+    confidence: str | None = None
+    actual_frequency: Annotated[float, Field(ge=0.0, le=1.0)] | None = None
+    primary_action: str | None = None
+    threshold_metadata: ReviewSolverThresholdMetadata | None = None
+    action_mapping: ReviewSolverActionMapping | None = None
+
+    @model_serializer(mode="wrap")
+    def serialize_compatibly(self, handler):
+        """Keep the BE-02 no-solver response byte-shape stable.
+
+        The original deterministic assessment had only ``status``, ``reason``
+        and ``source``.  New facts are omitted until a persisted artifact was
+        actually used, while ``source: null`` remains for compatibility.
+        """
+
+        data = handler(self)
+        for field in (
+            "confidence",
+            "actualFrequency",
+            "primaryAction",
+            "thresholdMetadata",
+            "actionMapping",
+        ):
+            if data.get(field) is None:
+                data.pop(field, None)
+        return data
 
 
 class DecisionReview(DomainModel):
