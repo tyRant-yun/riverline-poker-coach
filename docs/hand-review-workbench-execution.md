@@ -97,7 +97,7 @@ NEXT: <解锁的下一任务或建议>
 | BE-02 | Terra `019ff035-8773-7563-950d-1095932b9c1d` | integrated | `3e358b0` | 已进入 main | 解锁 BE-03/04 |
 | FE-04 | Terra `019ff035-877e-7180-bbb5-45e4fe321b86` | integrated | `7b9be05` | 已进入 main | 解锁 FE-05 |
 | BE-03 | Terra `019ff044-49d7-75b0-a202-a2ff52a71590` | active | - | 独立 worktree | 完成时跨任务回调 |
-| FE-API | Luna `019ff044-49d5-7e02-93fe-a880682e4202` | active | - | 独立 worktree | 对齐 HandReview API 类型/client |
+| FE-API | Luna `019ff044-49d5-7e02-93fe-a880682e4202` | integrated | `5d3d220` → `e7d67a5` | 已进入 main | FE-06 显式调用 adapter 后接入页面 |
 | BE-04 | 未创建 | blocked_by_dependency | - | - | BE-03 集成后创建，避免模型/服务冲突 |
 | FE-05/06 | 未创建 | blocked_by_dependency | - | - | FE-05 等 BE-03；FE-06 等 BE-04 |
 | QA/DOC | 未创建 | blocked_by_dependency | - | - | 功能集成后创建 |
@@ -123,7 +123,7 @@ Batch 2（2026-08-11）：通过。
 ## 6. 当前进度判断
 
 - Riverline 既有规则、Range Belief 与 Solver 底座：可复用；
-- Hand Review Workbench 专项目标：约 60%；
+- Hand Review Workbench 专项目标：约 65%；
 - Batch 1：100%，已集成并通过统一契约门；
 - Batch 2：100%，已集成并通过统一契约门；
-- 主要剩余工作：HandReview API、按节点 Solver registry、SolverAssessment、整手教学、复盘 UI 和完整 E2E。
+- 主要剩余工作：SolverAssessment、整手教学、背离/复盘 UI 和完整 E2E。
