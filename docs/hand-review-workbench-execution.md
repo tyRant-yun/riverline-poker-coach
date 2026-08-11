@@ -20,11 +20,12 @@ ready -> active -> reported -> accepted -> integrated
 1. 管理任务只创建依赖已经满足的独立 Codex worktree；
 2. 复杂领域、状态和 API 任务优先使用 Terra；纯展示、文档和机械任务优先使用 Luna；
 3. 执行任务在自己的 worktree 中完成代码、测试和聚焦 commit；
-4. 完成后通过任务最终回复回传标准报告；无需管理任务高频轮询；
-5. 管理任务收到完成、失败或需协调事件后，更新本台账并处理；
-6. 同一批次统一集成，再运行批次契约门；
-7. 只有契约失败、接口变更、来源/provenance、时间正确性或合并冲突才触发实现级检查；
-8. 批次通过后立即创建下一批已经解锁的任务。
+4. 创建任务时必须注入 `managerThreadId`；执行任务结束前必须调用跨任务消息工具向该 ID 主动发送标准报告；
+5. 独立任务自己的最终回复不等于回调，不能依赖它唤醒管理任务；
+6. 管理任务收到完成、失败或需协调的跨任务消息后，更新本台账并处理；
+7. 同一批次统一集成，再运行批次契约门；
+8. 只有契约失败、接口变更、来源/provenance、时间正确性或合并冲突才触发实现级检查；
+9. 批次通过后立即创建下一批已经解锁的任务。
 
 ## 2. 标准回传格式
 
@@ -42,6 +43,8 @@ NEXT: <解锁的下一任务或建议>
 ```
 
 不得只回复“已完成”或只给测试总数。测试失败必须保留准确输出摘要，不得用未运行的门代替。
+
+同一份报告必须在最终回复前通过任务间消息工具发送到创建提示中提供的 `managerThreadId`。如果该工具不可用，任务必须把状态写为 `failed` 并在自身最终回复中说明“callback unavailable”，不得声称已经回传。
 
 ## 3. 批次契约门
 
@@ -91,10 +94,10 @@ NEXT: <解锁的下一任务或建议>
 | BE-01 | Terra | integrated | `54f2b2d`, `9d25e81` | 已进入 main | BE-02 消费 DecisionSnapshot |
 | FE-01 | Luna | integrated | `766c90c`, `842a24a` | 已进入 main | 等待 BE-02 响应接线 |
 | FE-02/03 | Terra | integrated | `8482a2f`, `7231bf1` | 已进入 main | FE-04 复用 selected-decision 投影 |
-| BE-02 | Terra `019ff035-8773-7563-950d-1095932b9c1d` | active | - | 独立 worktree | 完成后按标准格式主动回传 |
-| FE-04 | Terra `019ff035-877e-7180-bbb5-45e4fe321b86` | active | - | 独立 worktree | 完成后按标准格式主动回传 |
-| BE-03/04 | 未创建 | blocked_by_dependency | - | - | Batch 2 通过后创建 |
-| FE-05/06 | 未创建 | blocked_by_dependency | - | - | Batch 2/3 接口稳定后创建 |
+| BE-02 | Terra `019ff035-8773-7563-950d-1095932b9c1d` | integrated | `3e358b0` | 已进入 main | 解锁 BE-03/04 |
+| FE-04 | Terra `019ff035-877e-7180-bbb5-45e4fe321b86` | integrated | `7b9be05` | 已进入 main | 解锁 FE-05 |
+| BE-03/04 | 待创建 | ready | - | - | 创建独立 Terra worktree |
+| FE-05/06 | 待创建 | partially_ready | - | - | FE-05 等 BE-03；FE-06 等 BE-04 |
 | QA/DOC | 未创建 | blocked_by_dependency | - | - | 功能集成后创建 |
 
 ## 5. 最近批次验收
@@ -107,9 +110,18 @@ Batch 1（2026-08-11）：通过。
 - Next.js：production build 通过；
 - 主工作区仅保留用户原有 `AGENT.MD` 修改。
 
+Batch 2（2026-08-11）：通过。
+
+- Backend：329 passed、8 skipped；
+- Frontend：24 files、128 passed；
+- TypeScript：`tsc --noEmit` 通过；
+- Next.js：production build 通过；
+- 真实 callback 测试：BE-02 成功向管理任务发送 `[TASK_CALLBACK]`。
+
 ## 6. 当前进度判断
 
 - Riverline 既有规则、Range Belief 与 Solver 底座：可复用；
-- Hand Review Workbench 专项目标：约 40%；
+- Hand Review Workbench 专项目标：约 60%；
 - Batch 1：100%，已集成并通过统一契约门；
+- Batch 2：100%，已集成并通过统一契约门；
 - 主要剩余工作：HandReview API、按节点 Solver registry、SolverAssessment、整手教学、复盘 UI 和完整 E2E。
