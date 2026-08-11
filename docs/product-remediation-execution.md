@@ -131,7 +131,7 @@ RM-01 与 RM-02 文件边界基本独立，可并行。后续任务按 contract 
 | RM-01 | integrated | Terra `019ff0ed-7d88-7e52-8d13-bd19188c3914` | `a2e9e6f` → `eb1ba3c` | 2–8 seat、button/Hero、派生位置与 UI 构造门已转绿 |
 | RM-02 | integrated | Terra `019ff0ed-7d8d-7673-bd99-be5633258225` | `c539b49` → `e0aa99e` | HU 常见 2BB open 分支与原 8-max RFI policy 均可用 |
 | RM-03 | integrated | Terra `019ff116-d0ca-75f0-9927-41f18e3793f7` | `db74f24` → `e71ec37` | 每个真实行动返回同源 Range Trace 更新；主线完整后端门通过 |
-| RM-04 | ready | - | - | RM-03 contract 已稳定，下一任务 |
+| RM-04 | active | Terra `019ff121-427d-75d0-b1e9-d1f49b9c35c7` | - | 独立 worktree；完成时主动回传 |
 | RM-05 | blocked_by_RM-04 | - | - | 消费最终 contract |
 | RM-06 | blocked_by_RM-05 | - | - | 最终发布门 |
 
