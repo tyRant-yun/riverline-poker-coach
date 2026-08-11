@@ -8,6 +8,22 @@ export function handReviewResponseFixture(): HandReviewApiResponse {
     review: {
       handReviewVersion: "hand-review-1",
       handSummary: { decisionCount: 1, reviewedActionIds: ["a1"] },
+      wholeHandSummary: {
+        teachingVersion: "hand-review-whole-hand-1",
+        summary: "整手需要优先复盘翻牌圈行动。",
+        uncertainty: "没有覆盖所有节点的 Solver 结果。",
+      },
+      priorityFindings: [{
+        actionId: "a1",
+        category: "solver_deviation",
+        mistakeTag: "solver_rare_action",
+        severity: "review",
+        summary: {
+          text: "翻牌圈行动值得优先复盘。",
+          evidenceReferences: [{ evidenceId: "state-a1" }],
+          containsNumbers: false,
+        },
+      }],
       uncertainty: ["solver assessment is not available"],
       decisionReviews: [{
         decisionReviewVersion: "decision-review-1",
@@ -31,6 +47,23 @@ export function handReviewResponseFixture(): HandReviewApiResponse {
         warnings: [],
         rangeUpdate: { status: "unavailable", reason: "range review is not available" },
         solverAssessment: { status: "unscored", reason: "solver assessment is not available" },
+        teaching: {
+          teachingVersion: "hand-review-teaching-1",
+          mode: "principle_only",
+          provider: "local",
+          summary: {
+            text: "基于本节点证据给出原则性说明。",
+            evidenceReferences: [{ evidenceId: "state-a1" }],
+            containsNumbers: false,
+          },
+          keyPoints: [],
+          uncertainty: {
+            text: "没有 Solver 覆盖。",
+            evidenceReferences: [],
+            containsNumbers: false,
+          },
+          mistakeTags: [],
+        },
       }],
     },
   };

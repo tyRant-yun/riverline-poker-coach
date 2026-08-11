@@ -87,6 +87,37 @@ export type HandReviewAnalysisSummary = {
   [key: string]: unknown;
 };
 
+/** Evidence-addressed teaching returned by the whole-hand review endpoint. */
+export type HandReviewTeachingText = {
+  text: string;
+  evidenceReferences: Array<{ evidenceId: string }>;
+  containsNumbers: boolean;
+};
+
+export type DecisionTeachingResponse = {
+  teachingVersion: string;
+  mode: "solver_grounded" | "principle_only";
+  provider: "local";
+  summary: HandReviewTeachingText;
+  keyPoints: HandReviewTeachingText[];
+  uncertainty: HandReviewTeachingText;
+  mistakeTags: string[];
+};
+
+export type PriorityFindingResponse = {
+  actionId: string;
+  category: "solver_deviation";
+  mistakeTag: "solver_rare_action" | "solver_absent_action";
+  severity: "review";
+  summary: HandReviewTeachingText;
+};
+
+export type WholeHandSummaryResponse = {
+  teachingVersion: string;
+  summary: string;
+  uncertainty: string;
+};
+
 /** Wire contract returned by POST /v1/hand-reviews (camelCase). */
 export type DecisionReviewResponse = {
   decisionReviewVersion: string;
@@ -103,12 +134,15 @@ export type DecisionReviewResponse = {
   warnings: string[];
   rangeUpdate: ReviewRangeUpdate;
   solverAssessment: ReviewSolverAssessment;
+  teaching: DecisionTeachingResponse | null;
 };
 
 export type HandReviewResponse = {
   handReviewVersion: string;
   handSummary: { decisionCount: number; reviewedActionIds: string[] };
   decisionReviews: DecisionReviewResponse[];
+  wholeHandSummary: WholeHandSummaryResponse | null;
+  priorityFindings: PriorityFindingResponse[];
   uncertainty: string[];
 };
 
@@ -134,5 +168,29 @@ export type DecisionReview = {
   warnings?: string[];
   rangeUpdate: ReviewRangeUpdate;
   solverAssessment: ReviewSolverAssessment;
-  teaching?: { summary: string } | null;
+  teaching?: {
+    teachingVersion?: string;
+    mode?: "solver_grounded" | "principle_only";
+    provider?: "local";
+    summary: string;
+    keyPoints?: string[];
+    uncertainty?: string;
+    mistakeTags?: string[];
+    evidenceReferences?: string[];
+  } | null;
+};
+
+export type PriorityFinding = {
+  actionId: string;
+  category: "solver_deviation";
+  mistakeTag: "solver_rare_action" | "solver_absent_action";
+  severity: "review";
+  summary: string;
+  evidenceReferences: string[];
+};
+
+export type WholeHandSummary = {
+  teachingVersion: string;
+  summary: string;
+  uncertainty: string;
 };

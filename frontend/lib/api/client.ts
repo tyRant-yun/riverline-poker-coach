@@ -147,5 +147,6 @@ export const practiceApi = {
 };
 
 export const handReviewApi = {
-  review: (scenario: Scenario) => request<HandReviewApiResponse>("/v1/hand-reviews", scenario),
+  review: (payload: { scenario: Scenario; solverJobs?: Record<string, string> }) =>
+    request<HandReviewApiResponse>("/v1/hand-reviews", payload),
 };

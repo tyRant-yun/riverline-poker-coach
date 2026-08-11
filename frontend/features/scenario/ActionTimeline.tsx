@@ -46,6 +46,7 @@ export default function ActionTimeline({ events, selectedActionId, onSelectActio
             <button
               className={`timeline-row ${selectedActionId === event.actionId ? "selected" : ""}`}
               key={event.actionId}
+              id={`action-timeline-${event.actionId}`}
               onClick={() => onSelectAction(event.actionId)}
             >
               {contents}

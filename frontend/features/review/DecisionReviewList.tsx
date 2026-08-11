@@ -4,9 +4,10 @@ import DecisionReviewCard from "./DecisionReviewCard";
 type Props = {
   reviews: readonly DecisionReview[];
   title?: string;
+  onSelectAction?: (actionId: string) => void;
 };
 
-export default function DecisionReviewList({ reviews, title = "整手决策复盘" }: Props) {
+export default function DecisionReviewList({ reviews, title = "整手决策复盘", onSelectAction }: Props) {
   return (
     <section className="panel" aria-label="决策复盘列表">
       <div className="panel-heading">
@@ -21,7 +22,7 @@ export default function DecisionReviewList({ reviews, title = "整手决策复�
       ) : (
         <div className="saved-list">
           {reviews.map((review) => (
-            <DecisionReviewCard key={review.actionId} review={review} />
+            <DecisionReviewCard key={review.actionId} review={review} onSelectAction={onSelectAction} />
           ))}
         </div>
       )}

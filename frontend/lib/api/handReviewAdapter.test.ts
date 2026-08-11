@@ -21,6 +21,29 @@ describe("hand review adapter", () => {
     expect(adapted.decisionReviews[0].rangeUpdate.status).toBe("unavailable");
   });
 
+  it("adapts BE-04 teaching, whole-hand summary, and action-addressable findings without changing evidence references", () => {
+    const adapted = adaptHandReviewResponse(handReviewResponseFixture());
+
+    expect(adapted.decisionReviews[0].teaching).toMatchObject({
+      mode: "principle_only",
+      summary: "基于本节点证据给出原则性说明。",
+      evidenceReferences: ["state-a1"],
+    });
+    expect(adapted.wholeHandSummary).toEqual({
+      teachingVersion: "hand-review-whole-hand-1",
+      summary: "整手需要优先复盘翻牌圈行动。",
+      uncertainty: "没有覆盖所有节点的 Solver 结果。",
+    });
+    expect(adapted.priorityFindings).toEqual([{
+      actionId: "a1",
+      category: "solver_deviation",
+      mistakeTag: "solver_rare_action",
+      severity: "review",
+      summary: "翻牌圈行动值得优先复盘。",
+      evidenceReferences: ["state-a1"],
+    }]);
+  });
+
   it("preserves grounded solver fields and action mapping", () => {
     const response = handReviewResponseFixture();
     response.review.decisionReviews[0].solverAssessment = {

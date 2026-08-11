@@ -3,16 +3,29 @@ import { SOLVER_ASSESSMENT_STATUS, solverAssessmentDetails } from "../../lib/sol
 
 type Props = {
   review: DecisionReview;
+  onSelectAction?: (actionId: string) => void;
 };
 
-export default function DecisionReviewCard({ review }: Props) {
+export default function DecisionReviewCard({ review, onSelectAction }: Props) {
   const solver = review.solverAssessment;
   const range = review.rangeUpdate;
   const solverMeta = SOLVER_ASSESSMENT_STATUS[solver.status];
   const solverDetails = solverAssessmentDetails(solver);
 
   return (
-    <article className="action-box" aria-label={`决策卡 ${review.actionId}`}>
+    <article
+      className="action-box"
+      aria-label={`决策卡 ${review.actionId}`}
+      id={`hand-review-action-${review.actionId}`}
+      tabIndex={onSelectAction ? 0 : undefined}
+      onClick={onSelectAction ? () => onSelectAction(review.actionId) : undefined}
+      onKeyDown={onSelectAction ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelectAction(review.actionId);
+        }
+      } : undefined}
+    >
       <div className="action-header">
         <div className="action-header__node">
           <span className="action-street">{review.street}</span>
@@ -50,7 +63,15 @@ export default function DecisionReviewCard({ review }: Props) {
       ) : null}
 
       {review.teaching?.summary ? (
-        <p className="teaching-summary">{review.teaching.summary}</p>
+        <>
+          <p className="teaching-summary">{review.teaching.summary}</p>
+          {review.teaching.keyPoints?.length ? (
+            <p className="muted small">{review.teaching.keyPoints.join(" · ")}</p>
+          ) : null}
+          {review.teaching.mode && review.teaching.uncertainty ? (
+            <p className="muted small">教学模式：{review.teaching.mode === "solver_grounded" ? "Solver 依据" : "原则性说明"} · 不确定性：{review.teaching.uncertainty}</p>
+          ) : null}
+        </>
       ) : null}
     </article>
   );

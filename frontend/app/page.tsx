@@ -33,11 +33,13 @@ import type { SeatViewModel } from "../types/poker";
 import {
   analysisApi,
   coachApi,
+  handReviewApi,
   practiceApi,
   rangesApi,
   scenariosApi,
   solverApi,
 } from "../lib/api/client";
+import { adaptHandReviewResponse } from "../lib/api/handReviewAdapter";
 import { notationFromMatrix, notationFromMatrixExplicit } from "../lib/poker/matrix";
 import { canSubmitSolve as solveGate, solveGateReasons } from "../lib/poker/solve";
 import type { DisplayUnit } from "../lib/poker/format";
@@ -45,6 +47,13 @@ import { buildSeatViewModels } from "../lib/poker/table";
 import { deadCardsForSeat, heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
 import { projectSelectedDecisionScenario, reconcileSelectedActionId, selectionForAction } from "../lib/poker/handReview";
 import { BeliefRequestGate } from "../lib/range/beliefRequest";
+import {
+  buildHandReviewRequest,
+  emptyWholeHandReviewState,
+  invalidateWholeHandReview,
+  selectedReviewAssessment,
+  type WholeHandReviewState,
+} from "../lib/poker/wholeHandReview";
 import {
   emptySolveJobRegistry,
   projectionFingerprint,
@@ -65,6 +74,7 @@ import ResultWorkspace, { type ResultTab } from "../features/workspace/ResultWor
 import TeachingPanel from "../features/coach/TeachingPanel";
 import PracticePanel from "../features/practice/PracticePanel";
 import SolverWorkspace from "../features/solver/SolverWorkspace";
+import WholeHandReviewPanel from "../features/review/WholeHandReviewPanel";
 
 const initialScenario: Scenario = {
   schemaVersion: 1,
@@ -129,11 +139,13 @@ export default function Home() {
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit>("bb");
   const [activeView, setActiveView] = useState<WorkspaceView>("handlab");
   const [resultTab, setResultTab] = useState<ResultTab>("evidence");
+  const [wholeHandReview, setWholeHandReview] = useState<WholeHandReviewState>(emptyWholeHandReviewState);
   // Each action node owns a polling generation. Resubmitting or unmounting
   // only supersedes that node's loop, never another action's job.
   const solvePollTokens = useRef<Record<string, number>>({});
   const rangeBeliefRequestGate = useRef(new BeliefRequestGate());
   const stateRefreshToken = useRef(0);
+  const wholeHandReviewToken = useRef(0);
 
   useEffect(() => {
     void loadSavedScenarios();
@@ -148,6 +160,12 @@ export default function Home() {
       for (const actionId of Object.keys(solvePollTokens.current)) {
         solvePollTokens.current[actionId] += 1;
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      wholeHandReviewToken.current += 1;
     };
   }, []);
 
@@ -233,6 +251,12 @@ export default function Home() {
 
   function invalidateDerivedAnalysisState() {
     invalidateRangeBelief();
+    invalidateWholeHandReviewState();
+  }
+
+  function invalidateWholeHandReviewState() {
+    wholeHandReviewToken.current += 1;
+    setWholeHandReview((current) => invalidateWholeHandReview(current));
   }
 
   function invalidateRangeBelief() {
@@ -697,11 +721,11 @@ export default function Home() {
     await refreshState(next);
   }
 
-  function selectAction(actionId: string) {
+  function selectAction(actionId: string, allowToggle = true) {
     const selection = selectionForAction(scenario.actionHistory, actionId);
     if (!selection) return;
     invalidateRangeBelief();
-    if (selectedActionId === selection.actionId) {
+    if (allowToggle && selectedActionId === selection.actionId) {
       setSelectedActionId(null);
       setBeliefSeatId(null);
       void refreshState(scenario, undefined, true);
@@ -711,6 +735,15 @@ export default function Home() {
     setBeliefSeatId(selection.actorSeat);
     setBeliefMode("current");
     void refreshState(projectSelectedDecisionScenario(scenario, selection), undefined, false);
+  }
+
+  function navigateToReviewedAction(actionId: string) {
+    selectAction(actionId, false);
+    requestAnimationFrame(() => {
+      const target = document.getElementById(`action-timeline-${actionId}`);
+      target?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+      target?.focus();
+    });
   }
 
   async function runAnalysis() {
@@ -828,6 +861,32 @@ export default function Home() {
       setMessage(error instanceof Error ? error.message : "教学解释失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runWholeHandReview() {
+    const requestToken = ++wholeHandReviewToken.current;
+    const request = buildHandReviewRequest(scenario, solveJobs);
+    setWholeHandReview((current) => ({ ...current, status: "loading", error: null }));
+    try {
+      const rawResponse = await handReviewApi.review(request);
+      // The API boundary returns wire data. Keep the pure adapter explicit so
+      // presentation never derives poker facts from the editable scenario.
+      const review = adaptHandReviewResponse(rawResponse);
+      if (wholeHandReviewToken.current !== requestToken) return;
+      setWholeHandReview({ status: "success", review, error: null });
+      setMessage(
+        review.decisionReviews.length
+          ? "整手复盘已生成；可点击决策卡或优先复盘点跳转。"
+          : "整手复盘已生成；这手牌没有可评分的玩家决策。",
+      );
+    } catch (error) {
+      if (wholeHandReviewToken.current !== requestToken) return;
+      setWholeHandReview((current) => ({
+        ...current,
+        status: "error",
+        error: error instanceof Error ? error.message : "整手复盘生成失败",
+      }));
     }
   }
 
@@ -1081,6 +1140,7 @@ export default function Home() {
             onValidate={() => void refreshState()}
             onAnalyze={() => void runAnalysis()}
             onTeach={() => void runTeaching()}
+            onHandReview={() => void runWholeHandReview()}
             onPractice={() => void generatePractice()}
             onSave={() => void saveScenario()}
             onExport={exportScenario}
@@ -1109,6 +1169,13 @@ export default function Home() {
         onSolveSubmit={() => void submitSolve()}
         onSolveCancel={() => void cancelSolve()}
         onPracticeAnswer={(action) => void answerPractice(action)}
+        solverAssessment={selectedReviewAssessment(wholeHandReview.review, selectedActionId)}
+      />
+      <WholeHandReviewPanel
+        state={wholeHandReview}
+        busy={busy}
+        onGenerate={() => void runWholeHandReview()}
+        onNavigate={navigateToReviewedAction}
       />
     </>
   );
@@ -1131,6 +1198,7 @@ export default function Home() {
         gate={solveReasons}
         onSubmit={() => void submitSolve()}
         onCancel={() => void cancelSolve()}
+        solverAssessment={selectedReviewAssessment(wholeHandReview.review, selectedActionId)}
       />
     </div>
   );
