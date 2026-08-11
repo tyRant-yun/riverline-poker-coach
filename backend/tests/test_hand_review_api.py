@@ -117,6 +117,123 @@ def test_hand_review_returns_ordered_node_scoped_analysis_and_evidence():
             "source": None,
         }
         assert review["rangeUpdate"]["status"] == "unavailable"
+        assert review["rangeUpdate"]["actionId"] == review["actionId"]
+        assert review["rangeUpdate"]["seatId"] == review["actorSeat"]
+        assert review["rangeUpdate"]["afterSequence"] == review["eventSequence"]
+
+
+def test_hand_review_returns_curated_combo_range_update_for_default_hu_open():
+    """Each real action exposes its post-action actor belief, not a placeholder."""
+
+    payload = _completed_checkdown_payload()
+    payload["board"] = []
+    payload["actionHistory"] = [
+        _action(1, 0, "raise_to", amount=200, amount_type="to"),
+    ]
+    payload["decisionPoint"] = {"street": "preflop", "actorSeat": 1, "afterSequence": 1}
+    payload["rangesBySeat"] = {
+        "0": {
+            "rangeId": "button-prior",
+            "name": "Button prior",
+            "version": "1",
+            "source": "user_defined",
+            "matrix169": {"AA": "1", "J4o": "1"},
+        }
+    }
+    client = TestClient(create_app(store=SQLiteStore(":memory:")))
+
+    response = client.post("/v1/hand-reviews", json=payload)
+
+    assert response.status_code == 200, response.text
+    update = response.json()["review"]["decisionReviews"][0]["rangeUpdate"]
+    assert update["status"] == "available"
+    assert update["actionId"] == "a1"
+    assert update["seatId"] == 0
+    assert update["afterSequence"] == 1
+    assert update["source"] == "preflop_policy"
+    assert update["confidence"] == "curated"
+    assert update["policy"]["version"] == "hu-100bb-0.1"
+    assert update["combos"]["AsAh"]["probability"] != update["combos"]["AsAh"]["priorProbability"]
+
+
+def test_hand_review_uses_curated_policy_for_each_supported_hu_branch_action():
+    payload = _completed_checkdown_payload()
+    payload["board"] = []
+    payload["actionHistory"] = [
+        _action(1, 0, "raise_to", amount=200, amount_type="to"),
+        _action(2, 1, "call", amount=100, amount_type="cost"),
+    ]
+    payload["decisionPoint"] = {"street": "preflop", "actorSeat": 0, "afterSequence": 2}
+    payload["rangesBySeat"] = {
+        "0": {"rangeId": "btn", "name": "BTN", "version": "1", "source": "user_defined", "matrix169": {"AA": "1", "J4o": "1"}},
+        "1": {"rangeId": "bb", "name": "BB", "version": "1", "source": "user_defined", "matrix169": {"76s": "1", "72o": "1"}},
+    }
+
+    response = TestClient(create_app(store=SQLiteStore(":memory:"))).post("/v1/hand-reviews", json=payload)
+
+    assert response.status_code == 200, response.text
+    updates = [item["rangeUpdate"] for item in response.json()["review"]["decisionReviews"]]
+    assert [(item["actionId"], item["afterSequence"], item["status"]) for item in updates] == [
+        ("a1", 1, "available"),
+        ("a2", 2, "available"),
+    ]
+    assert all(item["source"] == "preflop_policy" for item in updates)
+
+
+def test_hand_review_uses_curated_policy_for_8max_rfi():
+    positions = ("button", "small_blind", "big_blind", "utg", "utg+1", "mp", "hj", "co")
+    payload = {
+        "schemaVersion": 2, "gameVariant": "nlhe", "tableSize": 8,
+        "smallBlind": 50, "bigBlind": 100, "buttonSeat": 0, "heroSeat": 3,
+        "seats": [{"seatId": seat, "startingStack": 10000, "position": position} for seat, position in enumerate(positions)],
+        "board": [],
+        "actionHistory": [_action(1, 3, "raise_to", amount=250, amount_type="to")],
+        "decisionPoint": {"street": "preflop", "actorSeat": 4, "afterSequence": 1},
+        "assumptions": {},
+        "rangesBySeat": {"3": {"rangeId": "utg", "name": "UTG", "version": "1", "source": "user_defined", "matrix169": {"AA": "1", "A5s": "1"}}},
+    }
+
+    response = TestClient(create_app(store=SQLiteStore(":memory:"))).post("/v1/hand-reviews", json=payload)
+
+    assert response.status_code == 200, response.text
+    update = response.json()["review"]["decisionReviews"][0]["rangeUpdate"]
+    assert update["status"] == "available"
+    assert update["source"] == "preflop_policy"
+    assert update["policy"]["version"] == "8max-rfi-100bb-0.1"
+    assert update["policy"]["node"].endswith("8max-rfi-utg-2.5bb")
+
+
+def test_hand_review_range_update_is_honest_for_unsupported_hu_limp():
+    payload = _completed_checkdown_payload()
+    payload["board"] = []
+    payload["actionHistory"] = [_action(1, 0, "call", amount=50, amount_type="cost")]
+    payload["decisionPoint"] = {"street": "preflop", "actorSeat": 1, "afterSequence": 1}
+    payload["rangesBySeat"] = {"0": {"rangeId": "btn", "name": "BTN", "version": "1", "source": "user_defined", "matrix169": {"AA": "1"}}}
+
+    response = TestClient(create_app(store=SQLiteStore(":memory:"))).post("/v1/hand-reviews", json=payload)
+
+    assert response.status_code == 200, response.text
+    update = response.json()["review"]["decisionReviews"][0]["rangeUpdate"]
+    assert update["status"] == "unavailable"
+    assert "limp" in update["reason"]
+    assert update["combos"] is None
+
+
+def test_hand_review_range_update_does_not_see_future_board_cards():
+    payload = _completed_checkdown_payload()
+    payload["actionHistory"][0] = _action(1, 0, "raise_to", amount=200, amount_type="to")
+    payload["actionHistory"][1] = _action(2, 1, "call", amount=100, amount_type="cost")
+    payload["rangesBySeat"] = {"0": {"rangeId": "btn", "name": "BTN", "version": "1", "source": "user_defined", "matrix169": {"A2s": "1", "J4o": "1"}}}
+
+    response = TestClient(create_app(store=SQLiteStore(":memory:"))).post("/v1/hand-reviews", json=payload)
+
+    assert response.status_code == 200, response.text
+    reviews = response.json()["review"]["decisionReviews"]
+    assert {"a3", "a6", "a9"}.isdisjoint(item["actionId"] for item in reviews)
+    update = reviews[0]["rangeUpdate"]
+    assert update["status"] == "available"
+    assert "2c" in payload["board"]
+    assert "Ac2c" in update["combos"]  # future board cards did not block the open node
 
 
 def test_hand_review_attaches_one_ordered_teaching_per_real_action_without_future_facts():
@@ -210,7 +327,7 @@ def _flop_node_payload() -> dict[str, object]:
     return payload
 
 
-def _solver_result(*, check_frequency: float) -> SolveResult:
+def _solver_result(*, check_frequency: float, combo: str = "QhJc") -> SolveResult:
     return SolveResult(
         metadata=SolveMetadata(
             solver="test-solver",
@@ -225,7 +342,7 @@ def _solver_result(*, check_frequency: float) -> SolveResult:
             player=0,
             hands=(
                 SolverHand(
-                    combo="QhJc",
+                    combo=combo,
                     weight=1,
                     equity=0,
                     ev=0,
@@ -283,6 +400,41 @@ def test_hand_review_solver_assessment_uses_verified_job_and_product_threshold()
             review["solverAssessment"]["status"] == "unscored"
             for review in response.json()["review"]["decisionReviews"][:2]
         )
+    finally:
+        queue.close()
+
+
+def test_hand_review_range_update_reuses_only_the_verified_solver_artifact():
+    server = fakeredis.FakeServer()
+    queue = SolverJobQueue(client=fakeredis.FakeRedis(server=server))
+    client = TestClient(create_app(config=AppConfig(), store=SQLiteStore(":memory:"), solver_queue=queue))
+    try:
+        review_scenario = _completed_checkdown_payload()
+        review_scenario["actionHistory"][0] = _action(1, 0, "raise_to", amount=200, amount_type="to")
+        review_scenario["actionHistory"][1] = _action(2, 1, "call", amount=100, amount_type="cost")
+        review_scenario["rangesBySeat"] = {
+            "0": {"rangeId": "btn", "name": "BTN", "version": "1", "source": "user_defined", "matrix169": {"AA": "1"}},
+            "1": {"rangeId": "bb", "name": "BB", "version": "1", "source": "user_defined", "matrix169": {"76s": "1"}}
+        }
+        node_scenario = {
+            **review_scenario,
+            "actionHistory": review_scenario["actionHistory"][:3],
+            "decisionPoint": {"street": "flop", "actorSeat": 1, "afterSequence": 3},
+        }
+        submitted = client.post("/v1/solve/jobs", json={"scenario": node_scenario})
+        assert submitted.status_code == 202, submitted.text
+        job_id = submitted.json()["jobId"]
+        queue.finish(job_id, status="solved", result=_solver_result(check_frequency=0.8, combo="7s6s"))
+
+        response = client.post("/v1/hand-reviews", json={"scenario": review_scenario, "solverJobs": {"a4": job_id}})
+
+        assert response.status_code == 200, response.text
+        update = response.json()["review"]["decisionReviews"][2]["rangeUpdate"]
+        assert update["status"] == "available"
+        assert update["source"] == "solver"
+        assert update["confidence"] == "grounded"
+        assert update["afterSequence"] == 4
+        assert update["policy"]["node"] == "flop"
     finally:
         queue.close()
 
@@ -366,6 +518,7 @@ def test_hand_review_rejects_a_solver_artifact_from_a_different_node():
 
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "solver_artifact_mismatch"
+        assert "review" not in response.json()  # mismatch cannot contaminate an action update
     finally:
         queue.close()
 

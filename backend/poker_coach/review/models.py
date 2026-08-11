@@ -25,6 +25,9 @@ from poker_coach.domain.models import (
     TeachingText,
 )
 from poker_coach.strategy.models import StrategyMatch
+from poker_coach.ranges.aggregation import RangeBeliefMatrixCell
+from poker_coach.ranges.belief import PolicySource, RangeUpdateMetadata
+from poker_coach.ranges.views import RangeBeliefComboView
 
 
 class DecisionSnapshot(DomainModel):
@@ -52,12 +55,33 @@ class DecisionAnalysisSummary(DomainModel):
     strategy_match: StrategyMatch | None = None
 
 
-class ReviewRangeUpdate(DomainModel):
-    """Explicit BE-02 placeholder; action-conditioned range work is separate."""
+class ReviewRangePolicy(DomainModel):
+    """Traceable policy metadata for a review action's range transition."""
 
-    status: Literal["unavailable"] = "unavailable"
-    reason: str = "range review is not available in deterministic hand-review v1"
-    source: str | None = None
+    source: PolicySource
+    node: str | None = None
+    version: str | None = None
+    assumptions: tuple[str, ...] = ()
+
+
+class ReviewRangeUpdate(DomainModel):
+    """The actor's combo-level belief immediately after one real action."""
+
+    status: Literal["available", "unavailable"] = "unavailable"
+    action_id: str = Field(min_length=1, max_length=128)
+    seat_id: SeatNumber
+    after_sequence: Annotated[StrictInt, Field(ge=1)]
+    reason: str | None = None
+    uncertainty: str | None = None
+    source: PolicySource | None = None
+    confidence: str | None = None
+    policy: ReviewRangePolicy | None = None
+    prior_mass: float | None = Field(default=None, ge=0)
+    retained_mass: float | None = Field(default=None, ge=0)
+    retained_fraction: float | None = Field(default=None, ge=0, le=1)
+    combos: dict[str, RangeBeliefComboView] | None = None
+    matrix169: dict[str, RangeBeliefMatrixCell] | None = None
+    update: RangeUpdateMetadata | None = None
 
 
 class ReviewSolverThresholdMetadata(DomainModel):
@@ -165,7 +189,7 @@ class DecisionReview(DomainModel):
     evidence_bundle_id: str = Field(min_length=1, max_length=256)
     evidence_bundle: EvidenceBundle
     warnings: tuple[str, ...] = ()
-    range_update: ReviewRangeUpdate = Field(default_factory=ReviewRangeUpdate)
+    range_update: ReviewRangeUpdate
     solver_assessment: ReviewSolverAssessment = Field(default_factory=ReviewSolverAssessment)
     teaching: DecisionTeaching | None = None
 

@@ -63,13 +63,79 @@ def assess_solver_action(
 
     rules = adapter or PokerKitAdapter()
     try:
-        node_scenario = scenario_at_policy_sequence(scenario, review.event_sequence)
-        node_replay = rules.replay_to_decision(node_scenario)
-        oop_seat, ip_seat = postflop_seat_pair(node_scenario, replay=node_replay)
+        policy, pot_before = validated_solver_policy_provider(
+            scenario,
+            review,
+            job_id=job_id,
+            job_lookup=job_lookup,
+            adapter=rules,
+        )
     except (SolverUnsupportedError, ReplayError) as exc:
         return _unscored(str(exc))
-    if len((oop_seat, ip_seat)) != 2:  # Defensive documentation of the HU gate.
-        return _unscored("solver assessment requires exactly two active postflop seats")
+    combo = combo_key((actor_cards[0], actor_cards[1]))
+    action_policy = policy.get_action_frequencies(
+        scenario_at_policy_sequence(scenario, review.event_sequence),
+        review.actor_seat,
+        review.event_sequence,
+        (combo,),
+    )
+    frequencies = action_policy.frequencies.get(combo)
+    if frequencies is None:
+        return _unscored(
+            "solver artifact has no strategy row for the acting seat's known combo",
+            source="solver",
+            confidence=action_policy.confidence,
+        )
+    action_match = resolve_action_match(review.actual_action, action_policy, pot_before=pot_before)
+    mapping = _mapping_from(action_match)
+    if action_match.status is not ActionMatchStatus.EXACT or action_match.off_tree:
+        return _unscored(
+            "observed action is off-tree or unsupported by this solver artifact",
+            source="solver",
+            confidence=action_policy.confidence,
+            action_mapping=mapping,
+        )
+
+    actual_frequency = float(frequencies[action_match.policy_action])
+    primary_action = max(action_policy.actions, key=lambda action: frequencies[action])
+    primary_frequency = float(frequencies[primary_action])
+    status = (
+        "primary"
+        if actual_frequency == primary_frequency
+        else "mixed"
+        if actual_frequency >= MIXED_FREQUENCY_THRESHOLD
+        else "rare"
+        if actual_frequency > 0
+        else "absent"
+    )
+    return ReviewSolverAssessment(
+        status=status,
+        reason=None,
+        source="solver",
+        confidence=action_policy.confidence,
+        actual_frequency=actual_frequency,
+        primary_action=primary_action,
+        threshold_metadata=ReviewSolverThresholdMetadata(
+            mixed_threshold=MIXED_FREQUENCY_THRESHOLD
+        ),
+        action_mapping=mapping,
+    )
+
+
+def validated_solver_policy_provider(
+    scenario: ScenarioSpec,
+    review: DecisionReview,
+    *,
+    job_id: str,
+    job_lookup: Callable[[str], Mapping[str, Any]] | None,
+    adapter: PokerKitAdapter | None = None,
+) -> tuple[SolverPolicyAdapter, int]:
+    """Return an existing exact-node solver policy, never a newly solved one."""
+
+    rules = adapter or PokerKitAdapter()
+    node_scenario = scenario_at_policy_sequence(scenario, review.event_sequence)
+    node_replay = rules.replay_to_decision(node_scenario)
+    oop_seat, ip_seat = postflop_seat_pair(node_scenario, replay=node_replay)
     if job_lookup is None:
         raise SolverAssessmentError("solver_unavailable", "solver job lookup is unavailable")
 
@@ -120,7 +186,7 @@ def assess_solver_action(
             "solver artifact active seats do not match the requested node",
         )
 
-    policy = SolverPolicyAdapter(
+    return SolverPolicyAdapter(
         job["result"],
         oop_seat=oop_seat,
         ip_seat=ip_seat,
@@ -128,58 +194,7 @@ def assess_solver_action(
         policy_sequence=provenance.policy_sequence,
         actor_seat=provenance.actor_seat,
         confidence="grounded",
-    ).get_action_frequencies(
-        node_scenario,
-        review.actor_seat,
-        review.event_sequence,
-        (combo_key((actor_cards[0], actor_cards[1])),),
-    )
-    combo = combo_key((actor_cards[0], actor_cards[1]))
-    frequencies = policy.frequencies.get(combo)
-    if frequencies is None:
-        return _unscored(
-            "solver artifact has no strategy row for the acting seat's known combo",
-            source="solver",
-            confidence=policy.confidence,
-        )
-    action_match = resolve_action_match(
-        review.actual_action,
-        policy,
-        pot_before=int(node_replay.final_state.pot),
-    )
-    mapping = _mapping_from(action_match)
-    if action_match.status is not ActionMatchStatus.EXACT or action_match.off_tree:
-        return _unscored(
-            "observed action is off-tree or unsupported by this solver artifact",
-            source="solver",
-            confidence=policy.confidence,
-            action_mapping=mapping,
-        )
-
-    actual_frequency = float(frequencies[action_match.policy_action])
-    primary_action = max(policy.actions, key=lambda action: frequencies[action])
-    primary_frequency = float(frequencies[primary_action])
-    status = (
-        "primary"
-        if actual_frequency == primary_frequency
-        else "mixed"
-        if actual_frequency >= MIXED_FREQUENCY_THRESHOLD
-        else "rare"
-        if actual_frequency > 0
-        else "absent"
-    )
-    return ReviewSolverAssessment(
-        status=status,
-        reason=None,
-        source="solver",
-        confidence=policy.confidence,
-        actual_frequency=actual_frequency,
-        primary_action=primary_action,
-        threshold_metadata=ReviewSolverThresholdMetadata(
-            mixed_threshold=MIXED_FREQUENCY_THRESHOLD
-        ),
-        action_mapping=mapping,
-    )
+    ), int(node_replay.final_state.pot)
 
 
 def _unscored(

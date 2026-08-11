@@ -17,6 +17,7 @@ from decimal import Decimal
 
 from poker_coach.domain.models import (
     Card,
+    DecisionPoint,
     DomainModel,
     RangeSpec,
     ScenarioSpec,
@@ -130,10 +131,15 @@ def build_range_trace(
             )
         policy = None
         no_policy_message: str | None = None
+        # Providers must see the exact action-time node. In particular, a
+        # completed imported hand can carry a future runout in scenario.board;
+        # passing that wholesale would both leak cards and reject preflop-only
+        # curated policies for an otherwise valid historical action.
+        policy_scenario = _scenario_at_action(scenario, event.sequence)
         for candidate in provider_chain:
             try:
                 policy = candidate.get_action_frequencies(
-                    scenario, seat_id, event.sequence, tuple(snapshot.combos)
+                    policy_scenario, seat_id, event.sequence, tuple(snapshot.combos)
                 )
                 break
             except NoPolicyError as exc:
@@ -258,3 +264,22 @@ def _street_for_sequence(scenario: ScenarioSpec, sequence: int) -> str:
 
 def _deal_label(action_type: str) -> str:
     return f"Deal {action_type.removeprefix('deal_')}"
+
+
+def _scenario_at_action(scenario: ScenarioSpec, sequence: int) -> ScenarioSpec:
+    """Provider input containing no state later than the observed action."""
+
+    event = next(item for item in scenario.action_history if item.sequence == sequence)
+    return scenario.model_copy(
+        update={
+            "action_history": tuple(
+                item for item in scenario.action_history if item.sequence <= sequence
+            ),
+            "board": board_at_sequence(scenario, sequence),
+            "decision_point": DecisionPoint(
+                street=event.street,
+                actor_seat=event.actor_seat,
+                after_sequence=sequence,
+            ),
+        }
+    )
