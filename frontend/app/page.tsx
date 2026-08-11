@@ -718,7 +718,14 @@ export default function Home() {
       decisionPoint: { street: street.replace("deal_", ""), actorSeat: state?.actorSeat ?? scenario.heroSeat, afterSequence: actionHistory.length },
     };
     commitScenario(next);
-    await refreshState(next);
+    // A deal is a state transition, not a selectable player decision. Keeping
+    // the preceding action selected would leave the ActionBar on its
+    // historical projection and block the next real player action.
+    setSelectedActionId(null);
+    setBeliefSeatId(null);
+    // A deal advances to a new decision node, so adopt the backend-replayed
+    // actor even when the preceding player action was selected.
+    await refreshState(next, undefined, true);
   }
 
   function selectAction(actionId: string, allowToggle = true) {
@@ -992,6 +999,7 @@ export default function Home() {
   // submissions.
   const canSubmitSolve = Boolean(selectedAction) && solveGate(workspaceScenario, state, currentStreet, busy);
   const solveReasons = solveGateReasons(workspaceScenario, state, currentStreet);
+  const selectedActionIsLatest = selectedAction?.actionId === scenario.actionHistory[scenario.actionHistory.length - 1]?.actionId;
 
   const handLab = (
     <>
@@ -1091,8 +1099,8 @@ export default function Home() {
             <ActionBar
               legal={legal ?? null}
               currentStreet={currentStreet}
-              busy={busy || Boolean(selectedAction)}
-              boardLength={workspaceScenario.board.length}
+              busy={busy || Boolean(selectedAction && !selectedActionIsLatest)}
+              boardLength={scenario.board.length}
               raiseAmount={raiseAmount}
               pot={state?.pot ?? null}
               actorPosition={actorPosition}
