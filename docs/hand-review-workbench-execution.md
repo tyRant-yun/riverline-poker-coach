@@ -101,8 +101,8 @@ NEXT: <解锁的下一任务或建议>
 | BE-04 | Terra `019ff04f-1de8-7b40-abdd-6fb65703305d` | integrated | `8e8d053` → `6fbf670` | 已进入 main | FE-06 消费教学契约 |
 | FE-05 | Luna `019ff04f-1de0-7580-8097-51465fccee6f` | integrated | `78ad8f3` → `3a99609` | 已进入 main | FE-06 投影选中节点 assessment |
 | FE-06 | Terra `019ff05a-827f-7a41-b26f-09e9dbe59324` | integrated | `0007a19` → `89842f0` | 已进入 main | QA 验证完整产品路径 |
-| QA-01 | Terra `019ff06a-ebe4-76e0-87c1-a7304832e594` | active | - | 独立 worktree | 完整 E2E 与发布门 |
-| DOC-01 | Luna `019ff06a-ebeb-7072-ac19-7556b9a78485` | active | - | 独立 worktree | 使用说明与 PROJECT_STATE 收口 |
+| QA-01 | Terra `019ff06a-ebe4-76e0-87c1-a7304832e594` | integrated | `c2331ed` → `b3f3a50` | 已进入 main | 最终发布门通过 |
+| DOC-01 | Luna `019ff06a-ebeb-7072-ac19-7556b9a78485` | integrated | `f52acb1` → `a604cb2` | 已进入 main | 文档与状态已收口 |
 
 ## 5. 最近批次验收
 
@@ -139,19 +139,21 @@ Batch 3B（2026-08-11）：通过。
 - Next.js：production build 通过；
 - 整手教学与 Solver 背离展示已进入 main。
 
-Batch 4（2026-08-11）：代码门通过，等待最终 E2E。
+Batch 4（2026-08-11）：最终验收通过。
 
 - Backend：339 passed、8 skipped；
 - Python `compileall` 通过；
+- Python `pip check` 通过，无损坏依赖；
 - Frontend：29 files、150 passed；
 - TypeScript：`tsc --noEmit` 通过；
 - Next.js：production build 通过；
-- 整手复盘页面闭环已进入 main。
+- Playwright：7 passed；
+- 整手复盘页面闭环、完整产品 E2E 与文档均已进入 main。
 
 ## 6. 当前进度判断
 
 - Riverline 既有规则、Range Belief 与 Solver 底座：可复用；
-- Hand Review Workbench 专项目标：约 92%；
+- Hand Review Workbench 专项目标：100%；
 - Batch 1：100%，已集成并通过统一契约门；
 - Batch 2：100%，已集成并通过统一契约门；
-- 主要剩余工作：完整 E2E、发布门与文档收口。
+- 本轮规划任务已全部完成；后续扩展范围见 `PROJECT_STATE.md` 的“本轮明确未完成”。

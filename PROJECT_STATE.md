@@ -28,26 +28,27 @@
 | RangeBelief V1.1 | **Grounding & Temporal Correctness**：solver job/artifact 绑定 scenario+spot fingerprint、exact policy sequence/actor seat/active seats；jobId 是 grounded 入口，裸 result 仅 `unverified`；target-seat-aware dead cards；`board_at_sequence` 防未来牌泄漏；prior/current union 保留完全淘汰 combo 的负 Delta；single-size off-tree sizing；frontend polling 使用新 artifact，scenario mutation/load/undo/redo 失效旧 solver/belief | local V1.1（2026-08-11） |
 | RangeBelief V2.0 | **8-max Preflop Policy（首个窄覆盖版本）**：内置、版本化的 `preflop_policy` provider；仅覆盖 8-max NLHE、全员 100BB、no-ante/no-rake、无前序入池、2.5BB RFI 的 UTG→SB 七个位置。以完整 combo×{Raise,Fold} 策略表重建该行动；节点外一律 `no_policy`，不近似映射。数据为 first-party curated baseline（`confidence=curated`），非 solver export | local V2.0（2026-08-11） |
 | TeachingAgent | 外部 teaching agent 接入 compose（LLM env 插值）+ LLM 超时 60→180s（另一 worktree：fix/teaching-agent，已推送 origin） | 694faa2 |
-| Hand Review Workbench | **整手逐决策复盘闭环已实现**：真实行动时间线与 actionId 选择、行动前/行动后双游标、按行动者自动 Range Belief（Prior/Current/Δ 与 unavailable/stale）、按 actionId 独立手动 Solver job、grounded SolverAssessment、逐决策教学、整手总结、不确定性与 priority finding 跳转；完成牌局可回看此前决策 | `89842f0`（2026-08-11，QA 收口中） |
+| Hand Review Workbench | **整手逐决策复盘闭环已实现并通过最终 QA**：真实行动时间线与 actionId 选择、行动前/行动后双游标、按行动者自动 Range Belief（Prior/Current/Δ 与 unavailable/stale）、按 actionId 独立手动 Solver job、grounded SolverAssessment、逐决策教学、整手总结、不确定性与 priority finding 跳转；完成牌局可回看此前决策 | `89842f0`, `b3f3a50`（2026-08-11） |
 
 分支：`main`（单分支工作流）+ `fix/teaching-agent`（worktree：德州扑克-worktree）。
 
-## 3. 验证基线（2026-08-11，当前 QA 批次快照）
+## 3. 验证基线（2026-08-11，最终主线发布门）
 
-> 以下是本轮已验证的中间快照，不是不可变的最终 release certification。QA-01 仍在并行回归，后续集成可能改变测试文件/用例计数；请以带日期和批次的最新回传为准。
+> 以下结果在集成 QA-01 与 DOC-01 后的 `main` 上重新执行；这是本轮 Hand Review Workbench 的最终验收基线。
 
 | 门 | 结果 |
 |---|---|
 | Backend pytest（仓库根，unset PYTHONPATH） | **339 passed + 8 skipped**（live-PG 需 POKER_COACH_TEST_PG_URL 才跑；含 Hand Review、grounded SolverAssessment 与 Range Belief 回归） |
 | compileall | OK |
+| pip check | **No broken requirements found** |
 | vitest（frontend） | **29 files / 150 tests**（含行动选择、Range Belief 竞态/stale、按 actionId Solver registry、整手教学与 priority navigation 回归） |
 | tsc --noEmit | 0 错误 |
 | next build | ✓ |
-| Playwright / Hermes | QA-01 并行收口中；本快照不将未在本批次重跑的门当作最终认证 |
+| Playwright | **7 passed**；含完整 Hand Review Workbench 流程 E2E |
 
 ## 4. 关键架构约束（不可违背）
 
-- **E2E 即契约**：4+1 条 E2E 断言的钩子必须保留——文案（`规则校验通过…`、`范围已标准化为…`、`3 events`、`已载入…`）、按钮名（`校验场景`、`标准化范围`、`生成分析`、`教学解释`、`保存场景`、`重新分析`、`历史`、`Call 50`、`Check`、`Deal flop`、`提交 Solver`、`编辑范围`）、aria-label（`牌面 1..3`、`169 格范围矩阵`、`AA weight`、`范围侧`、`默认范围`、`教学问题`、`导入 JSON`、`收起范围矩阵`、`combo inspector AKs`）、类名（`.teaching-panel`、`.teaching-summary`、`.revision-row`、`.solve-panel`、`.solve-status`、`.sg-grid`）。注意：`Call 50` 是 Playwright substring 匹配——BB 模式下按钮 aria-label 为 `Call 50（0.5 BB）`（视觉 0.5 BB + `50 chips` 小字），不要改回纯文本 `Call 50`（会与 BB 显示冲突）。
+- **E2E 即契约**：7 条 Playwright E2E 的交互钩子必须保留——文案（`规则校验通过…`、`范围已标准化为…`、`3 events`、`已载入…`）、按钮名（`校验场景`、`标准化范围`、`生成分析`、`教学解释`、`保存场景`、`重新分析`、`历史`、`Call 50`、`Check`、`Deal flop`、`提交 Solver`、`编辑范围`、`生成整手复盘`）、aria-label（`牌面 1..3`、`169 格范围矩阵`、`AA weight`、`范围侧`、`默认范围`、`教学问题`、`导入 JSON`、`收起范围矩阵`、`combo inspector AKs`）、类名（`.teaching-panel`、`.teaching-summary`、`.revision-row`、`.solve-panel`、`.solve-status`、`.sg-grid`）。注意：`Call 50` 是 Playwright substring 匹配——BB 模式下按钮 aria-label 为 `Call 50（0.5 BB）`（视觉 0.5 BB + `50 chips` 小字），不要改回纯文本 `Call 50`（会与 BB 显示冲突）。
 - **后端是规则唯一权威**：前端不伪造规则事实；后端 JSON 字段（camelCase）不改名；solver 数值只重新聚合不重算。
 - **不可变语义**：undo/redo、appendAction 的 amount/amountType 映射（call→cost、bet→by、raise_to/all_in→to）。
 - **颜色只走 token**：globals.css 的 `--color-*`/`--felt-*` 系列，组件零裸 hex；提亮只动 token。
@@ -119,7 +120,6 @@ curl -X POST http://127.0.0.1:8000/v1/ranges/trace -d '{"scenario": {...}, "seat
 - 求解器：仅翻后（flop+）且决策点恰好 2 活玩家；bunching 忽略并记录为近似（`assumptions` 字段）
 - 整手复盘已实现，但“有 Solver”不等于“整手所有节点都有 Solver”：Solver 必须按节点显式提交，且只消费与 actionId/节点 fingerprint 匹配的已完成 job；无 job、no-policy、off-tree、provenance mismatch 和不支持节点都保持原则性教学或 unscored。
 - 当前 `mixed` 的 5% 边界是产品解释，不是扑克理论阈值；`primary/mixed/rare/absent` 只描述实际行动在已验证 SolverNode 中的频率关系，不能单独推出好坏或 EV 损失。
-- QA-01 仍可能补充集成/E2E 回归并改变验证数字；本文件第 3 节的 339/8 与 29 files/150 tests 只代表 2026-08-11 当前批次快照。
 - **RangeBelief V2.0**：内置策略只是 8-max 100BB no-rake 2.5BB RFI（UTG→SB）的 curated 纯 raise/fold 基线，不是 solver frequency dataset；BB option、limp、open size 变体、面对 open/3-bet/4-bet、ante/rake/stack 变体仍会诚实阻断 belief 链（可用 fixture/manual policy 覆盖）。无 population/player-specific 模型；无完整 solver tree traversal，solver artifact 仅覆盖显式绑定的一个 action sequence/node；off-tree 用 nearest-size（等距取小）非插值；前端默认按选中行动者/范围侧映射 belief seat，也支持在范围面板选择 seat；前端 initialScenario 仍为 HU
 - 8-max 前端：前端 initialScenario 仍为 HU；多way 场景主要经 API 使用
 - docker 偶发：引擎恢复期端口绑定可能丢失（`docker port` 为空）→ `docker compose up -d --force-recreate api web`
