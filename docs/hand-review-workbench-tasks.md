@@ -4,6 +4,8 @@
 日期：2026-08-11  
 上位设计：[Hand Review Workbench 产品与架构计划](hand-review-workbench-plan.md)
 
+执行状态、任务回传和批次门记录在：[Hand Review Workbench 执行台账](hand-review-workbench-execution.md)。
+
 ## 1. 执行原则
 
 - 先锁定决策快照和响应契约，再让教学生成自然语言；
@@ -317,4 +319,3 @@ flowchart TD
 - Commit 8：E2E、使用说明与 PROJECT_STATE 收口。
 
 提交前必须检查工作区，不能纳入已有的 `AGENT.MD` 修改或无关文件。
-
