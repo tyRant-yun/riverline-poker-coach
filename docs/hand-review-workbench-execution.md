@@ -91,8 +91,8 @@ NEXT: <解锁的下一任务或建议>
 | BE-01 | Terra | integrated | `54f2b2d`, `9d25e81` | 已进入 main | BE-02 消费 DecisionSnapshot |
 | FE-01 | Luna | integrated | `766c90c`, `842a24a` | 已进入 main | 等待 BE-02 响应接线 |
 | FE-02/03 | Terra | integrated | `8482a2f`, `7231bf1` | 已进入 main | FE-04 复用 selected-decision 投影 |
-| BE-02 | 待创建 | ready | - | - | 创建 Terra worktree |
-| FE-04 | 待创建 | ready | - | - | 创建 Terra worktree |
+| BE-02 | Terra `019ff035-8773-7563-950d-1095932b9c1d` | active | - | 独立 worktree | 完成后按标准格式主动回传 |
+| FE-04 | Terra `019ff035-877e-7180-bbb5-45e4fe321b86` | active | - | 独立 worktree | 完成后按标准格式主动回传 |
 | BE-03/04 | 未创建 | blocked_by_dependency | - | - | Batch 2 通过后创建 |
 | FE-05/06 | 未创建 | blocked_by_dependency | - | - | Batch 2/3 接口稳定后创建 |
 | QA/DOC | 未创建 | blocked_by_dependency | - | - | 功能集成后创建 |
