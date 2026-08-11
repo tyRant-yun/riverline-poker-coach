@@ -20,4 +20,29 @@ describe("hand review adapter", () => {
     expect(adapted.decisionReviews[0].solverAssessment.status).toBe("unscored");
     expect(adapted.decisionReviews[0].rangeUpdate.status).toBe("unavailable");
   });
+
+  it("preserves grounded solver fields and action mapping", () => {
+    const response = handReviewResponseFixture();
+    response.review.decisionReviews[0].solverAssessment = {
+      status: "mixed",
+      reason: null,
+      source: "solver",
+      confidence: "grounded",
+      actualFrequency: 0.05,
+      primaryAction: "Bet(250)",
+      thresholdMetadata: { mixedThreshold: 0.05, kind: "product_interpretation" },
+      actionMapping: {
+        status: "exact",
+        policyAction: "Bet(250)",
+        observedSize: 250,
+        mappedSize: 250,
+        offTree: false,
+      },
+    };
+
+    const adapted = adaptHandReviewResponse(response);
+    expect(adapted.decisionReviews[0].solverAssessment).toEqual(
+      response.review.decisionReviews[0].solverAssessment,
+    );
+  });
 });

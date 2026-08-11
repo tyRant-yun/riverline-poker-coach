@@ -47,7 +47,7 @@ describe("DecisionReviewList", () => {
       />,
     );
     expect(screen.getByText("不可用")).toBeInTheDocument();
-    expect(screen.getByText("未进行 Solver 评分")).toBeInTheDocument();
+    expect(screen.getByText("无 Solver 结论")).toBeInTheDocument();
     expect(screen.getByText("尚未提交 Solver。")).toBeInTheDocument();
     expect(screen.queryByText("明显偏离常用策略")).not.toBeInTheDocument();
   });
@@ -55,7 +55,7 @@ describe("DecisionReviewList", () => {
   it("shows a mixed solver assessment", () => {
     render(
       <DecisionReviewList
-        reviews={[review({ solverAssessment: { status: "mixed", actualFrequency: "18%" } })]}
+        reviews={[review({ solverAssessment: { status: "mixed", actualFrequency: 0.18 } })]}
       />,
     );
     expect(screen.getByText("可接受混频")).toBeInTheDocument();
@@ -63,13 +63,44 @@ describe("DecisionReviewList", () => {
   });
 
   it.each([
+    ["primary", "符合主策略", "source-tag"],
+    ["mixed", "可接受混频", "status-pill"],
     ["rare", "明显偏离常用策略", "source-tag"],
     ["absent", "Solver 不采用该行动", "danger-button"],
-  ] as const)("maps %s to a non-positive status class", (status, label, expectedClass) => {
+    ["unscored", "无 Solver 结论", "status-pill"],
+  ] as const)("maps %s to its shared status class", (status, label, expectedClass) => {
     render(<DecisionReviewList reviews={[review({ solverAssessment: { status } })]} />);
     const badge = screen.getByText(label);
 
     expect(badge).toHaveClass(expectedClass);
-    expect(badge).not.toHaveClass("source-tag", "green");
+    if (status === "primary") expect(badge).toHaveClass("green");
+  });
+
+  it("preserves grounded metadata and shows off-tree mapping without scoring it", () => {
+    render(
+      <DecisionReviewList
+        reviews={[
+          review({
+            solverAssessment: {
+              status: "unscored",
+              source: "solver",
+              confidence: "grounded",
+              actionMapping: {
+                status: "nearest_size",
+                policyAction: "Bet(250)",
+                observedSize: 275,
+                mappedSize: 250,
+                offTree: true,
+              },
+            },
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText(/来源：solver · 置信度：grounded/)).toBeInTheDocument();
+    expect(screen.getByText(/行动映射：Bet\(250\).*off-tree/)).toBeInTheDocument();
+    expect(screen.getByText("无 Solver 结论")).toBeInTheDocument();
+    expect(screen.queryByText(/EV loss|EV损失/)).not.toBeInTheDocument();
   });
 });

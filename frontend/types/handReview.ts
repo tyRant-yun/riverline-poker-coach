@@ -10,12 +10,28 @@ export type ReviewRangeUpdate = {
   reason?: string | null;
 };
 
+export type ReviewSolverThresholdMetadata = {
+  mixedThreshold: number;
+  kind: "product_interpretation";
+};
+
+export type ReviewSolverActionMapping = {
+  status: "exact" | "nearest_size" | "unsupported";
+  policyAction: string;
+  observedSize?: number | null;
+  mappedSize?: number | null;
+  offTree: boolean;
+};
+
 export type ReviewSolverAssessment = {
   status: "primary" | "mixed" | "rare" | "absent" | "unscored";
-  actualFrequency?: number | string | null;
-  primaryAction?: string | null;
-  source?: string | null;
   reason?: string | null;
+  source?: string | null;
+  confidence?: string | null;
+  actualFrequency?: number | null;
+  primaryAction?: string | null;
+  thresholdMetadata?: ReviewSolverThresholdMetadata | null;
+  actionMapping?: ReviewSolverActionMapping | null;
 };
 
 export type HandReviewAction = {

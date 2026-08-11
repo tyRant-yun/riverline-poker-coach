@@ -93,4 +93,27 @@ describe("SolverWorkspace assumptions", () => {
     );
     expect(screen.queryByLabelText("solver 提交条件")).not.toBeInTheDocument();
   });
+
+  it("shows an optional selected-decision assessment without replacing solver job UI", () => {
+    render(
+      <SolverWorkspace
+        solveJob={null}
+        canSubmit={false}
+        heroHoleCards={[]}
+        solverAssessment={{
+          status: "rare",
+          actualFrequency: 0.02,
+          primaryAction: "Check",
+          source: "solver",
+          confidence: "grounded",
+        }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("Solver 背离评估")).toBeInTheDocument();
+    expect(screen.getByText("明显偏离常用策略")).toBeInTheDocument();
+    expect(screen.getByText("提交 Solver 求解（独立容器）")).toBeInTheDocument();
+  });
 });

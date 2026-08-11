@@ -3,6 +3,7 @@ import type {
   DecisionReviewResponse,
   HandReviewApiResponse,
   HandReviewResponse,
+  ReviewSolverAssessment,
 } from "../../types/handReview";
 
 function actionText(action: DecisionReviewResponse["actualAction"]): string {
@@ -15,6 +16,21 @@ function actionText(action: DecisionReviewResponse["actualAction"]): string {
   };
   const label = labels[action.actionType] ?? action.actionType.replaceAll("_", " ");
   return action.amount === undefined ? label : `${label} ${action.amount}`;
+}
+
+function adaptSolverAssessment(assessment: ReviewSolverAssessment): ReviewSolverAssessment {
+  return {
+    status: assessment.status,
+    reason: assessment.reason,
+    source: assessment.source,
+    confidence: assessment.confidence,
+    actualFrequency: assessment.actualFrequency,
+    primaryAction: assessment.primaryAction,
+    thresholdMetadata: assessment.thresholdMetadata
+      ? { ...assessment.thresholdMetadata }
+      : assessment.thresholdMetadata,
+    actionMapping: assessment.actionMapping ? { ...assessment.actionMapping } : assessment.actionMapping,
+  };
 }
 
 /** Purely adapts the backend response; it does not infer poker facts. */
@@ -33,7 +49,7 @@ export function adaptDecisionReview(review: DecisionReviewResponse): DecisionRev
     evidenceBundle: review.evidenceBundle,
     warnings: review.warnings,
     rangeUpdate: review.rangeUpdate,
-    solverAssessment: review.solverAssessment,
+    solverAssessment: adaptSolverAssessment(review.solverAssessment),
   };
 }
 

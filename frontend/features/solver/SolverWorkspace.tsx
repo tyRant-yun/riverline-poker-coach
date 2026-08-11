@@ -5,6 +5,7 @@
 
 import { useMemo, useState } from "react";
 import type { SolveJob, SolverNodePayload } from "../../types/api";
+import type { ReviewSolverAssessment } from "../../types/handReview";
 import type { SolveGateReasons } from "../../lib/poker/solve";
 import {
   ACTIVE_SOLVE_STATUSES,
@@ -15,6 +16,7 @@ import { aggregateNode } from "../../lib/solver/aggregate";
 import StrategyGrid, { type StrategyGridMode } from "../../components/solver/StrategyGrid";
 import ComboInspector from "./ComboInspector";
 import NodeNavigator from "./NodeNavigator";
+import SolverAssessment from "./SolverAssessment";
 
 type Props = {
   solveJob: SolveJob | null;
@@ -24,6 +26,8 @@ type Props = {
   gate?: SolveGateReasons | null;
   onSubmit: () => void;
   onCancel: () => void;
+  /** Optional selected-decision assessment; page/FE-06 may supply it later. */
+  solverAssessment?: ReviewSolverAssessment | null;
 };
 
 const NODE_OPTIONS: { id: "root" | "response"; label: string }[] = [
@@ -37,7 +41,7 @@ const MODE_OPTIONS: { id: StrategyGridMode; label: string }[] = [
   { id: "equity", label: "Equity" },
 ];
 
-export default function SolverWorkspace({ solveJob, canSubmit, heroHoleCards, gate, onSubmit, onCancel }: Props) {
+export default function SolverWorkspace({ solveJob, canSubmit, heroHoleCards, gate, onSubmit, onCancel, solverAssessment }: Props) {
   const [nodeId, setNodeId] = useState<"root" | "response">("root");
   const [mode, setMode] = useState<StrategyGridMode>("strategy");
   const [activeCell, setActiveCell] = useState<string | null>(null);
@@ -72,6 +76,8 @@ export default function SolverWorkspace({ solveJob, canSubmit, heroHoleCards, ga
           近似假设：bunching_ignored — 本决策点源自多人桌，已弃牌玩家的手牌对剩余牌堆的影响被忽略（标准 HU 近似）。
         </p>
       )}
+
+      {solverAssessment ? <SolverAssessment assessment={solverAssessment} /> : null}
 
       {status === "idle" || status === "failed" || status === "cancelled" ? (
         <div className="action-buttons">

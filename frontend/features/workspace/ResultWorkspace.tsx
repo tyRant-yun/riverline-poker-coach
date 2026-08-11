@@ -13,6 +13,7 @@ import type {
   TeachingResponse,
 } from "../../types/api";
 import type { SeatSpec } from "../../types/scenario";
+import type { ReviewSolverAssessment } from "../../types/handReview";
 import type { SolveGateReasons } from "../../lib/poker/solve";
 import AnalysisPanel from "../analysis/AnalysisPanel";
 import TeachingPanel from "../coach/TeachingPanel";
@@ -55,6 +56,7 @@ type Props = {
   onSolveSubmit: () => void;
   onSolveCancel: () => void;
   onPracticeAnswer: (action: string) => void;
+  solverAssessment?: ReviewSolverAssessment | null;
 };
 
 export default function ResultWorkspace({
@@ -77,6 +79,7 @@ export default function ResultWorkspace({
   onSolveSubmit,
   onSolveCancel,
   onPracticeAnswer,
+  solverAssessment,
 }: Props) {
   return (
     <section className="panel result-workspace" aria-label="结果工作区">
@@ -131,6 +134,7 @@ export default function ResultWorkspace({
             gate={solveGate}
             onSubmit={onSolveSubmit}
             onCancel={onSolveCancel}
+            solverAssessment={solverAssessment}
           />
         )}
       </div>
