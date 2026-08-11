@@ -88,19 +88,28 @@ NEXT: <解锁的下一任务或建议>
 |---|---|---|---|---|---|
 | PLAN | 管理任务 | integrated | `5fcd6e4` | 已进入 main | 持续维护台账 |
 | DOC-入口 | Luna | integrated | `68302c6` | 已进入 main | 最终阶段再更新使用说明/状态 |
-| BE-01 | Terra | reported | `3a016df`, `f3514b4` | 待 Batch 1 集成 | 运行 Batch 1 后端门 |
-| FE-01 | Luna | reported | `8ce254b`, `5db11e5` | 待 Batch 1 集成 | 与 FE-02/03 一并验证 |
-| FE-02/03 | Terra | changes_requested | `f9e80c4` | 等待历史节点投影修复 | 修复后回传追加 commit |
-| BE-02 | 未创建 | blocked_by_dependency | - | - | Batch 1 通过后创建 |
-| FE-04 | 未创建 | blocked_by_dependency | - | - | Batch 1 通过后创建 |
+| BE-01 | Terra | integrated | `54f2b2d`, `9d25e81` | 已进入 main | BE-02 消费 DecisionSnapshot |
+| FE-01 | Luna | integrated | `766c90c`, `842a24a` | 已进入 main | 等待 BE-02 响应接线 |
+| FE-02/03 | Terra | integrated | `8482a2f`, `7231bf1` | 已进入 main | FE-04 复用 selected-decision 投影 |
+| BE-02 | 待创建 | ready | - | - | 创建 Terra worktree |
+| FE-04 | 待创建 | ready | - | - | 创建 Terra worktree |
 | BE-03/04 | 未创建 | blocked_by_dependency | - | - | Batch 2 通过后创建 |
 | FE-05/06 | 未创建 | blocked_by_dependency | - | - | Batch 2/3 接口稳定后创建 |
 | QA/DOC | 未创建 | blocked_by_dependency | - | - | 功能集成后创建 |
 
-## 5. 当前进度判断
+## 5. 最近批次验收
+
+Batch 1（2026-08-11）：通过。
+
+- Backend：327 passed、8 skipped；
+- Frontend：23 files、123 passed；
+- TypeScript：`tsc --noEmit` 通过；
+- Next.js：production build 通过；
+- 主工作区仅保留用户原有 `AGENT.MD` 修改。
+
+## 6. 当前进度判断
 
 - Riverline 既有规则、Range Belief 与 Solver 底座：可复用；
-- Hand Review Workbench 专项目标：约 30%–35%；
-- Batch 1：约 90%，等待一个修复回传与统一集成；
+- Hand Review Workbench 专项目标：约 40%；
+- Batch 1：100%，已集成并通过统一契约门；
 - 主要剩余工作：HandReview API、按节点 Solver registry、SolverAssessment、整手教学、复盘 UI 和完整 E2E。
-
