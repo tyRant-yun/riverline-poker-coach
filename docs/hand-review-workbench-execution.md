@@ -96,8 +96,10 @@ NEXT: <解锁的下一任务或建议>
 | FE-02/03 | Terra | integrated | `8482a2f`, `7231bf1` | 已进入 main | FE-04 复用 selected-decision 投影 |
 | BE-02 | Terra `019ff035-8773-7563-950d-1095932b9c1d` | integrated | `3e358b0` | 已进入 main | 解锁 BE-03/04 |
 | FE-04 | Terra `019ff035-877e-7180-bbb5-45e4fe321b86` | integrated | `7b9be05` | 已进入 main | 解锁 FE-05 |
-| BE-03/04 | 待创建 | ready | - | - | 创建独立 Terra worktree |
-| FE-05/06 | 待创建 | partially_ready | - | - | FE-05 等 BE-03；FE-06 等 BE-04 |
+| BE-03 | Terra `019ff044-49d7-75b0-a202-a2ff52a71590` | active | - | 独立 worktree | 完成时跨任务回调 |
+| FE-API | Luna `019ff044-49d5-7e02-93fe-a880682e4202` | active | - | 独立 worktree | 对齐 HandReview API 类型/client |
+| BE-04 | 未创建 | blocked_by_dependency | - | - | BE-03 集成后创建，避免模型/服务冲突 |
+| FE-05/06 | 未创建 | blocked_by_dependency | - | - | FE-05 等 BE-03；FE-06 等 BE-04 |
 | QA/DOC | 未创建 | blocked_by_dependency | - | - | 功能集成后创建 |
 
 ## 5. 最近批次验收
