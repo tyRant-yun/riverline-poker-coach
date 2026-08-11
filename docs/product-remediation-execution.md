@@ -128,8 +128,8 @@ RM-01 与 RM-02 文件边界基本独立，可并行。后续任务按 contract 
 
 | 任务 | 状态 | 执行任务 | 提交 | 备注 |
 |---|---|---|---|---|
-| RM-01 | 待创建 | - | - | Batch A |
-| RM-02 | 待创建 | - | - | Batch A |
+| RM-01 | active | Terra `019ff0ed-7d88-7e52-8d13-bd19188c3914` | - | 独立 worktree，完成时回传 |
+| RM-02 | active | Terra `019ff0ed-7d8d-7673-bd99-be5633258225` | - | 独立 worktree，完成时回传 |
 | RM-03 | blocked_by_Batch_A | - | - | 依赖真实 policy |
 | RM-04 | blocked_by_RM-03 | - | - | 同一 review contract 边界 |
 | RM-05 | blocked_by_RM-04 | - | - | 消费最终 contract |
