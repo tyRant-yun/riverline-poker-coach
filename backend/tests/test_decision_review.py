@@ -6,7 +6,7 @@ import pytest
 
 from poker_coach.domain.models import ScenarioSpec
 from poker_coach.review import build_decision_snapshots
-from poker_coach.rules import ReplayError
+from poker_coach.rules import PokerKitAdapter, ReplayError
 
 
 def _hu_checkdown_scenario() -> ScenarioSpec:
@@ -151,6 +151,15 @@ def test_returns_prior_decisions_after_a_multiway_all_in_hand_is_finished():
             "assumptions": {},
         }
     )
+
+    replay = PokerKitAdapter().replay(scenario)
+
+    assert replay.settlement.completed
+    assert replay.settlement.reason == "showdown"
+    assert replay.settlement.winner_seats == (1, 2)
+    assert replay.settlement.payouts == {1: 6_000, 2: 2_000}
+    assert not replay.final_state.hand_in_progress
+    assert replay.final_state.pot == 0
 
     snapshots = build_decision_snapshots(scenario)
 
