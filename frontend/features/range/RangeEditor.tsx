@@ -14,6 +14,9 @@ import type { BeliefMode, RangeBeliefView } from "../../types/rangeBelief";
 
 type Props = {
   rangeSide: RangeSide;
+  rangeSeatId?: number;
+  rangeSeats?: SeatSpec[];
+  isHeadsUp?: boolean;
   rangeText: string;
   defaultRanges: DefaultRanges;
   rangeMatrix: Record<string, string>;
@@ -28,6 +31,7 @@ type Props = {
   beliefEventSequence?: number | null;
   beliefDecisionSequence?: number | null;
   onRangeSideChange: (side: RangeSide) => void;
+  onRangeSeatChange?: (seatId: number) => void;
   onRangeTextChange: (value: string) => void;
   onApplyDefault: (key: string) => void;
   onParse: () => void;
@@ -46,6 +50,9 @@ function retainedPercent(belief: RangeBeliefView): string | null {
 
 export default function RangeEditor({
   rangeSide,
+  rangeSeatId = 0,
+  rangeSeats = [],
+  isHeadsUp = true,
   rangeText,
   defaultRanges,
   rangeMatrix,
@@ -60,6 +67,7 @@ export default function RangeEditor({
   beliefEventSequence = null,
   beliefDecisionSequence = null,
   onRangeSideChange,
+  onRangeSeatChange = () => {},
   onRangeTextChange,
   onApplyDefault,
   onParse,
@@ -72,7 +80,7 @@ export default function RangeEditor({
   // occupies primary space.
   const [expanded, setExpanded] = useState(true);
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
-  const seatLabel = rangeSide === "heroRange" ? "Hero" : "Villain";
+  const seatLabel = isHeadsUp ? (rangeSide === "heroRange" ? "Hero" : "Villain") : `Seat ${rangeSeatId}`;
   const beliefSeatLabel = beliefSeatId == null ? seatLabel : `Seat ${beliefSeatId}`;
 
   return (
@@ -176,6 +184,7 @@ export default function RangeEditor({
       ) : (
         <>
           <div className="range-controls">
+        {isHeadsUp ? (
         <label>
           编辑对象
           <select
@@ -187,6 +196,22 @@ export default function RangeEditor({
             <option value="heroRange">Hero 范围</option>
           </select>
         </label>
+        ) : (
+          <label>
+            编辑对象
+            <select
+              aria-label="范围玩家"
+              value={rangeSeatId}
+              onChange={(event) => onRangeSeatChange(Number(event.target.value))}
+            >
+              {rangeSeats.map((seat) => (
+                <option key={seat.seatId} value={seat.seatId}>
+                  Seat {seat.seatId} · {seat.position}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
           默认范围
           <select

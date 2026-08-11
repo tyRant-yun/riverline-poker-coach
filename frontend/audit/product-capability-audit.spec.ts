@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("real user capability audit", () => {
-  test("records the current HU-only editor surface and ActionBar continuity", async ({ page }) => {
+  test("preserves the HU editor surface and ActionBar continuity", async ({ page }) => {
     await page.goto("/");
 
     // Positive controls are driven on the real page; this does not use the
@@ -17,13 +17,10 @@ test.describe("real user capability audit", () => {
     await page.getByLabel("重做").click();
     await expect(page.getByText("1 events")).toBeVisible({ timeout: 10_000 });
 
-    // Current negative inventory: this is a passing measurement so the two
-    // red gate tests below remain the release signal for the missing journey.
-    await expect(page.getByRole("combobox", { name: "桌型" })).toHaveCount(0);
-    await expect(page.getByRole("combobox", { name: "按钮位" })).toHaveCount(0);
-    await expect(page.getByRole("combobox", { name: "Hero 座位" })).toHaveCount(0);
-    await expect(page.getByLabel(/Seat 2.*筹码/)).toHaveCount(0);
-    await expect(page.getByLabel(/Seat 2.*范围/)).toHaveCount(0);
+    // The expanded construction controls coexist with the concise HU flow.
+    await expect(page.getByRole("combobox", { name: "桌型" })).toHaveValue("2");
+    await expect(page.getByRole("combobox", { name: "按钮位" })).toHaveValue("0");
+    await expect(page.getByRole("combobox", { name: "Hero 座位" })).toHaveValue("0");
   });
 
   test("a user can construct an 8-max table and control positions from the UI", async ({ page }) => {

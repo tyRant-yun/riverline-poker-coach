@@ -44,7 +44,8 @@ import { notationFromMatrix, notationFromMatrixExplicit } from "../lib/poker/mat
 import { canSubmitSolve as solveGate, solveGateReasons } from "../lib/poker/solve";
 import type { DisplayUnit } from "../lib/poker/format";
 import { buildSeatViewModels } from "../lib/poker/table";
-import { deadCardsForSeat, heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
+import { deadCardsForSeat, getRangeForSeat, heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
+import { changeButtonSeat, changeHeroSeat, resizeTable, type TableSize } from "../lib/poker/scenarioTopology";
 import { projectSelectedDecisionScenario, reconcileSelectedActionId, selectionForAction } from "../lib/poker/handReview";
 import { BeliefRequestGate } from "../lib/range/beliefRequest";
 import {
@@ -113,6 +114,8 @@ export default function Home() {
   const [teachingQuestion, setTeachingQuestion] = useState("");
   const [rangeSide, setRangeSide] = useState<RangeSide>("villainRange");
   const [rangeTextBySide, setRangeTextBySide] = useState<Record<RangeSide, string>>({ heroRange: "22+, A5s+, K9o+", villainRange: "22+, A5s+, K9o+" });
+  const [rangeTextBySeat, setRangeTextBySeat] = useState<Record<string, string>>({});
+  const [rangeSeatId, setRangeSeatId] = useState(1);
   const [defaultRanges, setDefaultRanges] = useState<DefaultRanges>({});
   const [rangeMatrix, setRangeMatrix] = useState<Record<string, string>>({});
   const [rangeSummary, setRangeSummary] = useState<RangeSummary | null>(null);
@@ -179,7 +182,12 @@ export default function Home() {
   useEffect(() => {
     if (practice) setResultTab("practice");
   }, [practice]);
-  const rangeText = rangeTextBySide[rangeSide];
+  const rangeSeatForEditor = scenario.tableSize === 2
+    ? beliefSeatForSide(rangeSide) ?? scenario.heroSeat
+    : scenario.seats.some((seat) => seat.seatId === rangeSeatId) ? rangeSeatId : scenario.heroSeat;
+  const rangeText = scenario.tableSize === 2
+    ? rangeTextBySide[rangeSide]
+    : rangeTextBySeat[String(rangeSeatForEditor)] ?? notationFromMatrix(getRangeForSeat(scenario, rangeSeatForEditor)?.matrix169 ?? {});
   const selectedAction = useMemo(
     () => selectionForAction(scenario.actionHistory, selectedActionId),
     [scenario.actionHistory, selectedActionId],
@@ -247,6 +255,16 @@ export default function Home() {
     const seatSync = syncSeatSourcesFromLegacy(scenario, patch);
     commitScenario({ ...scenario, ...patch, ...seatSync });
     setMessage("场景已修改，需要重新校验或分析。");
+  }
+
+  function commitTopology(next: Scenario) {
+    commitScenario(next);
+    setSelectedActionId(null);
+    setBeliefSeatId(null);
+    setRangeSeatId(next.heroSeat);
+    syncRangeEditor(next);
+    setState(null);
+    void refreshState(next, undefined, true);
   }
 
   function invalidateDerivedAnalysisState() {
@@ -363,7 +381,9 @@ export default function Home() {
   function selectRangeSide(side: RangeSide) {
     invalidateRangeBelief();
     setRangeSide(side);
-    const selected = side === "heroRange" ? scenario.heroRange : scenario.villainRange;
+    const selectedSeat = beliefSeatForSide(side) ?? scenario.heroSeat;
+    setRangeSeatId(selectedSeat);
+    const selected = getRangeForSeat(scenario, selectedSeat);
     setRangeMatrix(selected?.matrix169 ?? {});
     setRangeSummary(null);
     setRangeCombos([]);
@@ -372,6 +392,16 @@ export default function Home() {
 
   function selectBeliefSeat(seatId: number) {
     invalidateRangeBelief();
+    setBeliefSeatId(seatId);
+  }
+
+  function selectRangeSeat(seatId: number) {
+    invalidateRangeBelief();
+    setRangeSeatId(seatId);
+    const selected = getRangeForSeat(scenario, seatId);
+    setRangeMatrix(selected?.matrix169 ?? {});
+    setRangeSummary(null);
+    setRangeCombos([]);
     setBeliefSeatId(seatId);
   }
 
@@ -438,7 +468,18 @@ export default function Home() {
       heroRange: nextScenario.heroRange ? notationFromMatrix(nextScenario.heroRange.matrix169) : current.heroRange,
       villainRange: nextScenario.villainRange ? notationFromMatrix(nextScenario.villainRange.matrix169) : current.villainRange,
     }));
-    const selected = rangeSide === "heroRange" ? nextScenario.heroRange : nextScenario.villainRange;
+    setRangeTextBySeat((current) => Object.fromEntries(nextScenario.seats.map((seat) => [
+      String(seat.seatId),
+      getRangeForSeat(nextScenario, seat.seatId)
+        ? notationFromMatrix(getRangeForSeat(nextScenario, seat.seatId)!.matrix169)
+        : current[String(seat.seatId)] ?? "22+, A5s+, K9o+",
+    ])));
+    const selectedSeat = nextScenario.tableSize === 2
+      ? (rangeSide === "heroRange"
+        ? nextScenario.heroSeat
+        : nextScenario.seats.find((seat) => seat.seatId !== nextScenario.heroSeat)?.seatId ?? nextScenario.heroSeat)
+      : nextScenario.seats.some((seat) => seat.seatId === rangeSeatId) ? rangeSeatId : nextScenario.heroSeat;
+    const selected = getRangeForSeat(nextScenario, selectedSeat);
     setRangeMatrix(selected?.matrix169 ?? {});
     setRangeSummary(null);
     setRangeCombos([]);
@@ -806,7 +847,11 @@ export default function Home() {
   }
 
   function setCurrentRangeText(value: string) {
-    setRangeTextBySide((current) => ({ ...current, [rangeSide]: value }));
+    if (scenario.tableSize === 2) {
+      setRangeTextBySide((current) => ({ ...current, [rangeSide]: value }));
+      return;
+    }
+    setRangeTextBySeat((current) => ({ ...current, [String(rangeSeatForEditor)]: value }));
   }
 
   async function applyDefaultRange(key: string) {
@@ -820,17 +865,22 @@ export default function Home() {
 
   async function normalizeRange(notation = rangeText, side = rangeSide) {
     try {
-      const targetSeat = beliefSeatForSide(side);
-      const deadCards = targetSeat == null
-        ? [...scenario.board]
-        : deadCardsForSeat(scenario, targetSeat);
+      const targetSeat = scenario.tableSize === 2 ? beliefSeatForSide(side) : rangeSeatForEditor;
+      const deadCards = targetSeat == null ? [...scenario.board] : deadCardsForSeat(scenario, targetSeat);
       const payload = await rangesApi.parse(notation, deadCards);
       setRangeMatrix(payload.range.matrix169);
       setRangeSummary(payload.summary);
       setRangeCombos(payload.combos ?? []);
       setCurrentRangeText(notation);
-      updateScenario({ [side]: payload.range } as Partial<Scenario>);
-      setMessage(`${side === "heroRange" ? "Hero" : "Villain"} 范围已标准化为 ${Object.keys(payload.range.matrix169).length} 个矩阵格。`);
+      if (scenario.tableSize === 2) {
+        updateScenario({ [side]: payload.range } as Partial<Scenario>);
+      } else if (targetSeat != null) {
+        updateScenario({
+          rangesBySeat: { ...(scenario.rangesBySeat ?? {}), [String(targetSeat)]: payload.range },
+          ...(targetSeat === scenario.heroSeat ? { heroRange: payload.range } : {}),
+        });
+      }
+      setMessage(`${scenario.tableSize === 2 ? (side === "heroRange" ? "Hero" : "Villain") : `Seat ${targetSeat}`} 范围已标准化为 ${Object.keys(payload.range.matrix169).length} 个矩阵格。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "范围解析失败");
     }
@@ -1017,6 +1067,9 @@ export default function Home() {
               onRedo={redo}
               onUpdateScenario={updateScenario}
               onUpdateBoard={updateBoard}
+              onTableSizeChange={(tableSize) => commitTopology(resizeTable(scenario, tableSize as TableSize))}
+              onButtonSeatChange={(seatId) => commitTopology(changeButtonSeat(scenario, seatId))}
+              onHeroSeatChange={(seatId) => commitTopology(changeHeroSeat(scenario, seatId))}
             />
           </section>
 
@@ -1130,6 +1183,10 @@ export default function Home() {
             beliefEventSequence={selectedAction?.eventSequence ?? null}
             beliefDecisionSequence={selectedAction?.decisionSequence ?? null}
             onRangeSideChange={selectRangeSide}
+            rangeSeatId={rangeSeatForEditor}
+            rangeSeats={scenario.seats}
+            isHeadsUp={scenario.tableSize === 2}
+            onRangeSeatChange={selectRangeSeat}
             onRangeTextChange={setCurrentRangeText}
             onApplyDefault={(key) => void applyDefaultRange(key)}
             onParse={() => void parseRange()}

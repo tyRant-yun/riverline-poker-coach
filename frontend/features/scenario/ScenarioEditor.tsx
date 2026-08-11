@@ -10,7 +10,8 @@
 import { useMemo, useState } from "react";
 
 import CardPicker from "../../components/poker/CardPicker";
-import { heroSeatSpec, opponentSeatSpec } from "../../lib/poker/scenario";
+import { positionLabel } from "../../lib/poker/positions";
+import { getKnownCardsForSeat, heroSeatSpec, opponentSeatSpec } from "../../lib/poker/scenario";
 import type { Scenario } from "../../types/scenario";
 
 type Props = {
@@ -24,6 +25,9 @@ type Props = {
   onRedo: () => void;
   onUpdateScenario: (patch: Partial<Scenario>) => void;
   onUpdateBoard: (index: number, value: string) => void;
+  onTableSizeChange?: (tableSize: number) => void;
+  onButtonSeatChange?: (seatId: number) => void;
+  onHeroSeatChange?: (seatId: number) => void;
 };
 
 type PickerTarget = "hero" | "villain" | number;
@@ -45,6 +49,9 @@ export default function ScenarioEditor({
   onRedo,
   onUpdateScenario,
   onUpdateBoard,
+  onTableSizeChange,
+  onButtonSeatChange,
+  onHeroSeatChange,
 }: Props) {
   const [pickerTarget, setPickerTarget] = useState<PickerTarget | null>(null);
   const [heroOnlyMode, setHeroOnlyMode] = useState(false);
@@ -58,9 +65,23 @@ export default function ScenarioEditor({
   const villainHoleCards = scenario.villainHoleCards ?? [];
 
   const usedCards = useMemo(
-    () => [...heroHoleCards, ...villainHoleCards, ...boardInput.filter(Boolean)],
-    [heroHoleCards, villainHoleCards, boardInput],
+    () => [
+      ...scenario.seats.flatMap((seat) => getKnownCardsForSeat(scenario, seat.seatId)),
+      ...boardInput.filter(Boolean),
+    ],
+    [scenario, boardInput],
   );
+
+  function updateKnownSeatCards(seatId: number, value: string) {
+    const cards = value.split(/\s+/).filter(Boolean).slice(0, 2);
+    const knownHoleCardsBySeat = { ...(scenario.knownHoleCardsBySeat ?? {}) };
+    if (cards.length === 2) knownHoleCardsBySeat[String(seatId)] = cards;
+    else delete knownHoleCardsBySeat[String(seatId)];
+    const patch: Partial<Scenario> = { knownHoleCardsBySeat };
+    if (seatId === scenario.heroSeat) patch.heroHoleCards = cards;
+    if (isHeadsUp && seatId === villainSeat?.seatId) patch.villainHoleCards = cards;
+    onUpdateScenario(patch);
+  }
 
   const handlePick = (card: string) => {
     const lower = card.toLowerCase();
@@ -105,7 +126,42 @@ export default function ScenarioEditor({
         </div>
       </div>
 
-      <div className="form-grid">
+      <div className="settings-grid scenario-topology-controls">
+        <label>
+          桌型
+          <select
+            aria-label="桌型"
+            value={scenario.tableSize}
+            onChange={(event) => onTableSizeChange?.(Number(event.target.value))}
+          >
+            {Array.from({ length: 7 }, (_, index) => index + 2).map((tableSize) => (
+              <option key={tableSize} value={tableSize}>{tableSize}-max</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          按钮位
+          <select
+            aria-label="按钮位"
+            value={scenario.buttonSeat}
+            onChange={(event) => onButtonSeatChange?.(Number(event.target.value))}
+          >
+            {scenario.seats.map((seat) => <option key={seat.seatId} value={seat.seatId}>Seat {seat.seatId}</option>)}
+          </select>
+        </label>
+        <label>
+          Hero 座位
+          <select
+            aria-label="Hero 座位"
+            value={scenario.heroSeat}
+            onChange={(event) => onHeroSeatChange?.(Number(event.target.value))}
+          >
+            {scenario.seats.map((seat) => <option key={seat.seatId} value={seat.seatId}>Seat {seat.seatId}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {isHeadsUp && <div className="form-grid">
         <label>
           Hero 手牌
           <span className="card-slot">
@@ -155,7 +211,7 @@ export default function ScenarioEditor({
             </span>
           </label>
         )}
-      </div>
+      </div>}
       {isHeadsUp && (
         <div className="review-mode">
           <label className="hero-only-toggle">
@@ -231,6 +287,48 @@ export default function ScenarioEditor({
           </label>
         )}
       </div>
+      {!isHeadsUp && (
+        <div className="seat-editor-grid" aria-label="多座位编辑器">
+          {scenario.seats.map((seat) => {
+            const cards = getKnownCardsForSeat(scenario, seat.seatId);
+            return (
+              <article className="seat-editor" key={seat.seatId}>
+                <div className="seat-editor__heading">
+                  <strong>Seat {seat.seatId}</strong>
+                  {seat.seatId === scenario.heroSeat && <span className="source-tag">HERO</span>}
+                </div>
+                <label>
+                  位置
+                  <output aria-label={`Seat ${seat.seatId} 位置`}>{positionLabel(seat.position)}</output>
+                </label>
+                <label>
+                  起始筹码
+                  <input
+                    aria-label={`Seat ${seat.seatId} 起始筹码`}
+                    type="number"
+                    min="1"
+                    value={seat.startingStack}
+                    onChange={(event) => onUpdateScenario({
+                      seats: scenario.seats.map((candidate) => candidate.seatId === seat.seatId
+                        ? { ...candidate, startingStack: Number(event.target.value) || 1 }
+                        : candidate),
+                    })}
+                  />
+                </label>
+                <label>
+                  手牌
+                  <input
+                    aria-label={`Seat ${seat.seatId} 手牌`}
+                    value={cards.join(" ")}
+                    placeholder="未知"
+                    onChange={(event) => updateKnownSeatCards(seat.seatId, event.target.value)}
+                  />
+                </label>
+              </article>
+            );
+          })}
+        </div>
+      )}
       <div className="card-inputs">
         {boardInput.map((card, index) => (
           <span key={index} className="card-slot">

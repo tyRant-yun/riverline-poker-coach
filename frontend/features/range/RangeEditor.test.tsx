@@ -4,13 +4,17 @@ import RangeEditor from "./RangeEditor";
 import type { DefaultRanges, SeatSpec } from "../../types/scenario";
 import type { RangeBeliefView } from "../../types/rangeBelief";
 
-function renderEditor(overrides: { matrix?: Record<string, string>; belief?: RangeBeliefView | null; beliefLoading?: boolean; beliefStale?: boolean; mode?: "prior" | "current" | "delta"; beliefSeatId?: number; beliefSeats?: SeatSpec[] } = {}) {
+function renderEditor(overrides: { matrix?: Record<string, string>; belief?: RangeBeliefView | null; beliefLoading?: boolean; beliefStale?: boolean; mode?: "prior" | "current" | "delta"; beliefSeatId?: number; beliefSeats?: SeatSpec[]; rangeSeatId?: number; rangeSeats?: SeatSpec[]; isHeadsUp?: boolean } = {}) {
   const onCycleCell = vi.fn();
   const onBeliefModeChange = vi.fn();
   const onBeliefSeatChange = vi.fn();
+  const onRangeSeatChange = vi.fn();
   const utils = render(
     <RangeEditor
       rangeSide="villainRange"
+      rangeSeatId={overrides.rangeSeatId}
+      rangeSeats={overrides.rangeSeats}
+      isHeadsUp={overrides.isHeadsUp}
       rangeText=""
       defaultRanges={{} as DefaultRanges}
       rangeMatrix={overrides.matrix ?? {}}
@@ -23,6 +27,7 @@ function renderEditor(overrides: { matrix?: Record<string, string>; belief?: Ran
       beliefSeatId={overrides.beliefSeatId}
       beliefSeats={overrides.beliefSeats}
       onRangeSideChange={vi.fn()}
+      onRangeSeatChange={onRangeSeatChange}
       onRangeTextChange={vi.fn()}
       onApplyDefault={vi.fn()}
       onParse={vi.fn()}
@@ -31,7 +36,7 @@ function renderEditor(overrides: { matrix?: Record<string, string>; belief?: Ran
       onBeliefSeatChange={onBeliefSeatChange}
     />,
   );
-  return { ...utils, onCycleCell, onBeliefModeChange, onBeliefSeatChange };
+  return { ...utils, onCycleCell, onBeliefModeChange, onBeliefSeatChange, onRangeSeatChange };
 }
 
 const availableBelief: RangeBeliefView = {
@@ -113,6 +118,22 @@ describe("RangeEditor matrix", () => {
   it("labels the editor as the Prior range", () => {
     renderEditor();
     expect(screen.getByRole("heading", { name: /起始范围（Prior）/ })).toBeInTheDocument();
+  });
+
+  it("edits a multi-seat range by continuous seat id instead of HU aliases", () => {
+    const { onRangeSeatChange } = renderEditor({
+      isHeadsUp: false,
+      rangeSeatId: 5,
+      rangeSeats: [
+        { seatId: 0, startingStack: 10_000, position: "button" },
+        { seatId: 5, startingStack: 10_000, position: "utg" },
+      ],
+    });
+
+    expect(screen.getByRole("heading", { name: "Seat 5 起始范围（Prior）" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("范围玩家"), { target: { value: "0" } });
+    expect(onRangeSeatChange).toHaveBeenCalledWith(0);
+    expect(screen.queryByLabelText("范围侧")).not.toBeInTheDocument();
   });
 });
 

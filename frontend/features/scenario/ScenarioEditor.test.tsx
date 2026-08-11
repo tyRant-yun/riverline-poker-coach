@@ -150,4 +150,15 @@ describe("ScenarioEditor seat-based stacks", () => {
     expect(screen.queryByLabelText("Villain 起始筹码")).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/复盘模式/)).not.toBeInTheDocument();
   });
+
+  it("exposes derived table controls and a compact editor for every multiway seat", () => {
+    renderEditor(eightMax);
+
+    expect(screen.getByRole("combobox", { name: "桌型" })).toHaveValue("8");
+    expect(screen.getByRole("combobox", { name: "按钮位" })).toHaveValue("4");
+    expect(screen.getByRole("combobox", { name: "Hero 座位" })).toHaveValue("5");
+    expect(screen.getByLabelText("Seat 7 位置")).toHaveTextContent("CO");
+    expect(screen.getByLabelText("Seat 7 起始筹码")).toHaveValue(10000);
+    expect(screen.getByLabelText("Seat 7 手牌")).toBeInTheDocument();
+  });
 });

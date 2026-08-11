@@ -416,6 +416,11 @@ select { width: 100%; }
 /* Cards stack single-column (roomy card fields); numeric settings stay 2-col. */
 .form-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+.scenario-topology-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.seat-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.seat-editor { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface-raised); }
+.seat-editor__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.seat-editor output { display: block; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 7px; color: var(--color-text); background: var(--color-surface); }
 .card-inputs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
 .card-inputs input { text-align: center; min-width: 0; }
 /* Board cells are narrow (5 per rail column): stack the pick button under
@@ -865,7 +870,7 @@ footer { color: var(--color-text-muted); font-size: 11px; padding: 20px 3px 0; }
   .shell { padding: 14px 12px 30px; }
   .app-header { padding: 8px 12px; gap: 10px; flex-wrap: wrap; }
   .app-nav { order: 3; flex-basis: 100%; }
-  .form-grid, .settings-grid, .result-columns, .teaching-columns { grid-template-columns: 1fr; display: grid; }
+  .form-grid, .settings-grid, .seat-editor-grid, .result-columns, .teaching-columns { grid-template-columns: 1fr; display: grid; }
   .card-inputs { grid-template-columns: repeat(3, 1fr); }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .evidence-row { grid-template-columns: 1fr 1fr; }
