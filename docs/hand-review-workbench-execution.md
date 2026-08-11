@@ -98,9 +98,9 @@ NEXT: <解锁的下一任务或建议>
 | FE-04 | Terra `019ff035-877e-7180-bbb5-45e4fe321b86` | integrated | `7b9be05` | 已进入 main | 解锁 FE-05 |
 | BE-03 | Terra `019ff044-49d7-75b0-a202-a2ff52a71590` | integrated | `795d6dd` → `c19ab73` | 已进入 main | 解锁 BE-04/FE-05 |
 | FE-API | Luna `019ff044-49d5-7e02-93fe-a880682e4202` | integrated | `5d3d220` → `e7d67a5` | 已进入 main | FE-06 显式调用 adapter 后接入页面 |
-| BE-04 | Terra `019ff04f-1de8-7b40-abdd-6fb65703305d` | active | - | 独立 worktree | 完成时跨任务回调 |
-| FE-05 | Luna `019ff04f-1de0-7580-8097-51465fccee6f` | active | - | 独立 worktree | 完成时跨任务回调 |
-| FE-06 | 未创建 | blocked_by_dependency | - | - | 等 BE-04 与 FE-05 集成 |
+| BE-04 | Terra `019ff04f-1de8-7b40-abdd-6fb65703305d` | integrated | `8e8d053` → `6fbf670` | 已进入 main | FE-06 消费教学契约 |
+| FE-05 | Luna `019ff04f-1de0-7580-8097-51465fccee6f` | integrated | `78ad8f3` → `3a99609` | 已进入 main | FE-06 投影选中节点 assessment |
+| FE-06 | Terra `019ff05a-827f-7a41-b26f-09e9dbe59324` | active | - | 独立 worktree | 完成时跨任务回调 |
 | QA/DOC | 未创建 | blocked_by_dependency | - | - | 功能集成后创建 |
 
 ## 5. 最近批次验收
@@ -129,10 +129,19 @@ Batch 3A（2026-08-11）：通过。
 - Next.js：production build 通过；
 - FE HandReview API 与 grounded SolverAssessment 已进入 main。
 
+Batch 3B（2026-08-11）：通过。
+
+- Backend：339 passed、8 skipped；
+- Python `compileall` 通过；
+- Frontend：26 files、138 passed；
+- TypeScript：`tsc --noEmit` 通过；
+- Next.js：production build 通过；
+- 整手教学与 Solver 背离展示已进入 main。
+
 ## 6. 当前进度判断
 
 - Riverline 既有规则、Range Belief 与 Solver 底座：可复用；
-- Hand Review Workbench 专项目标：约 72%；
+- Hand Review Workbench 专项目标：约 82%；
 - Batch 1：100%，已集成并通过统一契约门；
 - Batch 2：100%，已集成并通过统一契约门；
-- 主要剩余工作：整手教学、背离/复盘 UI 和完整 E2E。
+- 主要剩余工作：页面复盘闭环、完整 E2E、文档收口。
