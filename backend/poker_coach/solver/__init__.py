@@ -6,10 +6,23 @@ isolated sidecar container; nothing here imports or ships solver-engine
 code. The contracts in ``types`` are the only boundary crossing it.
 """
 
-from .adapter import build_spot, parse_result, postflop_seat_pair, range_to_string, spot_to_config_json
+from .adapter import (
+    build_spot,
+    parse_result,
+    postflop_seat_pair,
+    range_to_string,
+    scenario_at_policy_sequence,
+    spot_to_config_json,
+)
 from .analyzer import HandAnalysis, NodeAnalysis, SolverAnalysis, analyze, classify_hand
 from .artifact import hero_node_of, solve_result_to_artifact
-from .cache import SolveCache, solve_hash, solve_with_cache
+from .cache import (
+    SolveCache,
+    scenario_fingerprint,
+    solve_hash,
+    solve_with_cache,
+    solver_spot_fingerprint,
+)
 from .client import SidecarClient, SolverCancelled
 from .evidence import solver_evidence_items
 from .jobs import SolverJobQueue, SolverQueueUnavailable
@@ -19,6 +32,7 @@ from .types import (
     SolverHand,
     SolverNode,
     SolverSpot,
+    SolverJobProvenance,
     SolverUnsupportedError,
     SolveResult,
 )
@@ -30,6 +44,7 @@ __all__ = [
     "postflop_seat_pair",
     "range_to_string",
     "spot_to_config_json",
+    "scenario_at_policy_sequence",
     "analyze",
     "classify_hand",
     "SolverAnalysis",
@@ -42,6 +57,8 @@ __all__ = [
     "SolverCancelled",
     "SolveCache",
     "solve_hash",
+    "scenario_fingerprint",
+    "solver_spot_fingerprint",
     "solve_with_cache",
     "SolverJobQueue",
     "SolverQueueUnavailable",
@@ -54,4 +71,5 @@ __all__ = [
     "SolverNode",
     "SolverHand",
     "SolverUnsupportedError",
+    "SolverJobProvenance",
 ]

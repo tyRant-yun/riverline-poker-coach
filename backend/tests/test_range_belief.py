@@ -28,6 +28,7 @@ from poker_coach.ranges import (
     FixturePolicyProvider,
     InvalidPolicyError,
     NoPolicyError,
+    PolicySequenceMismatchError,
     PolicyResult,
     PolicySource,
     SolverPolicyAdapter,
@@ -35,8 +36,10 @@ from poker_coach.ranges import (
     ZeroProbabilityActionError,
     aggregate_belief_to_matrix169,
     apply_dead_cards,
+    board_at_sequence,
     build_belief_view,
     build_range_trace,
+    dead_cards_for_belief,
     match_observed_action,
     snapshot_from_range,
     update_range_belief,
@@ -402,6 +405,52 @@ class TestDeadCards:
                 action_type="deal_flop",
             )
 
+    def test_target_seat_known_cards_are_not_dead_but_other_seat_cards_are(self):
+        scenario = make_scenario(
+            board=("2c",),
+            known_by_seat={0: ("As", "Ks"), 1: ("Qh", "Qd")},
+        )
+        dead = dead_cards_for_belief(scenario, 0, ("2c",))
+        assert set(dead) == {"2c", "Qh", "Qd"}
+
+        target_prior = snapshot_from_range(
+            prior_range({"AsKs": "1", "QhQd": "1", "7s6s": "1"}),
+            seat_id=0,
+            street=Street.FLOP,
+            after_sequence=3,
+            dead_cards=dead,
+        )
+        assert "AsKs" in target_prior.combos
+        assert "QhQd" not in target_prior.combos
+
+    def test_board_at_sequence_does_not_leak_future_cards(self):
+        scenario = make_scenario(
+            events=(
+                check_event(1, 0),
+                check_event(2, 1),
+                deal_event(3, Street.FLOP),
+                deal_event(4, Street.TURN),
+                deal_event(5, Street.RIVER),
+            ),
+            board=("As", "7d", "2c", "Jh", "9s"),
+            after_sequence=5,
+        )
+        assert board_at_sequence(scenario, 2) == ()
+        assert board_at_sequence(scenario, 3) == ("As", "7d", "2c")
+        assert board_at_sequence(scenario, 4) == ("As", "7d", "2c", "Jh")
+        assert board_at_sequence(scenario, 5) == ("As", "7d", "2c", "Jh", "9s")
+
+    def test_future_board_cards_remain_playable_in_flop_trace(self):
+        prior = prior_range({"Jh9s": "1", "KcQc": "1"})
+        scenario = make_scenario(
+            events=(check_event(1, 0), check_event(2, 1), deal_event(3, Street.FLOP)),
+            board=("As", "7d", "2c", "Jh", "9s"),
+            ranges={0: prior},
+            after_sequence=3,
+        )
+        trace = build_range_trace(scenario, 0, prior_range=prior)
+        assert "Jh9s" in trace.current.combos
+
 
 class TestFixtureProvider:
     def test_starting_hand_keys_expand_to_concrete_combos(self):
@@ -644,6 +693,43 @@ class TestAggregation:
         assert cell_key("5c4c") == "54s"
         assert cell_key("2d2c") == "22"
 
+    def test_union_keeps_completely_eliminated_prior_combo_in_delta(self):
+        prior = snapshot_from_range(
+            prior_range({"AsAh": "1", "JsJh": "1"}),
+            seat_id=0,
+            street=Street.FLOP,
+            after_sequence=0,
+        )
+        policy = PolicyResult(
+            source=PolicySource.FIXTURE,
+            actions=("Bet(100)",),
+            frequencies={
+                "AsAh": {"Bet(100)": Decimal("1")},
+                "JsJh": {"Bet(100)": Decimal("0")},
+            },
+            likelihood_only=True,
+        )
+        updated = update_range_belief(
+            prior,
+            bet_event(1, 0, 100),
+            policy,
+        )
+        matrix = aggregate_belief_to_matrix169(updated, prior=prior)
+        assert "JJ" in matrix
+        assert matrix["JJ"].prior_probability_mass > 0
+        assert matrix["JJ"].probability_mass == 0
+        assert matrix["JJ"].delta < 0
+        view = build_belief_view(
+            build_range_trace(
+                make_scenario(events=(bet_event(1, 0, 100),), ranges={0: prior_range({"AsAh": "1", "JsJh": "1"})}, after_sequence=1),
+                0,
+                prior_range=prior_range({"AsAh": "1", "JsJh": "1"}),
+                provider=FixturePolicyProvider({"bet": {"AsAh": {"bet": "1"}, "JsJh": {"bet": "0"}}}),
+            )
+        )
+        assert view.combos["JsJh"].prior_probability > 0
+        assert view.combos["JsJh"].probability == 0
+
 
 class TestView:
     def test_prior_current_delta_view(self):
@@ -746,6 +832,20 @@ class TestSolverAdapter:
         with pytest.raises(NoPolicyError):
             adapter.get_action_frequencies(make_scenario(), 2, 4, ())
 
+    def test_artifact_sequence_and_actor_seat_are_exactly_bound(self):
+        result = self._solver_result()
+        adapter = SolverPolicyAdapter(
+            result,
+            oop_seat=1,
+            ip_seat=0,
+            policy_sequence=5,
+            actor_seat=1,
+        )
+        with pytest.raises(PolicySequenceMismatchError, match="policy sequence"):
+            adapter.get_action_frequencies(make_scenario(), 1, 8, ("AsKs",))
+        with pytest.raises(NoPolicyError, match="actor seat"):
+            adapter.get_action_frequencies(make_scenario(), 0, 5, ("AsKs",))
+
     def test_strategy_frequency_validation_rejects_bad_sums(self):
         with pytest.raises(ValidationError, match="sum to"):
             PolicyResult(
@@ -758,6 +858,25 @@ class TestSolverAdapter:
 
 
 class TestOffTreeMatching:
+    def test_single_sized_action_is_exact_only_when_size_matches(self):
+        exact = match_observed_action(
+            bet_event(1, 0, 100),
+            ("Check", "Bet(100)"),
+            pot_before=300,
+            reference_pot=300,
+        )
+        off_tree = match_observed_action(
+            bet_event(1, 0, 160),
+            ("Check", "Bet(100)"),
+            pot_before=300,
+            reference_pot=300,
+        )
+        assert exact.status.value == "exact"
+        assert exact.off_tree is False
+        assert off_tree.status.value == "nearest_size"
+        assert off_tree.policy_action == "Bet(100)"
+        assert off_tree.off_tree is True
+
     def test_nearest_size_maps_and_flags_off_tree(self):
         match = match_observed_action(
             bet_event(1, 0, 120),

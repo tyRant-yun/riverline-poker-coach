@@ -596,10 +596,40 @@ class ScenarioSpec(DomainModel):
         all_known_cards.extend(self.board)
         if len(all_known_cards) != len(set(all_known_cards)):
             raise ValueError("hole cards and board cards cannot overlap")
-        known_cards = set(all_known_cards)
+        # Range validity is evaluated at the selected decision node. Future
+        # board cards in an imported full-board scenario are not dead yet,
+        # and a seat's own known cards are not blockers for that seat's
+        # strategic range belief.
+        board_size_by_deal = {
+            ActionType.DEAL_FLOP.value: 3,
+            ActionType.DEAL_TURN.value: 4,
+            ActionType.DEAL_RIVER.value: 5,
+        }
+        deals = [
+            event
+            for event in self.action_history
+            if event.sequence <= self.decision_point.after_sequence
+            and event.action_type.value in board_size_by_deal
+        ]
+        if deals:
+            visible_board_size = max(
+                board_size_by_deal[event.action_type.value] for event in deals
+            )
+        else:
+            visible_board_size = {
+                Street.PREFLOP: 0,
+                Street.FLOP: 3,
+                Street.TURN: 4,
+                Street.RIVER: 5,
+                Street.COMPLETE: 5,
+            }[self.decision_point.street]
+        visible_board = set(self.board[:visible_board_size])
         for seat_id, range_spec in ranges_by_seat.items():
+            other_known_cards = set(all_known_cards) - set(self.board)
+            other_known_cards -= set(known_by_seat.get(seat_id, ()))
+            blockers = visible_board | other_known_cards
             for combo in range_spec.combos:
-                if known_cards.intersection(combo.cards):
+                if blockers.intersection(combo.cards):
                     raise ValueError(
                         f"seat {seat_id} range combo contains a known card: {combo.cards}"
                     )

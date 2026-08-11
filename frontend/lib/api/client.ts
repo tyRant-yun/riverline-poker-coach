@@ -95,6 +95,7 @@ export const analysisApi = {
 
 export type BeliefPolicyPayload =
   | { source: "fixture"; frequencies: Record<string, Record<string, Record<string, string>>> }
+  | { source: "solver"; jobId: string }
   | { source: "solver"; result: NonNullable<SolveJob["result"]> }
   | { source: "manual" };
 
@@ -127,7 +128,7 @@ export const coachApi = {
 
 export const solverApi = {
   submit: (scenario: Scenario) =>
-    request<{ jobId: string; status: string; spot?: SolverSpotPayload | null }>(
+    request<SolveJob>(
       "/v1/solve/jobs",
       { scenario, maxIterations: 200 },
     ),

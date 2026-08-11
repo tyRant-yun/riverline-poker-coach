@@ -104,6 +104,7 @@ class PolicyResult(DomainModel):
     likelihood_only: bool = False
     node: str | None = None
     reference_pot: Annotated[int, Field(ge=0)] | None = None
+    confidence: str = "grounded"
 
     @model_validator(mode="after")
     def validate_frequencies(self) -> PolicyResult:
@@ -195,7 +196,7 @@ def match_observed_action(
             policy_action="",
             off_tree=False,
         )
-    if len(family) == 1:
+    if len(family) == 1 and family[0].size is None:
         return ActionMatch(
             status=ActionMatchStatus.EXACT,
             policy_action=family[0].label,
@@ -211,11 +212,21 @@ def match_observed_action(
     observed_size = _observed_size(observed, pot_before)
     if observed_size is None or reference_pot is None or reference_pot <= 0:
         # No consistent pot context: nearest chip amount (deterministic).
-        chosen = min(sized, key=lambda spec: (abs(spec.size - Decimal(observed.amount or 0)), spec.size))
+        observed_chips = Decimal(observed.amount or 0)
+        for spec in sorted(sized, key=lambda item: item.size):
+            if spec.size == observed_chips:
+                return ActionMatch(
+                    status=ActionMatchStatus.EXACT,
+                    policy_action=spec.label,
+                    observed_size=observed_chips,
+                    mapped_size=spec.size,
+                    off_tree=False,
+                )
+        chosen = min(sized, key=lambda spec: (abs(spec.size - observed_chips), spec.size))
         return ActionMatch(
             status=ActionMatchStatus.NEAREST_SIZE,
             policy_action=chosen.label,
-            observed_size=Decimal(observed.amount or 0),
+            observed_size=observed_chips,
             mapped_size=chosen.size,
             off_tree=True,
         )

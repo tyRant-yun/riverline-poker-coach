@@ -44,6 +44,23 @@ export function getKnownCardsForSeat(scenario: Scenario, seatId: number): string
   return [];
 }
 
+/**
+ * Public board plus known hole cards of every seat except the selected seat.
+ * Range belief is strategic for that seat, so its own known cards are not
+ * blockers unless a future hand-conditioned mode explicitly opts in.
+ */
+export function deadCardsForSeat(
+  scenario: Scenario,
+  seatId: number,
+  visibleBoard: string[] = scenario.board,
+): string[] {
+  const cards = [...visibleBoard];
+  for (const seat of scenario.seats) {
+    if (seat.seatId !== seatId) cards.push(...getKnownCardsForSeat(scenario, seat.seatId));
+  }
+  return [...new Set(cards)];
+}
+
 /** Range attached to a seat: seat-based source first, legacy fields last. */
 export function getRangeForSeat(
   scenario: Scenario,

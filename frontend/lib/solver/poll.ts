@@ -10,6 +10,8 @@ export type SolvePollPayload = {
   status: string;
   error?: string | null;
   executionMs?: number | null;
+  spot?: SolveJob["spot"];
+  provenance?: SolveJob["provenance"];
   result?: SolveJob["result"] | null;
 };
 
@@ -17,5 +19,10 @@ export function applySolvePoll(
   previous: SolveJob | null,
   payload: SolvePollPayload,
 ): SolveJob {
-  return { ...(previous ?? { jobId: payload.jobId, status: payload.status }), ...payload };
+  const next = { ...(previous ?? { jobId: payload.jobId, status: payload.status }), ...payload };
+  if (payload.spot === undefined && previous?.spot !== undefined) next.spot = previous.spot;
+  if (payload.provenance === undefined && previous?.provenance !== undefined) {
+    next.provenance = previous.provenance;
+  }
+  return next;
 }

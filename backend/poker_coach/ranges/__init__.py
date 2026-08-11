@@ -11,6 +11,7 @@ from .aggregation import aggregate_belief_to_matrix169
 from .belief import (
     InvalidPolicyError,
     NoPolicyError,
+    PolicySequenceMismatchError,
     NoPriorRangeError,
     PolicySource,
     RangeBeliefCombo,
@@ -35,7 +36,7 @@ from .policy import (
 )
 from .providers.fixture import FixturePolicyProvider
 from .providers.solver import SolverPolicyAdapter
-from .trace import RangeBeliefTrace, build_range_trace
+from .trace import RangeBeliefTrace, board_at_sequence, build_range_trace, dead_cards_for_belief
 from .update import apply_dead_cards, snapshot_from_range, update_range_belief
 from .views import RangeBeliefComboView, RangeBeliefView, build_belief_view
 
@@ -46,6 +47,7 @@ __all__ = [
     "FixturePolicyProvider",
     "InvalidPolicyError",
     "NoPolicyError",
+    "PolicySequenceMismatchError",
     "NoPriorRangeError",
     "PolicyActionSpec",
     "PolicyResult",
@@ -64,6 +66,8 @@ __all__ = [
     "apply_dead_cards",
     "build_belief_view",
     "build_range_trace",
+    "board_at_sequence",
+    "dead_cards_for_belief",
     "cards_from_key",
     "combo_key",
     "match_observed_action",

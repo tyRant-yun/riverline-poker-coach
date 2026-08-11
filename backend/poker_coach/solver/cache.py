@@ -7,7 +7,19 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
+from poker_coach.domain.models import ScenarioSpec
+
 from .types import SolverSpot, SolveResult
+
+
+def scenario_fingerprint(scenario: ScenarioSpec) -> str:
+    """Canonical fingerprint for a ScenarioSpec at one exact decision node."""
+    return hashlib.sha256(scenario.to_json().encode("utf-8")).hexdigest()
+
+
+def solver_spot_fingerprint(spot: SolverSpot) -> str:
+    """Canonical fingerprint for the actual sidecar input."""
+    return solve_hash(spot)
 
 
 def solve_hash(spot: SolverSpot) -> str:

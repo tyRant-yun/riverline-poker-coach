@@ -142,6 +142,20 @@ export type SolveJob = {
   executionMs?: number | null;
   /** Present on the submit response only; the spot the job was built from. */
   spot?: SolverSpotPayload | null;
+  provenance?: {
+    scenarioFingerprint: string;
+    spotFingerprint: string;
+    decisionSequence: number;
+    policySequence: number;
+    actorSeat: number;
+    activeSeats: number[];
+    street: string;
+  } | null;
+  scenarioFingerprint?: string;
+  spotFingerprint?: string;
+  policySequence?: number;
+  actorSeat?: number;
+  activeSeats?: number[];
   result?: {
     metadata?: {
       solver: string;

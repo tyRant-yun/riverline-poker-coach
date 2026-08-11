@@ -42,7 +42,7 @@ import { notationFromMatrix, notationFromMatrixExplicit } from "../lib/poker/mat
 import { canSubmitSolve as solveGate, solveGateReasons } from "../lib/poker/solve";
 import type { DisplayUnit } from "../lib/poker/format";
 import { buildSeatViewModels } from "../lib/poker/table";
-import { heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
+import { deadCardsForSeat, heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
 import { applySolvePoll } from "../lib/solver/poll";
 
 import AppShell, { type WorkspaceView } from "../components/AppShell";
@@ -184,6 +184,13 @@ export default function Home() {
     setMessage("场景已修改，需要重新校验或分析。");
   }
 
+  function invalidateDerivedAnalysisState() {
+    solvePollToken.current += 1;
+    setSolveJob(null);
+    setRangeBelief(null);
+    setRangeBeliefLoading(false);
+  }
+
   function commitScenario(next: Scenario) {
     setPastScenarios((past) => [...past, scenario]);
     setFutureScenarios([]);
@@ -193,7 +200,7 @@ export default function Home() {
     setTeaching(null);
     setPractice(null);
     setPracticeOutcome(null);
-    setRangeBelief(null);
+    invalidateDerivedAnalysisState();
   }
 
   function undo() {
@@ -207,6 +214,7 @@ export default function Home() {
     setTeaching(null);
     setPractice(null);
     setPracticeOutcome(null);
+    invalidateDerivedAnalysisState();
   }
 
   function redo() {
@@ -220,6 +228,7 @@ export default function Home() {
     setTeaching(null);
     setPractice(null);
     setPracticeOutcome(null);
+    invalidateDerivedAnalysisState();
   }
 
   async function resetScenario() {
@@ -269,7 +278,7 @@ export default function Home() {
     // The belief view follows the selected seat; refetch when a solver
     // result exists, otherwise clear (prior-only / unavailable).
     if (solveJob?.result) {
-      void fetchRangeBelief(side);
+      void fetchRangeBelief(side, solveJob);
     } else {
       setRangeBelief(null);
     }
@@ -281,14 +290,17 @@ export default function Home() {
     return other?.seatId ?? null;
   }
 
-  async function fetchRangeBelief(side: RangeSide = rangeSide) {
+  async function fetchRangeBelief(
+    side: RangeSide = rangeSide,
+    job: SolveJob | null = solveJob,
+  ) {
     const seatId = beliefSeatForSide(side);
     if (seatId == null) {
       setRangeBelief(null);
       return;
     }
-    const policy = solveJob?.result
-      ? { source: "solver" as const, result: solveJob.result }
+    const policy = job?.status === "solved" && job.result
+      ? { source: "solver" as const, jobId: job.jobId }
       : undefined;
     setRangeBeliefLoading(true);
     try {
@@ -314,6 +326,7 @@ export default function Home() {
   }
 
   async function loadSaved(record: SavedScenario) {
+    invalidateDerivedAnalysisState();
     setPastScenarios([]);
     setFutureScenarios([]);
     setScenario(record.scenario);
@@ -397,6 +410,7 @@ export default function Home() {
 
   async function reanalyzeSaved(record: SavedScenario) {
     setBusy(true);
+    invalidateDerivedAnalysisState();
     try {
       const payload = await scenariosApi.analyze(record.scenarioId);
       setScenario(record.scenario);
@@ -417,6 +431,7 @@ export default function Home() {
   }
 
   function loadRevision(revision: ScenarioRevision) {
+    invalidateDerivedAnalysisState();
     setPastScenarios([]);
     setFutureScenarios([]);
     setScenario(revision.scenario);
@@ -436,6 +451,7 @@ export default function Home() {
 
   async function reanalyzeRevision(revision: ScenarioRevision, title: string) {
     setBusy(true);
+    invalidateDerivedAnalysisState();
     try {
       const payload = await scenariosApi.analyzeRevision(revision.scenarioId, revision.revisionNo);
       setScenario(revision.scenario);
@@ -486,6 +502,7 @@ export default function Home() {
         tags: ["imported"],
       });
       const record = payload.scenario as SavedScenario;
+      invalidateDerivedAnalysisState();
       setPastScenarios([]);
       setFutureScenarios([]);
       setScenario(record.scenario);
@@ -638,9 +655,10 @@ export default function Home() {
 
   async function normalizeRange(notation = rangeText, side = rangeSide) {
     try {
-      const deadCards = side === "heroRange"
-        ? [...heroCards(scenario), ...(scenario.villainHoleCards ?? []), ...scenario.board]
-        : [...heroCards(scenario), ...scenario.board];
+      const targetSeat = beliefSeatForSide(side);
+      const deadCards = targetSeat == null
+        ? [...scenario.board]
+        : deadCardsForSeat(scenario, targetSeat);
       const payload = await rangesApi.parse(notation, deadCards);
       setRangeMatrix(payload.range.matrix169);
       setRangeSummary(payload.summary);
@@ -692,11 +710,7 @@ export default function Home() {
     setBusy(true);
     try {
       const payload = await solverApi.submit(scenario);
-      setSolveJob({
-        jobId: payload.jobId,
-        status: payload.status,
-        spot: payload.spot ?? null,
-      });
+      setSolveJob(payload);
       void pollSolveJob(payload.jobId);
       setMessage("求解作业已提交（独立 Solver 容器执行，通常 1–3 分钟）。");
     } catch (error) {
@@ -731,15 +745,12 @@ export default function Home() {
         // Merge onto the previous job instead of replacing it: the submit
         // response's spot (assumptions -> bunching_ignored) must survive
         // every poll cycle.
-        setSolveJob((previous) =>
-          applySolvePoll(previous, {
-            jobId,
-            status: payload.status,
-            error: payload.error,
-            executionMs: payload.executionMs,
-            result: payload.result,
-          }),
-        );
+        const pollPayload = { ...payload, jobId };
+        const freshJob = applySolvePoll(solveJob, pollPayload);
+        // Use a functional merge for React state (the poll closure may have
+        // captured the initial null job), but use the freshly returned API
+        // payload for the belief request below.
+        setSolveJob((previous) => applySolvePoll(previous, pollPayload));
         if (["solved", "failed", "cancelled"].includes(payload.status)) {
           setMessage(
             payload.status === "solved"
@@ -747,7 +758,7 @@ export default function Home() {
               : `求解${payload.status}${payload.error ? `：${payload.error}` : ""}`,
           );
           if (payload.status === "solved") {
-            void fetchRangeBelief();
+            void fetchRangeBelief(rangeSide, freshJob);
           }
           return;
         }

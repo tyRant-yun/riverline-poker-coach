@@ -87,6 +87,11 @@ class NoPolicyError(RangeBeliefError):
         super().__init__("no_policy", message)
 
 
+class PolicySequenceMismatchError(RangeBeliefError):
+    def __init__(self, message: str):
+        super().__init__("policy_sequence_mismatch", message)
+
+
 class UnsupportedActionError(RangeBeliefError):
     def __init__(self, message: str):
         super().__init__("unsupported_action", message)

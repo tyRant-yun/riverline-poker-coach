@@ -1,7 +1,7 @@
 # PROJECT_STATE
 
 > Riverline 德州扑克 AI 教练（poker-coach-web）项目状态快照。
-> 更新日期：2026-08-10。本文件与 AGENT.MD 同级，供任何会话快速恢复上下文。
+> 更新日期：2026-08-11。本文件与 AGENT.MD 同级，供任何会话快速恢复上下文。
 
 ## 1. 项目概览
 
@@ -25,6 +25,7 @@
 | UI-P1 | Hand Lab 前端精修（不推翻三栏）：BB 金额层+单位切换（默认 BB）、board 未发位=弱 empty slot（非 card-back）、seat/action 层级（position 优先+HERO pill+actor ring、call/raise 主蓝）、ScenarioEditor cards 单列+复盘两行+选牌按钮堆叠、History 降密度（title/rev+次级操作）、Range matrix weight 强度+hover+tooltip、Analyze 按钮四级分级+honest 文案、panel 分级、solver disabled 原因 ✓/✗、polling 保留 spot、shell 撑满 1480 宽视口、左栏 min-content 溢出修复（rail 不再压到桌子） | 6903fe8 … d346959 |
 | ReviewFix | 复盘模式/任意牌局**打到结束（决策点 1 活玩家）**不再 422：`BasicMetrics.active_player_count` ge=2→ge=1（equity 对单人局不计算；ge=2 仅限 equity 结果模型）；完成牌局 analyze/teaching 正常降级返回 200 | 32073a9 |
 | RangeBelief | **Range Belief Engine V1**：combo 级行动条件 Bayesian 更新（newReach=oldReach×P(action\|combo)）、PolicyProvider 抽象（solver/fixture/manual，支持有序 provider 链）、snapshot trace（仅自己行动/deal/prior 生成）、169 派生聚合（质量守恒）、Prior/Current/Δ UI、`POST /v1/ranges/belief` + `POST /v1/ranges/trace`（seat 驱动） | 5fee982 … 7e09eaa |
+| RangeBelief V1.1 | **Grounding & Temporal Correctness**：solver job/artifact 绑定 scenario+spot fingerprint、exact policy sequence/actor seat/active seats；jobId 是 grounded 入口，裸 result 仅 `unverified`；target-seat-aware dead cards；`board_at_sequence` 防未来牌泄漏；prior/current union 保留完全淘汰 combo 的负 Delta；single-size off-tree sizing；frontend polling 使用新 artifact，scenario mutation/load/undo/redo 失效旧 solver/belief | local V1.1（2026-08-11） |
 | TeachingAgent | 外部 teaching agent 接入 compose（LLM env 插值）+ LLM 超时 60→180s（另一 worktree：fix/teaching-agent，已推送 origin） | 694faa2 |
 
 分支：`main`（单分支工作流）+ `fix/teaching-agent`（worktree：德州扑克-worktree）。
@@ -33,13 +34,13 @@
 
 | 门 | 结果 |
 |---|---|
-| Backend pytest（仓库根，unset PYTHONPATH） | **300 passed + 8 skipped**（live-PG 需 POKER_COACH_TEST_PG_URL 才跑；RangeBelief 新增 44 个） |
+| Backend pytest（仓库根，unset PYTHONPATH） | **310 passed + 8 skipped**（live-PG 需 POKER_COACH_TEST_PG_URL 才跑；RangeBelief V1.1 grounding/temporal 回归已覆盖） |
 | compileall / pip check | OK |
-| vitest（frontend） | **104/104**（19 文件，含 Prior/Current/Δ tabs、no-policy unavailable、delta 正负类、prior 编辑保留等回归） |
+| vitest（frontend） | **106/106**（18 文件，含 Prior/Current/Δ tabs、no-policy unavailable、deadCardsForSeat、fresh solver artifact 等回归） |
 | tsc --noEmit | 0 错误 |
 | next build | ✓ |
 | Playwright E2E | **6/6**（compose down 后本地 hermetic webServer 实测；范围标准化流程含在内） |
-| hermes verify --json | ok: True（build + test；start/readiness 依赖 compose）——本轮 RangeBelief 由 tsc/vitest/build/E2E 直接覆盖 |
+| hermes verify --json | 未重跑；本轮等价实测：compileall OK、py -3.13 pip check OK、tsc/vitest/build/E2E 全部通过 |
 
 ## 4. 关键架构约束（不可违背）
 
@@ -55,10 +56,13 @@
 - **169 Matrix 只是 View（RangeBelief）**：belief 底层状态是具体 two-card combo（canonical key 高位在前、镜像 solver 格式，如 `5c4c`/`2d2c`/`Ac4c`）；禁止把 169 cell 当推理状态。聚合必须质量守恒：`sum(matrix169.probabilityMass) ≈ sum(combo probabilities) ≈ 1`；suit-specific combo（AsKs vs AhKh）保留各自 reach/likelihood 后才聚合到同一 cell。
 - **reach 与 probability 分离（RangeBelief）**：`reach`=沿行动序列的未归一化质量，`probability`=归一化条件信念（sum≈1）。likelihood=0 → combo 直接从 belief 移除；全零必须报 `zero_probability_action`（禁止 uniform fallback）。
 - **无 grounded policy 不伪造（RangeBelief）**：no_policy / unsupported_action / zero_probability_action 显式降级；翻前自身动作无 policy 时链条诚实停止（V2 preflop 数据集前，可用 fixture/manual policy 覆盖）；`available=false` 响应只给 reason + prior，不给假 current。
+- **Solver provenance（RangeBelief V1.1）**：生产 grounded policy 必须通过 persisted `jobId`；job 保存 `scenarioFingerprint`、`spotFingerprint`、`policySequence`、`actorSeat`、`activeSeats`、`street`，请求会重建 exact node spot 并拒绝 `solver_artifact_mismatch`。一个 artifact 只覆盖其显式 policy sequence；裸 `source=solver,result` 仅兼容读取并标记 `confidence=unverified`，不得称为 grounded。
 - **Policy 抽象（RangeBelief）**：PolicySource 枚举（solver/fixture/preflop_policy/population/heuristic/manual/unknown）；`ActionPolicyProvider.get_action_frequencies(scenario, seatId, sequence, combos)`；API `policy` 支持**有序 provider 链**（如 fixture 覆盖翻前 call + solver 覆盖翻后 bet）；solver 输出零重算——SolverPolicyAdapter 只做 `SolverNode.hands[].strategy → PolicyResult` 映射。
 - **Off-tree sizing（RangeBelief）**：显式 ActionMapping 解析 `Bet(250)/Raise(625)/AllIn(9750)/Check/Call/Fold`；off-tree 用 nearest-size（等距取小，确定性），`observedSize/mappedSize/offTree` 进 metadata 与 UI；禁止插值 strategy。
+- **Temporal/dead-card semantics（RangeBelief V1.1）**：belief dead cards = visible board at the requested sequence + known hole cards of other seats；target seat own known cards 不删除自己的 strategic range；full imported board 的未来牌只在对应 deal/endpoint 可见。domain range validation 同样按 selected decision node 处理。
+- **Delta union（RangeBelief V1.1）**：169 cell 与 combo view 遍历 `union(prior,current)`；current 完全淘汰的 combo 以 probability/reach=0 保留，`comboCount` 表示 union 中 concrete combo 数。
 - **Belief seat 驱动（RangeBelief）**：domain/API 全部 seatId 驱动；禁止新增 heroBelief/villainBelief 字段（HU 前端可继续叫 Hero/Villain）。
-- **Domain 约束**：RangeSpec 具体 combos 不得包含已知牌（hole+board）；action_history sequence 必须连续从 1 开始；decision_point.actor_seat 必须与 replay 一致。
+- **Domain 约束**：RangeSpec 具体 combos 不得包含 selected decision node 上的 visible board 或其他 seats 的 known hole cards；target seat own cards 与 future board cards 不作为该 seat belief 的 blockers；action_history sequence 必须连续从 1 开始；decision_point.actor_seat 必须与 replay 一致。
 
 ## 5. PokerKit 地面真值（8B 探针实测）
 
@@ -90,21 +94,28 @@ Range Belief API 速查：
 ```bash
 # 当前 belief（含 prior/current/delta + matrix169）；policy 可缺省（prior-only）
 curl -X POST http://127.0.0.1:8000/v1/ranges/belief -H 'Content-Type: application/json' \
-  -d '{"scenario": {...}, "seatId": 6, "policy": {"source": "solver", "result": {...}}}'
+  -d '{"scenario": {...}, "seatId": 6, "policy": {"source": "solver", "jobId": "..."}}'
 # 完整 snapshot 链
 curl -X POST http://127.0.0.1:8000/v1/ranges/trace -d '{"scenario": {...}, "seatId": 6}'
-# policy 支持有序链：[{source: fixture, frequencies}, {source: solver, result}]
+# policy 支持有序链：[{source: fixture, frequencies}, {source: solver, jobId}]
 ```
 
 ## 7. 已知边界
 
 - 复盘/空手牌场景：equity 不可用是**有意**的（hero 或 villain 手牌缺失即不计算）；牌局打到结束（决策点 1 活玩家）同样合法降级——`BasicMetrics.active_player_count` 允许 1，equity 不计算（`ge=2` 仅限 equity 结果模型）
 - 求解器：仅翻后（flop+）且决策点恰好 2 活玩家；bunching 忽略并记录为近似（`assumptions` 字段）
-- **RangeBelief V1**：无 grounded preflop frequency 数据集（翻前自身动作会诚实阻断 belief 链，除非用户提供 fixture/manual policy）；无 population/player-specific 模型；solver policy 仅覆盖当前决策点节点（单节点 dump）；off-tree 用 nearest-size（等距取小）非插值；前端 belief 跟随 Hero/Villain 选择（seat 映射），暂无独立 seat 下拉
+- **RangeBelief V1/V1.1**：无 grounded preflop frequency 数据集（翻前自身动作会诚实阻断 belief 链，除非用户提供 fixture/manual policy）；无 population/player-specific 模型；无完整 solver tree traversal，solver artifact 仅覆盖显式绑定的一个 action sequence/node；off-tree 用 nearest-size（等距取小）非插值；前端 belief 跟随 Hero/Villain 选择（seat 映射），暂无独立 seat 下拉
 - 8-max 前端：前端 initialScenario 仍为 HU；多way 场景主要经 API 使用
 - docker 偶发：引擎恢复期端口绑定可能丢失（`docker port` 为空）→ `docker compose up -d --force-recreate api web`
 - E2E hermetic：playwright webServer env 已清 PYTHONPATH/PYTHONHOME/DB/Redis URL/LLM key，不依赖外部服务
 - live-PG 测试：conftest 防止 .env 激活；连接 5s 超时快速失败
+
+### 本轮明确未完成（后续阶段）
+
+- 无 grounded preflop policy dataset；PreflopPolicy V2 / 8-max 数据集尚未开始。
+- 无 population 或 player-specific model，亦未引入 ML、Deep CFR。
+- 无完整 solver tree traversal / historical inference；solver policy 只可用于显式绑定的单一 action sequence。
+- 无 multiway solver policy；现有 solver 仍仅支持翻后恰好两名 active players。
 
 ## 8. 服务当前状态
 

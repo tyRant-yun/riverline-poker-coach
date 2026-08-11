@@ -79,4 +79,14 @@ describe("applySolvePoll", () => {
     const next = applySolvePoll(null, { jobId: "j3", status: "queued" });
     expect(next).toEqual({ jobId: "j3", status: "queued", spot: undefined });
   });
+
+  it("keeps a newly solved result usable even when the initial closure had no job", () => {
+    const next = applySolvePoll(null, {
+      jobId: "j4",
+      status: "solved",
+      result: RESULT,
+    });
+    expect(next.jobId).toBe("j4");
+    expect(next.result).toBe(RESULT);
+  });
 });

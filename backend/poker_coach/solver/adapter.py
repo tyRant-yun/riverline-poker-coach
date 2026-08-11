@@ -17,6 +17,7 @@ from typing import Any
 
 from poker_coach.domain.models import (
     Card,
+    DecisionPoint,
     RangeCombo,
     RangeSpec,
     ScenarioSpec,
@@ -162,6 +163,42 @@ def build_spot(
         max_iterations=max_iterations,
         target_exploitability_frac=target_exploitability_frac,
         assumptions=assumptions,
+    )
+
+
+def scenario_at_policy_sequence(
+    scenario: ScenarioSpec, policy_sequence: int
+) -> ScenarioSpec:
+    """Return the exact node scenario immediately before ``policy_sequence``.
+
+    A solver job is normally submitted before its next observed action exists.
+    When a later trace includes that action, truncate the later scenario back
+    to the job's node before rebuilding the spot. This keeps the artifact
+    reusable for its one exact action without treating it as a full tree.
+    """
+    if policy_sequence < 1:
+        raise SolverUnsupportedError("policy sequence must be positive")
+    if policy_sequence == scenario.decision_point.after_sequence + 1:
+        return scenario
+    event = next(
+        (item for item in scenario.action_history if item.sequence == policy_sequence),
+        None,
+    )
+    if event is None:
+        raise SolverUnsupportedError(
+            f"scenario has no action event at policy sequence {policy_sequence}"
+        )
+    return scenario.model_copy(
+        update={
+            "action_history": tuple(
+                item for item in scenario.action_history if item.sequence < policy_sequence
+            ),
+            "decision_point": DecisionPoint(
+                street=event.street,
+                actor_seat=event.actor_seat,
+                after_sequence=policy_sequence - 1,
+            ),
+        }
     )
 
 

@@ -57,7 +57,12 @@ def aggregate_belief_to_matrix169(
     priorProbabilityMass / delta / multiplier against the initial prior.
     """
     acc: dict[str, dict[str, Decimal | int]] = {}
-    for combo_key, combo in snapshot.combos.items():
+    combo_keys = set(snapshot.combos)
+    if prior is not None:
+        combo_keys.update(prior.combos)
+    for combo_key in sorted(combo_keys):
+        combo = snapshot.combos.get(combo_key)
+        prior_combo = prior.combos.get(combo_key) if prior is not None else None
         cell = cell_key(combo_key)
         entry = acc.setdefault(
             cell,
@@ -68,12 +73,11 @@ def aggregate_belief_to_matrix169(
                 "count": 0,
             },
         )
-        entry["reach"] = Decimal(entry["reach"]) + combo.reach
-        entry["prob"] = Decimal(entry["prob"]) + combo.probability
-        if prior is not None:
-            prior_combo = prior.combos.get(combo_key)
-            if prior_combo is not None:
-                entry["prior_prob"] = Decimal(entry["prior_prob"]) + prior_combo.probability
+        if combo is not None:
+            entry["reach"] = Decimal(entry["reach"]) + combo.reach
+            entry["prob"] = Decimal(entry["prob"]) + combo.probability
+        if prior_combo is not None:
+            entry["prior_prob"] = Decimal(entry["prior_prob"]) + prior_combo.probability
         entry["count"] = int(entry["count"]) + 1
 
     cells: dict[str, RangeBeliefMatrixCell] = {}

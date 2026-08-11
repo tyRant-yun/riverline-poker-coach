@@ -5,9 +5,13 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+import fakeredis
 from fastapi.testclient import TestClient
 
-from poker_coach.api import create_app
+from poker_coach.api import AppConfig, create_app
+from poker_coach.persistence.sqlite_store import SQLiteStore
+from poker_coach.solver import SolverJobQueue
+from poker_coach.solver.adapter import parse_result
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -226,6 +230,81 @@ def test_belief_with_solver_result_at_preflop_is_invalid_policy():
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_policy"
+
+
+def test_belief_with_solver_job_requires_and_verifies_exact_node_provenance():
+    server = fakeredis.FakeServer()
+    queue = SolverJobQueue(client=fakeredis.FakeRedis(server=server))
+    app = create_app(
+        config=AppConfig(),
+        store=SQLiteStore(":memory:"),
+        solver_queue=queue,
+    )
+    client = TestClient(app)
+    try:
+        before_action = belief_scenario_payload()
+        before_action["board"] = ["Qs", "7d", "2c"]
+        before_action["rangesBySeat"]["1"]["matrix169"] = {"AKs": "1"}
+        submitted = client.post("/v1/solve/jobs", json={"scenario": before_action})
+        assert submitted.status_code == 202, submitted.text
+        job_id = submitted.json()["jobId"]
+        queue.finish(
+            job_id,
+            status="solved",
+            result=parse_result(solver_result_payload()),
+        )
+
+        after_action = belief_scenario_payload(actions=4)
+        after_action["board"] = ["Qs", "7d", "2c"]
+        after_action["rangesBySeat"]["1"]["matrix169"] = {"AKs": "1"}
+        response = client.post(
+            "/v1/ranges/belief",
+            json={
+                "scenario": after_action,
+                "seatId": 1,
+                "policy": [
+                    {"source": "fixture", "frequencies": {"call": {"AKs": {"call": "1"}}}},
+                    {"source": "solver", "jobId": job_id},
+                ],
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["confidence"] == "grounded"
+        assert response.json()["update"]["actionType"] == "bet"
+
+        wrong_scenario = {**after_action, "board": ["Qh", "8h", "3s"]}
+        mismatch = client.post(
+            "/v1/ranges/belief",
+            json={
+                "scenario": wrong_scenario,
+                "seatId": 1,
+                "policy": {"source": "solver", "jobId": job_id},
+            },
+        )
+        assert mismatch.status_code == 422
+        assert mismatch.json()["error"]["code"] == "solver_artifact_mismatch"
+    finally:
+        queue.close()
+
+
+def test_raw_solver_result_is_explicitly_unverified_compatibility_input():
+    client = TestClient(create_app())
+    scenario = belief_scenario_payload(actions=4)
+    scenario["rangesBySeat"]["1"]["matrix169"] = {"AKs": "1"}
+    scenario["board"] = ["Qs", "7d", "2c"]
+    response = client.post(
+        "/v1/ranges/belief",
+        json={
+            "scenario": scenario,
+            "seatId": 1,
+            "policy": [
+                {"source": "fixture", "frequencies": {"call": {"AKs": {"call": "1"}}}},
+                {"source": "solver", "result": solver_result_payload()},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["confidence"] == "unverified"
 
 
 def test_trace_returns_snapshot_chain():
