@@ -61,4 +61,15 @@ describe("DecisionReviewList", () => {
     expect(screen.getByText("可接受混频")).toBeInTheDocument();
     expect(screen.getByText(/实际行动频率 18%/)).toBeInTheDocument();
   });
+
+  it.each([
+    ["rare", "明显偏离常用策略", "source-tag"],
+    ["absent", "Solver 不采用该行动", "danger-button"],
+  ] as const)("maps %s to a non-positive status class", (status, label, expectedClass) => {
+    render(<DecisionReviewList reviews={[review({ solverAssessment: { status } })]} />);
+    const badge = screen.getByText(label);
+
+    expect(badge).toHaveClass(expectedClass);
+    expect(badge).not.toHaveClass("source-tag", "green");
+  });
 });

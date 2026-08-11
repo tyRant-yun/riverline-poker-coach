@@ -12,6 +12,14 @@ const solverStatusText: Record<ReviewSolverAssessment["status"], string> = {
   unscored: "未进行 Solver 评分",
 };
 
+const solverStatusClass: Record<ReviewSolverAssessment["status"], string> = {
+  primary: "source-tag green",
+  mixed: "status-pill",
+  rare: "source-tag",
+  absent: "danger-button",
+  unscored: "status-pill",
+};
+
 function frequencyText(value: number | string | null | undefined) {
   if (value === null || value === undefined) return null;
   if (typeof value === "number") return `${Math.round(value * 100)}%`;
@@ -63,7 +71,7 @@ export default function DecisionReviewCard({ review }: Props) {
 
       <div className="range-compact" aria-label="Solver 评估状态">
         <strong className="range-compact__name">Solver</strong>
-        <span className={solver.status === "unscored" ? "status-pill" : "source-tag green"}>
+        <span className={solverStatusClass[solver.status]}>
           {solverStatusText[solver.status]}
         </span>
       </div>
