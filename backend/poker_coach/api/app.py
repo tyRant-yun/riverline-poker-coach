@@ -42,6 +42,7 @@ from poker_coach.ranges import (
     build_belief_view,
     build_range_trace,
 )
+from poker_coach.review import build_hand_review
 from poker_coach.rules import PokerKitAdapter, ReplayError
 from poker_coach.solver import (
     SolverJobQueue,
@@ -627,6 +628,25 @@ def create_app(
         if idempotency_key:
             idempotency_cache[idempotency_key] = (scenario_hash, response_payload)
         return response_payload
+
+    @app.post("/v1/hand-reviews")
+    async def hand_review(request: Request):
+        """Return deterministic, node-scoped analysis for every player action."""
+
+        scenario = _scenario_from_request(await request.json())
+        _set_scenario_context(request, scenario)
+        started = time.perf_counter()
+        review = build_hand_review(
+            scenario,
+            adapter=adapter,
+            timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
+        )
+        return {
+            "schemaVersion": scenario.schema_version,
+            "requestId": request.state.request_id,
+            "executionMs": round((time.perf_counter() - started) * 1000, 3),
+            "review": review.to_dict(),
+        }
 
     @app.post("/v1/analysis/equity")
     async def equity_analysis(request: Request):
