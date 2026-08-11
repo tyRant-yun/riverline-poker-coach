@@ -299,9 +299,15 @@ export default function Home() {
       setRangeBelief(null);
       return;
     }
-    const policy = job?.status === "solved" && job.result
+    // The curated preflop provider is deliberately narrow and declines every
+    // non-RFI node; chaining it before the solver lets a trace ground an
+    // eligible 8-max open without guessing at the rest of the hand.
+    const solverPolicy = job?.status === "solved" && job.result
       ? { source: "solver" as const, jobId: job.jobId }
       : undefined;
+    const policy = solverPolicy
+      ? [{ source: "preflop_policy" as const }, solverPolicy]
+      : { source: "preflop_policy" as const };
     setRangeBeliefLoading(true);
     try {
       const payload = await rangesApi.belief({ scenario, seatId, policy });

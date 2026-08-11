@@ -35,6 +35,7 @@ from .policy import (
     resolve_action_match,
 )
 from .providers.fixture import FixturePolicyProvider
+from .providers.preflop import PREFLOP_POLICY_VERSION, PreflopPolicyProvider
 from .providers.solver import SolverPolicyAdapter
 from .trace import RangeBeliefTrace, board_at_sequence, build_range_trace, dead_cards_for_belief
 from .update import apply_dead_cards, snapshot_from_range, update_range_belief
@@ -52,6 +53,8 @@ __all__ = [
     "PolicyActionSpec",
     "PolicyResult",
     "PolicySource",
+    "PREFLOP_POLICY_VERSION",
+    "PreflopPolicyProvider",
     "RangeBeliefCombo",
     "RangeBeliefComboView",
     "RangeBeliefError",

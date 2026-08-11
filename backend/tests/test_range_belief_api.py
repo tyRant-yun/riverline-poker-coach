@@ -111,6 +111,46 @@ def fixture_policy_payload() -> dict:
     }
 
 
+def eight_max_rfi_payload() -> dict:
+    positions = ("button", "small_blind", "big_blind", "utg", "utg+1", "mp", "hj", "co")
+    return {
+        "schemaVersion": 2,
+        "gameVariant": "nlhe",
+        "tableSize": 8,
+        "smallBlind": 50,
+        "bigBlind": 100,
+        "buttonSeat": 0,
+        "heroSeat": 3,
+        "seats": [
+            {"seatId": seat_id, "startingStack": 10000, "position": position}
+            for seat_id, position in enumerate(positions)
+        ],
+        "board": [],
+        "actionHistory": [
+            {
+                "actionId": "utg-open",
+                "sequence": 1,
+                "street": "preflop",
+                "actorSeat": 3,
+                "actionType": "raise_to",
+                "amount": 250,
+                "amountType": "to",
+            }
+        ],
+        "decisionPoint": {"street": "preflop", "actorSeat": 4, "afterSequence": 1},
+        "assumptions": {},
+        "rangesBySeat": {
+            "3": {
+                "rangeId": "utg-prior",
+                "name": "UTG prior",
+                "version": "1",
+                "source": "user_defined",
+                "matrix169": {"AA": "1", "A5s": "1"},
+            }
+        },
+    }
+
+
 def solver_result_payload() -> dict:
     return {
         "metadata": {
@@ -185,6 +225,43 @@ def test_belief_without_policy_is_unavailable_and_honest():
     assert "no_policy" in payload["unavailableReason"]
     assert payload["combos"] is not None  # prior combos still visible
     assert payload["matrix169"] is not None
+
+
+def test_belief_with_builtin_8max_preflop_policy_is_curated_and_exact_node_only():
+    client = TestClient(create_app())
+    response = client.post(
+        "/v1/ranges/belief",
+        json={
+            "scenario": eight_max_rfi_payload(),
+            "seatId": 3,
+            "policy": {"source": "preflop_policy"},
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["source"] == "preflop_policy"
+    assert payload["confidence"] == "curated"
+    assert payload["update"]["actionLabel"] == "Raise(250)"
+    assert payload["update"]["node"].endswith("8max-rfi-utg-2.5bb")
+    # The view intentionally unions prior/current cells, so the folded A5s
+    # cell remains visible with zero current mass and a negative delta.
+    assert Decimal(payload["matrix169"]["AA"]["probabilityMass"]) == Decimal("1")
+    assert Decimal(payload["matrix169"]["A5s"]["probabilityMass"]) == Decimal("0")
+
+
+def test_builtin_preflop_policy_rejects_unrecognized_extra_fields():
+    client = TestClient(create_app())
+    response = client.post(
+        "/v1/ranges/belief",
+        json={
+            "scenario": eight_max_rfi_payload(),
+            "seatId": 3,
+            "policy": {"source": "preflop_policy", "version": "anything"},
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_policy"
 
 
 def test_belief_with_solver_result_policy():

@@ -36,6 +36,7 @@ from poker_coach.ranges import (
     FixturePolicyProvider,
     InvalidPolicyError,
     NoPriorRangeError,
+    PreflopPolicyProvider,
     RangeBeliefError,
     SolverPolicyAdapter,
     build_belief_view,
@@ -1015,7 +1016,9 @@ def create_app(
         """Combo-level action-conditioned belief for one seat.
 
         Payload: ``{scenario, seatId?, afterSequence?, policy?}``. ``policy``
-        may be ``{source: "fixture", frequencies}`` (deterministic override),
+          may be ``{source: "fixture", frequencies}`` (deterministic override),
+          ``{source: "preflop_policy"}`` (the built-in exact 8-max RFI
+          baseline),
         ``{source: "solver", jobId}`` (the preferred persisted artifact
         path). A raw ``result`` remains a compatibility path but is marked
         ``confidence=unverified``. When no grounded policy covers the node the response reports
@@ -1207,6 +1210,13 @@ def _belief_policy_provider(
             return FixturePolicyProvider(frequencies)
         except InvalidPolicyError as exc:
             raise ApiError("invalid_policy", str(exc)) from exc
+    if source == "preflop_policy":
+        if set(policy_payload) != {"source"}:
+            raise ApiError(
+                "invalid_policy",
+                "preflop_policy accepts no fields other than source",
+            )
+        return PreflopPolicyProvider()
     if source == "solver":
         job_id = policy_payload.get("jobId")
         raw_result = policy_payload.get("result")

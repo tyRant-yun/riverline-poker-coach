@@ -335,6 +335,8 @@ function beliefSourceLabel(belief: RangeBeliefView): string | null {
       return "solver-backed";
     case "fixture":
       return "fixture / manual policy";
+    case "preflop_policy":
+      return "8-max curated preflop policy";
     case "manual":
       return "manual prior";
     default:

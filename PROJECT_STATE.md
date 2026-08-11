@@ -26,21 +26,22 @@
 | ReviewFix | 复盘模式/任意牌局**打到结束（决策点 1 活玩家）**不再 422：`BasicMetrics.active_player_count` ge=2→ge=1（equity 对单人局不计算；ge=2 仅限 equity 结果模型）；完成牌局 analyze/teaching 正常降级返回 200 | 32073a9 |
 | RangeBelief | **Range Belief Engine V1**：combo 级行动条件 Bayesian 更新（newReach=oldReach×P(action\|combo)）、PolicyProvider 抽象（solver/fixture/manual，支持有序 provider 链）、snapshot trace（仅自己行动/deal/prior 生成）、169 派生聚合（质量守恒）、Prior/Current/Δ UI、`POST /v1/ranges/belief` + `POST /v1/ranges/trace`（seat 驱动） | 5fee982 … 7e09eaa |
 | RangeBelief V1.1 | **Grounding & Temporal Correctness**：solver job/artifact 绑定 scenario+spot fingerprint、exact policy sequence/actor seat/active seats；jobId 是 grounded 入口，裸 result 仅 `unverified`；target-seat-aware dead cards；`board_at_sequence` 防未来牌泄漏；prior/current union 保留完全淘汰 combo 的负 Delta；single-size off-tree sizing；frontend polling 使用新 artifact，scenario mutation/load/undo/redo 失效旧 solver/belief | local V1.1（2026-08-11） |
+| RangeBelief V2.0 | **8-max Preflop Policy（首个窄覆盖版本）**：内置、版本化的 `preflop_policy` provider；仅覆盖 8-max NLHE、全员 100BB、no-ante/no-rake、无前序入池、2.5BB RFI 的 UTG→SB 七个位置。以完整 combo×{Raise,Fold} 策略表重建该行动；节点外一律 `no_policy`，不近似映射。数据为 first-party curated baseline（`confidence=curated`），非 solver export | local V2.0（2026-08-11） |
 | TeachingAgent | 外部 teaching agent 接入 compose（LLM env 插值）+ LLM 超时 60→180s（另一 worktree：fix/teaching-agent，已推送 origin） | 694faa2 |
 
 分支：`main`（单分支工作流）+ `fix/teaching-agent`（worktree：德州扑克-worktree）。
 
-## 3. 验证基线（2026-08-10 实测）
+## 3. 验证基线（2026-08-11 实测）
 
 | 门 | 结果 |
 |---|---|
-| Backend pytest（仓库根，unset PYTHONPATH） | **310 passed + 8 skipped**（live-PG 需 POKER_COACH_TEST_PG_URL 才跑；RangeBelief V1.1 grounding/temporal 回归已覆盖） |
+| Backend pytest（仓库根，unset PYTHONPATH） | **323 passed + 8 skipped**（live-PG 需 POKER_COACH_TEST_PG_URL 才跑；含 8-max RFI policy exact-node / API 回归） |
 | compileall / pip check | OK |
 | vitest（frontend） | **106/106**（18 文件，含 Prior/Current/Δ tabs、no-policy unavailable、deadCardsForSeat、fresh solver artifact 等回归） |
 | tsc --noEmit | 0 错误 |
 | next build | ✓ |
 | Playwright E2E | **6/6**（compose down 后本地 hermetic webServer 实测；范围标准化流程含在内） |
-| hermes verify --json | 未重跑；本轮等价实测：compileall OK、py -3.13 pip check OK、tsc/vitest/build/E2E 全部通过 |
+| hermes verify --json | 未重跑；本轮等价实测：compileall OK、py -3.13 pip check OK、tsc/vitest/build 通过；Playwright 沿用上一轮 6/6 基线 |
 
 ## 4. 关键架构约束（不可违背）
 
@@ -55,7 +56,7 @@
 - **seat 契约**：seat IDs 必须连续 0..table_size-1；knownHoleCardsBySeat 每个 seat 恰 2 张（空数组=缺失）；solver 的 range 真相源是 rangesBySeat（按两个 active seat 解析），Hero/Villain 仅是 Coach 视角。
 - **169 Matrix 只是 View（RangeBelief）**：belief 底层状态是具体 two-card combo（canonical key 高位在前、镜像 solver 格式，如 `5c4c`/`2d2c`/`Ac4c`）；禁止把 169 cell 当推理状态。聚合必须质量守恒：`sum(matrix169.probabilityMass) ≈ sum(combo probabilities) ≈ 1`；suit-specific combo（AsKs vs AhKh）保留各自 reach/likelihood 后才聚合到同一 cell。
 - **reach 与 probability 分离（RangeBelief）**：`reach`=沿行动序列的未归一化质量，`probability`=归一化条件信念（sum≈1）。likelihood=0 → combo 直接从 belief 移除；全零必须报 `zero_probability_action`（禁止 uniform fallback）。
-- **无 grounded policy 不伪造（RangeBelief）**：no_policy / unsupported_action / zero_probability_action 显式降级；翻前自身动作无 policy 时链条诚实停止（V2 preflop 数据集前，可用 fixture/manual policy 覆盖）；`available=false` 响应只给 reason + prior，不给假 current。
+- **无 policy 不伪造（RangeBelief）**：no_policy / unsupported_action / zero_probability_action 显式降级；内置 `preflop_policy` 只覆盖已声明的 8-max RFI node，其他翻前自身动作仍必须诚实停止（或由 fixture/manual/solver 覆盖）；`available=false` 响应只给 reason + prior，不给假 current。
 - **Solver provenance（RangeBelief V1.1）**：生产 grounded policy 必须通过 persisted `jobId`；job 保存 `scenarioFingerprint`、`spotFingerprint`、`policySequence`、`actorSeat`、`activeSeats`、`street`，请求会重建 exact node spot 并拒绝 `solver_artifact_mismatch`。一个 artifact 只覆盖其显式 policy sequence；裸 `source=solver,result` 仅兼容读取并标记 `confidence=unverified`，不得称为 grounded。
 - **Policy 抽象（RangeBelief）**：PolicySource 枚举（solver/fixture/preflop_policy/population/heuristic/manual/unknown）；`ActionPolicyProvider.get_action_frequencies(scenario, seatId, sequence, combos)`；API `policy` 支持**有序 provider 链**（如 fixture 覆盖翻前 call + solver 覆盖翻后 bet）；solver 输出零重算——SolverPolicyAdapter 只做 `SolverNode.hands[].strategy → PolicyResult` 映射。
 - **Off-tree sizing（RangeBelief）**：显式 ActionMapping 解析 `Bet(250)/Raise(625)/AllIn(9750)/Check/Call/Fold`；off-tree 用 nearest-size（等距取小，确定性），`observedSize/mappedSize/offTree` 进 metadata 与 UI；禁止插值 strategy。
@@ -95,6 +96,9 @@ Range Belief API 速查：
 # 当前 belief（含 prior/current/delta + matrix169）；policy 可缺省（prior-only）
 curl -X POST http://127.0.0.1:8000/v1/ranges/belief -H 'Content-Type: application/json' \
   -d '{"scenario": {...}, "seatId": 6, "policy": {"source": "solver", "jobId": "..."}}'
+# 内置翻前 policy：仅 8-max、100BB、no-ante/no-rake、2.5BB RFI（UTG→SB）
+curl -X POST http://127.0.0.1:8000/v1/ranges/belief -H 'Content-Type: application/json' \
+  -d '{"scenario": {...}, "seatId": 3, "policy": {"source": "preflop_policy"}}'
 # 完整 snapshot 链
 curl -X POST http://127.0.0.1:8000/v1/ranges/trace -d '{"scenario": {...}, "seatId": 6}'
 # policy 支持有序链：[{source: fixture, frequencies}, {source: solver, jobId}]
@@ -104,7 +108,7 @@ curl -X POST http://127.0.0.1:8000/v1/ranges/trace -d '{"scenario": {...}, "seat
 
 - 复盘/空手牌场景：equity 不可用是**有意**的（hero 或 villain 手牌缺失即不计算）；牌局打到结束（决策点 1 活玩家）同样合法降级——`BasicMetrics.active_player_count` 允许 1，equity 不计算（`ge=2` 仅限 equity 结果模型）
 - 求解器：仅翻后（flop+）且决策点恰好 2 活玩家；bunching 忽略并记录为近似（`assumptions` 字段）
-- **RangeBelief V1/V1.1**：无 grounded preflop frequency 数据集（翻前自身动作会诚实阻断 belief 链，除非用户提供 fixture/manual policy）；无 population/player-specific 模型；无完整 solver tree traversal，solver artifact 仅覆盖显式绑定的一个 action sequence/node；off-tree 用 nearest-size（等距取小）非插值；前端 belief 跟随 Hero/Villain 选择（seat 映射），暂无独立 seat 下拉
+- **RangeBelief V2.0**：内置策略只是 8-max 100BB no-rake 2.5BB RFI（UTG→SB）的 curated 纯 raise/fold 基线，不是 solver frequency dataset；BB option、limp、open size 变体、面对 open/3-bet/4-bet、ante/rake/stack 变体仍会诚实阻断 belief 链（可用 fixture/manual policy 覆盖）。无 population/player-specific 模型；无完整 solver tree traversal，solver artifact 仅覆盖显式绑定的一个 action sequence/node；off-tree 用 nearest-size（等距取小）非插值；前端 belief 跟随 Hero/Villain 选择（seat 映射），暂无独立 seat 下拉
 - 8-max 前端：前端 initialScenario 仍为 HU；多way 场景主要经 API 使用
 - docker 偶发：引擎恢复期端口绑定可能丢失（`docker port` 为空）→ `docker compose up -d --force-recreate api web`
 - E2E hermetic：playwright webServer env 已清 PYTHONPATH/PYTHONHOME/DB/Redis URL/LLM key，不依赖外部服务
@@ -112,7 +116,7 @@ curl -X POST http://127.0.0.1:8000/v1/ranges/trace -d '{"scenario": {...}, "seat
 
 ### 本轮明确未完成（后续阶段）
 
-- 无 grounded preflop policy dataset；PreflopPolicy V2 / 8-max 数据集尚未开始。
+- 扩展 curated preflop policy：BB option、limp、不同 open size、面对 open/3-bet/4-bet，以及 ante/rake/有效筹码变体；如需 solver 频率，必须引入带来源与许可的完整数据集，不能把当前 baseline 标作 solver-backed。
 - 无 population 或 player-specific model，亦未引入 ML、Deep CFR。
 - 无完整 solver tree traversal / historical inference；solver policy 只可用于显式绑定的单一 action sequence。
 - 无 multiway solver policy；现有 solver 仍仅支持翻后恰好两名 active players。

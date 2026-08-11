@@ -95,6 +95,7 @@ export const analysisApi = {
 
 export type BeliefPolicyPayload =
   | { source: "fixture"; frequencies: Record<string, Record<string, Record<string, string>>> }
+  | { source: "preflop_policy" }
   | { source: "solver"; jobId: string }
   | { source: "solver"; result: NonNullable<SolveJob["result"]> }
   | { source: "manual" };
