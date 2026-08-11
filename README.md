@@ -1,6 +1,6 @@
 # 德州扑克策略教学产品
 
-当前状态：已完成一个可本地运行的 HU NLHE MVP 核心切片。当前覆盖事件重放、合法动作、牌力与牌面分析、精确/模拟 Equity、证据汇总、策略目录匹配、FastAPI、SQLite 场景/修订/分析历史、验证练习和 Next.js 场景编辑器；教学层支持证据约束、三档解释深度和合法动作边界。自适应训练、真实外部模型 Agent、Redis 多进程任务和动态 Solver 仍在后续迭代。
+当前状态：已完成一个可本地运行的 HU NLHE MVP 核心切片。当前覆盖事件重放、合法动作、牌力与牌面分析、精确/模拟 Equity、证据汇总、策略目录匹配、FastAPI、SQLite 场景/修订/分析历史、验证练习和 Next.js 场景编辑器；教学层支持证据约束、三档解释深度和合法动作边界，外部模型 Agent、Redis 多进程任务和翻后 Solver 已有基础实现。自适应训练仍在后续迭代；整手逐决策复盘工作台处于规划阶段，见下方规划文档。
 
 ## 本地验证
 
@@ -80,6 +80,8 @@ curl http://127.0.0.1:8000/health
 - [Solver 输出导入规范](docs/solver-import-spec.md)
 - [Solver Integration Design Review](docs/solver-integration-design.md)
 - [Solver spike 报告（阶段 1）](docs/spike-postflop-solver.md)
+- [Hand Review Workbench 产品与架构计划](docs/hand-review-workbench-plan.md)
+- [Hand Review Workbench 任务执行表](docs/hand-review-workbench-tasks.md)
 - [BYO DeepSeek Key 端到端加密设计](docs/design-bring-your-own-key.md)
 - [依赖与许可证清单](docs/dependency-inventory.md)
 - [开发规范](AGENT.MD)
