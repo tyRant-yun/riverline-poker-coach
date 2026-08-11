@@ -22,6 +22,7 @@ import type {
   TeachingResponse,
 } from "../../types/api";
 import type { RangeBeliefTraceResponse, RangeBeliefView } from "../../types/rangeBelief";
+import type { HandReviewApiResponse } from "../../types/handReview";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -143,4 +144,8 @@ export const practiceApi = {
     request<{ question: PracticeQuestion }>("/v1/practice/generate", payload),
   attempt: (questionId: string, selectedAction: string) =>
     request<{ outcome: PracticeOutcome }>(`/v1/practice/${questionId}/attempt`, { selectedAction }),
+};
+
+export const handReviewApi = {
+  review: (scenario: Scenario) => request<HandReviewApiResponse>("/v1/hand-reviews", scenario),
 };

@@ -1,0 +1,23 @@
+import { describe, expect, it } from "vitest";
+import { adaptHandReviewResponse } from "./handReviewAdapter";
+import { handReviewResponseFixture } from "../../test/handReviewFixtures";
+
+describe("hand review adapter", () => {
+  it("maps wire actions for the existing list and preserves backend facts", () => {
+    const adapted = adaptHandReviewResponse(handReviewResponseFixture());
+    const review = adapted.decisionReviews[0];
+
+    expect(review.actualAction).toBe("Raise to 250");
+    expect(review.actualActionEvent?.actionType).toBe("raise_to");
+    expect(review.stateBeforeAction?.board).toEqual([]);
+    expect(review.analysisSummary?.analysisVersion).toBe("analysis-1");
+    expect(review.evidenceBundleId).toBe("evidence-a1");
+    expect(adapted.uncertainty).toEqual(["solver assessment is not available"]);
+  });
+
+  it("does not compute solver or range conclusions", () => {
+    const adapted = adaptHandReviewResponse(handReviewResponseFixture());
+    expect(adapted.decisionReviews[0].solverAssessment.status).toBe("unscored");
+    expect(adapted.decisionReviews[0].rangeUpdate.status).toBe("unavailable");
+  });
+});
