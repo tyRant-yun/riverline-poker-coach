@@ -80,6 +80,11 @@ def test_hand_review_returns_ordered_node_scoped_analysis_and_evidence():
     assert response.status_code == 200
     body = response.json()
     assert body["review"]["handReviewVersion"] == "hand-review-1"
+    assert body["review"]["sourceKind"] == "aggregated_local"
+    assert body["review"]["provider"] == "local"
+    assert body["review"]["teacherVersion"] == "hand-review-aggregate-0.1"
+    assert body["review"]["promptVersion"] == "hand-review-aggregate-prompt-0.1"
+    assert body["review"]["degraded"] is False
     reviews = body["review"]["decisionReviews"]
     assert [review["actionId"] for review in reviews] == [
         "a1",
@@ -120,6 +125,12 @@ def test_hand_review_returns_ordered_node_scoped_analysis_and_evidence():
         assert review["rangeUpdate"]["actionId"] == review["actionId"]
         assert review["rangeUpdate"]["seatId"] == review["actorSeat"]
         assert review["rangeUpdate"]["afterSequence"] == review["eventSequence"]
+        teaching = review["teaching"]
+        assert teaching["sourceKind"] == "local_deterministic_template"
+        assert teaching["provider"] == "local"
+        assert teaching["teacherVersion"] == "teaching-core-0.1"
+        assert teaching["promptVersion"] == "teaching-prompt-0.1"
+        assert teaching["degraded"] is False
 
 
 def test_hand_review_returns_curated_combo_range_update_for_default_hu_open():
@@ -476,19 +487,24 @@ def test_hand_review_solver_assessment_statuses_use_the_product_threshold(
         assert "evLoss" not in assessment
         findings = response.json()["review"]["priorityFindings"]
         if expected_status in {"rare", "absent"}:
-            assert findings == [
-                {
-                    "actionId": "a4",
-                    "category": "solver_deviation",
-                    "mistakeTag": (
-                        "solver_rare_action"
-                        if expected_status == "rare"
-                        else "solver_absent_action"
-                    ),
-                    "severity": "review",
-                    "summary": response.json()["review"]["decisionReviews"][2]["teaching"]["summary"],
-                }
-            ]
+            assert len(findings) == 1
+            finding = findings[0]
+            assert finding["actionId"] == "a4"
+            assert finding["category"] == "solver_deviation"
+            assert finding["mistakeTag"] == (
+                "solver_rare_action"
+                if expected_status == "rare"
+                else "solver_absent_action"
+            )
+            assert finding["severity"] == "review"
+            teaching = response.json()["review"]["decisionReviews"][2]["teaching"]
+            assert finding["summary"] == teaching["summary"]
+            assert finding["sourceKind"] == "aggregated_local"
+            assert finding["provider"] == "local"
+            assert finding["teacherVersion"] == "hand-review-aggregate-0.1"
+            assert finding["promptVersion"] == "hand-review-aggregate-prompt-0.1"
+            assert finding["degraded"] == teaching["degraded"]
+            assert finding["degradationReason"] == teaching["degradationReason"]
         else:
             assert findings == []
     finally:

@@ -140,7 +140,15 @@ class DecisionTeaching(DomainModel):
 
     teaching_version: str = "hand-review-teaching-1"
     mode: Literal["solver_grounded", "principle_only"] = "principle_only"
-    provider: Literal["local"] = "local"
+    # ``provider`` identifies the configured Teacher seam. ``source_kind``
+    # identifies the actual text source, which differs when an external
+    # Teacher falls back to a deterministic local template.
+    source_kind: Literal["external_agent", "local_deterministic_template"] = "local_deterministic_template"
+    provider: str = "local"
+    teacher_version: str = "teaching-core-0.1"
+    prompt_version: str = "teaching-prompt-0.1"
+    degraded: bool = False
+    degradation_reason: str | None = None
     summary: TeachingText
     key_points: tuple[TeachingText, ...] = ()
     uncertainty: TeachingText
@@ -164,6 +172,12 @@ class PriorityFinding(DomainModel):
     mistake_tag: Literal["solver_rare_action", "solver_absent_action"]
     severity: Literal["review"] = "review"
     summary: TeachingText
+    source_kind: Literal["external_agent", "local_deterministic_template", "aggregated_local"] = "aggregated_local"
+    provider: str = "local"
+    teacher_version: str = "teaching-core-0.1"
+    prompt_version: str = "teaching-prompt-0.1"
+    degraded: bool = False
+    degradation_reason: str | None = None
 
 
 class WholeHandTeaching(DomainModel):
@@ -172,6 +186,12 @@ class WholeHandTeaching(DomainModel):
     teaching_version: str = "hand-review-whole-hand-1"
     summary: str = Field(min_length=1)
     uncertainty: str = Field(min_length=1)
+    source_kind: Literal["aggregated_local"] = "aggregated_local"
+    provider: str = "local"
+    teacher_version: str = "hand-review-aggregate-0.1"
+    prompt_version: str = "hand-review-aggregate-prompt-0.1"
+    degraded: bool = False
+    degradation_reason: str | None = None
 
 
 class DecisionReview(DomainModel):
@@ -205,6 +225,12 @@ class HandReviewResponse(DomainModel):
     """Versioned deterministic response for ``POST /v1/hand-reviews``."""
 
     hand_review_version: str = "hand-review-1"
+    source_kind: Literal["aggregated_local"] = "aggregated_local"
+    provider: str = "local"
+    teacher_version: str = "hand-review-aggregate-0.1"
+    prompt_version: str = "hand-review-aggregate-prompt-0.1"
+    degraded: bool = False
+    degradation_reason: str | None = None
     hand_summary: HandReviewSummary
     decision_reviews: tuple[DecisionReview, ...] = ()
     whole_hand_summary: WholeHandTeaching | None = None

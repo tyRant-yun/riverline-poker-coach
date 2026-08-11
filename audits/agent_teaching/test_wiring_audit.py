@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from poker_coach.api import create_app
-from poker_coach.coach import ExternalModelTeacher
+from poker_coach.coach import ExternalModelTeacher, TeachingService
 from poker_coach.persistence import SQLiteStore
 
 
@@ -95,7 +95,7 @@ def _completed_hand_payload() -> dict[str, object]:
     return payload
 
 
-Mode = Literal["success", "timeout", "schema_drift", "invalid_evidence"]
+Mode = Literal["success", "timeout", "transport", "schema_drift", "invalid_evidence"]
 
 
 @dataclass
@@ -103,17 +103,21 @@ class RecordingTransport:
     """Deterministic OpenAI-compatible fake at ExternalModelTeacher's public seam."""
 
     mode: Mode = "success"
+    modes_by_call: dict[int, Mode] = field(default_factory=dict)
     calls: list[dict[str, Any]] = field(default_factory=list)
 
     def __call__(self, system: str, user: str, model: str, timeout: float) -> dict[str, Any]:
         facts = json.loads(user.split("## 牌局事实与证据\n", 1)[1].split("\n\n## 教学深度", 1)[0])
         self.calls.append({"system": system, "facts": facts, "model": model, "timeout": timeout})
-        if self.mode == "timeout":
+        mode = self.modes_by_call.get(len(self.calls), self.mode)
+        if mode == "timeout":
             raise TimeoutError("audit transport timeout")
-        if self.mode == "schema_drift":
+        if mode == "transport":
+            raise RuntimeError("audit transport failure")
+        if mode == "schema_drift":
             return {"summary": "not a TeachingResponse"}
         evidence_id = facts["evidence"][0]["evidenceId"]
-        if self.mode == "invalid_evidence":
+        if mode == "invalid_evidence":
             return {
                 "explanationDepth": "intermediate",
                 "summary": {
@@ -157,6 +161,25 @@ def _client(transport: RecordingTransport) -> TestClient:
         transport=transport,
     )
     return TestClient(create_app(store=SQLiteStore(":memory:"), teacher=teacher))
+
+
+@dataclass
+class RecordingLocalTeacher:
+    """The configured local seam must also be called once per decision."""
+
+    calls: list[dict[str, Any]] = field(default_factory=list)
+    provider = "local"
+    version = "teaching-core-0.1"
+    prompt_version = "teaching-prompt-0.1"
+
+    def explain(self, scenario, *, analysis, depth="intermediate", user_question=None):
+        self.calls.append({"board": list(scenario.board), "actorSeat": scenario.hero_seat})
+        return TeachingService().explain(
+            scenario,
+            analysis=analysis,
+            depth=depth,
+            user_question=user_question,
+        )
 
 
 def _assert_external_envelope(body: dict[str, Any], *, degraded: bool) -> None:
@@ -218,12 +241,7 @@ def test_single_node_invalid_evidence_is_sanitized_without_claiming_a_local_agen
 
 
 def test_hand_review_must_call_external_teacher_once_per_real_decision_and_expose_provenance() -> None:
-    """J11 release gate: expected to fail until hand-review Teacher wiring exists.
-
-    The completed fixture has eight player decisions.  A future implementation
-    must call the injected Teacher once per node with that node's visible facts,
-    then return provider/version/degraded provenance for decisions and summary.
-    """
+    """J11: N real decisions get N bounded external calls in actionId order."""
 
     transport = RecordingTransport()
     response = _client(transport).post("/v1/hand-reviews", json={"scenario": _completed_hand_payload()})
@@ -232,8 +250,68 @@ def test_hand_review_must_call_external_teacher_once_per_real_decision_and_expos
     body = response.json()
     expected_calls = len(body["review"]["decisionReviews"])
     assert len(transport.calls) == expected_calls, (
-        "J11 external-agent wiring missing: expected one bounded Teacher call per "
-        f"decision ({expected_calls}), got {len(transport.calls)}"
+        "expected one bounded Teacher call per decision "
+        f"({expected_calls}), got {len(transport.calls)}"
     )
-    assert all("9s" not in json.dumps(call["facts"], ensure_ascii=False) for call in transport.calls[:2])
-    assert {"provider", "teacherVersion", "promptVersion", "degraded"} <= set(body["review"])
+    assert [call["facts"]["scenario"]["board"] for call in transport.calls] == [
+        [], [], ["2c", "7d", "Jh"], ["2c", "7d", "Jh"],
+        ["2c", "7d", "Jh", "9s"], ["2c", "7d", "Jh", "9s"],
+        ["2c", "7d", "Jh", "9s", "3h"], ["2c", "7d", "Jh", "9s", "3h"],
+    ]
+    assert all("9s" not in json.dumps(call["facts"], ensure_ascii=False) for call in transport.calls[:4])
+    for decision in body["review"]["decisionReviews"]:
+        teaching = decision["teaching"]
+        assert teaching["sourceKind"] == "external_agent"
+        assert teaching["provider"] == "external_llm"
+        assert teaching["teacherVersion"] == "teaching-external-0.1"
+        assert teaching["promptVersion"] == "teaching-external-prompt-0.1"
+        assert teaching["degraded"] is False
+    assert body["review"]["wholeHandSummary"]["sourceKind"] == "aggregated_local"
+    assert body["review"]["wholeHandSummary"]["degraded"] is False
+    assert body["review"]["sourceKind"] == "aggregated_local"
+    assert body["review"]["degraded"] is False
+
+
+def test_hand_review_calls_the_configured_local_teacher_once_per_real_decision() -> None:
+    teacher = RecordingLocalTeacher()
+    response = TestClient(create_app(store=SQLiteStore(":memory:"), teacher=teacher)).post(
+        "/v1/hand-reviews", json={"scenario": _completed_hand_payload()}
+    )
+
+    assert response.status_code == 200, response.text
+    decisions = response.json()["review"]["decisionReviews"]
+    assert len(teacher.calls) == len(decisions) == 8
+    assert [call["board"] for call in teacher.calls[:4]] == [
+        [], [], ["2c", "7d", "Jh"], ["2c", "7d", "Jh"],
+    ]
+    assert all(item["teaching"]["sourceKind"] == "local_deterministic_template" for item in decisions)
+    assert all(item["teaching"]["provider"] == "local" for item in decisions)
+
+
+@pytest.mark.parametrize("mode", ["timeout", "transport", "schema_drift", "invalid_evidence"])
+def test_hand_review_degrades_only_the_failed_external_decision(mode: Mode) -> None:
+    """A failed/suspicious node falls back locally without contaminating peers."""
+
+    transport = RecordingTransport(modes_by_call={2: mode})
+    response = _client(transport).post("/v1/hand-reviews", json={"scenario": _completed_hand_payload()})
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    decisions = body["review"]["decisionReviews"]
+    assert len(transport.calls) == len(decisions) == 8
+    for index, decision in enumerate(decisions):
+        teaching = decision["teaching"]
+        assert teaching["provider"] == "external_llm"
+        assert teaching["teacherVersion"] == "teaching-external-0.1"
+        assert teaching["promptVersion"] == "teaching-external-prompt-0.1"
+        if index == 1:
+            assert teaching["sourceKind"] == "local_deterministic_template"
+            assert teaching["degraded"] is True
+            assert teaching["degradationReason"]
+        else:
+            assert teaching["sourceKind"] == "external_agent"
+            assert teaching["degraded"] is False
+            assert teaching["degradationReason"] is None
+    assert body["review"]["wholeHandSummary"]["sourceKind"] == "aggregated_local"
+    assert body["review"]["wholeHandSummary"]["degraded"] is True
+    assert "a2" in body["review"]["wholeHandSummary"]["degradationReason"]

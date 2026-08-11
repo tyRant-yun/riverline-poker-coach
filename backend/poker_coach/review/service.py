@@ -7,6 +7,7 @@ from typing import Any
 
 from poker_coach.analysis import analyze_scenario
 from poker_coach.analysis.models import AnalysisResult
+from poker_coach.coach import TeachingService
 from poker_coach.domain.models import DecisionPoint, ScenarioSpec
 from poker_coach.ranges import (
     NoPriorRangeError,
@@ -32,7 +33,7 @@ from .solver_assessment import (
     assess_solver_action,
     validated_solver_policy_provider,
 )
-from .teaching import compose_hand_review_teaching
+from .teaching import attach_teacher_teaching, compose_hand_review_teaching
 
 
 def build_hand_review(
@@ -42,6 +43,7 @@ def build_hand_review(
     timeout_seconds: float | None = None,
     solver_job_ids: Mapping[str, str] | None = None,
     solver_job_lookup: Callable[[str], Mapping[str, Any]] | None = None,
+    teacher: TeachingService | Any | None = None,
 ) -> HandReviewResponse:
     """Analyze every real action from its independently replayed pre-action node.
 
@@ -51,6 +53,7 @@ def build_hand_review(
     """
 
     rules = adapter or PokerKitAdapter()
+    review_teacher = teacher or TeachingService(rules)
     events_by_id = {event.action_id: event for event in scenario.action_history}
     snapshots = build_decision_snapshots(scenario, adapter=rules)
     pot_before_by_sequence = {
@@ -60,8 +63,9 @@ def build_hand_review(
     reviews: list[DecisionReview] = []
     for snapshot in snapshots:
         actual_action = events_by_id[snapshot.action_id]
+        node_scenario = _scenario_for_snapshot(scenario, snapshot)
         analysis = analyze_scenario(
-            _scenario_for_snapshot(scenario, snapshot),
+            node_scenario,
             adapter=rules,
             timeout_seconds=timeout_seconds,
         )
@@ -112,7 +116,14 @@ def build_hand_review(
                     )
                 }
             )
-        reviews.append(review)
+        reviews.append(
+            attach_teacher_teaching(
+                review,
+                teacher=review_teacher,
+                scenario=node_scenario,
+                analysis=analysis,
+            )
+        )
     uncertainty = tuple(dict.fromkeys(warning for review in reviews for warning in review.warnings))
     response = HandReviewResponse(
         hand_summary=HandReviewSummary(

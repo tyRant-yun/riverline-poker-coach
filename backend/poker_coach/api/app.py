@@ -631,7 +631,7 @@ def create_app(
 
     @app.post("/v1/hand-reviews")
     async def hand_review(request: Request):
-        """Return deterministic, node-scoped analysis for every player action."""
+        """Return node-scoped analysis and teaching for every player action."""
 
         payload = await request.json()
         scenario, solver_job_ids = _hand_review_request(payload)
@@ -648,6 +648,7 @@ def create_app(
                     if solver_job_ids is not None
                     else None
                 ),
+                teacher=teacher,
             )
         except SolverAssessmentError as exc:
             raise ApiError(exc.code, str(exc), details=exc.details) from exc

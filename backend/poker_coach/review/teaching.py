@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from poker_coach.domain.models import EvidenceBundle, EvidenceReference, TeachingText
+from typing import Any
+
+from poker_coach.domain.models import (
+    EvidenceBundle,
+    EvidenceReference,
+    ScenarioSpec,
+    TeachingResponse,
+    TeachingText,
+)
 
 from .models import (
     DecisionReview,
@@ -22,7 +30,9 @@ def compose_hand_review_teaching(review: HandReviewResponse) -> HandReviewRespon
     """
 
     decisions = tuple(
-        decision.model_copy(update={"teaching": compose_decision_teaching(decision)})
+        decision.model_copy(
+            update={"teaching": decision.teaching or compose_decision_teaching(decision)}
+        )
         for decision in review.decision_reviews
     )
     findings = tuple(
@@ -36,8 +46,82 @@ def compose_hand_review_teaching(review: HandReviewResponse) -> HandReviewRespon
             "decision_reviews": decisions,
             "whole_hand_summary": summary,
             "priority_findings": findings,
+            "degraded": any(item.teaching and item.teaching.degraded for item in decisions),
+            "degradation_reason": _aggregate_degradation_reason(decisions),
         }
     )
+
+
+def attach_teacher_teaching(
+    review: DecisionReview,
+    *,
+    teacher: Any,
+    scenario: ScenarioSpec,
+    analysis: Any,
+) -> DecisionReview:
+    """Call the configured Teacher once for this bounded decision node.
+
+    ``scenario`` and ``analysis`` were constructed from the pre-action
+    snapshot. No future action, board card, or another node's evidence reaches
+    the configured Teacher.
+    """
+
+    provider = str(getattr(teacher, "provider", "local"))
+    teacher_version = str(getattr(teacher, "version", "teaching-core-0.1"))
+    prompt_version = str(getattr(teacher, "prompt_version", "teaching-prompt-0.1"))
+    response: TeachingResponse | None = None
+    failure_reason: str | None = None
+    try:
+        response = teacher.explain(scenario, analysis=analysis)
+        if getattr(teacher, "degraded", False):
+            failure_reason = str(getattr(teacher, "last_error", None) or "teacher_degraded")
+        elif getattr(teacher, "last_validation_issue", None):
+            failure_reason = str(getattr(teacher, "last_validation_issue"))
+    except Exception as exc:  # A custom configured Teacher must not fail a hand review.
+        failure_reason = f"teacher_error: {exc}"
+
+    local_template = compose_decision_teaching(review)
+    is_teacher_success = response is not None and failure_reason is None
+    if is_teacher_success:
+        # Keep review-specific policy/solver caveats alongside the configured
+        # Teacher response. Both originate at this decision only.
+        key_points = tuple((*response.key_reasons, *local_template.key_points))
+        teaching = local_template.model_copy(
+            update={
+                "source_kind": (
+                    "external_agent"
+                    if provider == "external_llm"
+                    else "local_deterministic_template"
+                ),
+                "provider": provider,
+                "teacher_version": teacher_version,
+                "prompt_version": prompt_version,
+                "degraded": False,
+                "degradation_reason": None,
+                # Solver deviations remain the deterministic, exact-node
+                # wording. External/local Teacher text is used otherwise.
+                "summary": (
+                    local_template.summary
+                    if local_template.mode == "solver_grounded"
+                    else response.summary
+                ),
+                "key_points": key_points,
+                "uncertainty": response.uncertainty,
+            }
+        )
+    else:
+        teaching = local_template.model_copy(
+            update={
+                "source_kind": "local_deterministic_template",
+                "provider": provider,
+                "teacher_version": teacher_version,
+                "prompt_version": prompt_version,
+                "degraded": failure_reason is not None,
+                "degradation_reason": failure_reason,
+            }
+        )
+    teaching.validate_evidence_references(review.evidence_bundle)
+    return review.model_copy(update={"teaching": teaching})
 
 
 def compose_decision_teaching(review: DecisionReview) -> DecisionTeaching:
@@ -129,6 +213,14 @@ def _priority_findings(review: DecisionReview) -> tuple[PriorityFinding, ...]:
             category="solver_deviation",
             mistake_tag=tag,
             summary=teaching.summary,
+            # Findings are a deterministic aggregation of already validated
+            # node assessments; they are never presented as Agent output.
+            source_kind="aggregated_local",
+            provider="local",
+            teacher_version="hand-review-aggregate-0.1",
+            prompt_version="hand-review-aggregate-prompt-0.1",
+            degraded=teaching.degraded,
+            degradation_reason=teaching.degradation_reason,
         ),
     )
 
@@ -136,21 +228,40 @@ def _priority_findings(review: DecisionReview) -> tuple[PriorityFinding, ...]:
 def _whole_hand_summary(
     decisions: tuple[DecisionReview, ...], findings: tuple[PriorityFinding, ...]
 ) -> WholeHandTeaching:
+    degraded = any(item.teaching and item.teaching.degraded for item in decisions)
+    degradation_reason = _aggregate_degradation_reason(decisions)
     if findings:
         action_ids = "、".join(item.action_id for item in findings)
         return WholeHandTeaching(
             summary=f"整手复盘已按行动顺序生成；优先从 {action_ids} 对应的节点开始回看。",
             uncertainty="优先项仅来自已验证节点的实际行动频率，不包含未提供的 EV 损失。",
+            degraded=degraded,
+            degradation_reason=degradation_reason,
         )
     if any(item.solver_assessment.status == "unscored" for item in decisions):
         return WholeHandTeaching(
             summary="整手复盘已按行动顺序生成；当前没有可确认的 Solver 偏离优先项。",
             uncertainty="部分节点没有精确策略或范围政策，已保留为原则教学而非策略错误。",
+            degraded=degraded,
+            degradation_reason=degradation_reason,
         )
     return WholeHandTeaching(
         summary="整手复盘已按行动顺序生成；当前没有需要优先复盘的已验证 Solver 偏离。",
         uncertainty="结论仅汇总各行动已存在的教学事实，不补充跨节点推断。",
+        degraded=degraded,
+        degradation_reason=degradation_reason,
     )
+
+
+def _aggregate_degradation_reason(decisions: tuple[DecisionReview, ...]) -> str | None:
+    failed_action_ids = [
+        decision.action_id
+        for decision in decisions
+        if decision.teaching is not None and decision.teaching.degraded
+    ]
+    if not failed_action_ids:
+        return None
+    return "local fallback for decisions: " + ", ".join(failed_action_ids)
 
 
 def _refs(bundle: EvidenceBundle) -> dict[str, EvidenceReference]:
