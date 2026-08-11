@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import RangeEditor from "./RangeEditor";
-import type { DefaultRanges } from "../../types/scenario";
+import type { DefaultRanges, SeatSpec } from "../../types/scenario";
 import type { RangeBeliefView } from "../../types/rangeBelief";
 
-function renderEditor(overrides: { matrix?: Record<string, string>; belief?: RangeBeliefView | null; beliefLoading?: boolean; mode?: "prior" | "current" | "delta" } = {}) {
+function renderEditor(overrides: { matrix?: Record<string, string>; belief?: RangeBeliefView | null; beliefLoading?: boolean; beliefStale?: boolean; mode?: "prior" | "current" | "delta"; beliefSeatId?: number; beliefSeats?: SeatSpec[] } = {}) {
   const onCycleCell = vi.fn();
   const onBeliefModeChange = vi.fn();
+  const onBeliefSeatChange = vi.fn();
   const utils = render(
     <RangeEditor
       rangeSide="villainRange"
@@ -17,16 +18,20 @@ function renderEditor(overrides: { matrix?: Record<string, string>; belief?: Ran
       rangeCombos={[]}
       belief={overrides.belief ?? null}
       beliefLoading={overrides.beliefLoading ?? false}
+      beliefStale={overrides.beliefStale ?? false}
       beliefMode={overrides.mode ?? "prior"}
+      beliefSeatId={overrides.beliefSeatId}
+      beliefSeats={overrides.beliefSeats}
       onRangeSideChange={vi.fn()}
       onRangeTextChange={vi.fn()}
       onApplyDefault={vi.fn()}
       onParse={vi.fn()}
       onCycleCell={onCycleCell}
       onBeliefModeChange={onBeliefModeChange}
+      onBeliefSeatChange={onBeliefSeatChange}
     />,
   );
-  return { ...utils, onCycleCell, onBeliefModeChange };
+  return { ...utils, onCycleCell, onBeliefModeChange, onBeliefSeatChange };
 }
 
 const availableBelief: RangeBeliefView = {
@@ -112,6 +117,19 @@ describe("RangeEditor matrix", () => {
 });
 
 describe("RangeEditor belief view", () => {
+  it("selects a continuous seatId for the belief view", () => {
+    const { onBeliefSeatChange } = renderEditor({
+      beliefSeatId: 5,
+      beliefSeats: [
+        { seatId: 0, startingStack: 10_000, position: "button" },
+        { seatId: 5, startingStack: 10_000, position: "hj" },
+      ],
+    });
+
+    fireEvent.change(screen.getByLabelText("范围玩家 seat"), { target: { value: "0" } });
+    expect(onBeliefSeatChange).toHaveBeenCalledWith(0);
+  });
+
   it("renders Prior / Current / Delta tabs", () => {
     renderEditor();
     expect(screen.getByLabelText("belief mode prior")).toBeInTheDocument();
@@ -126,6 +144,13 @@ describe("RangeEditor belief view", () => {
     expect(screen.getByText(/No grounded action policy is available/)).toBeInTheDocument();
     expect(screen.getByText(/still edit the Prior range manually/)).toBeInTheDocument();
     // No fabricated numbers: the belief matrix is not rendered.
+    expect(screen.queryByLabelText("belief 范围矩阵")).not.toBeInTheDocument();
+  });
+
+  it("marks an invalidated result as stale instead of presenting it as current", () => {
+    renderEditor({ belief: availableBelief, beliefStale: true, mode: "current" });
+    expect(screen.getByLabelText("belief stale")).toBeInTheDocument();
+    expect(screen.getByText(/范围结果已过期/)).toBeInTheDocument();
     expect(screen.queryByLabelText("belief 范围矩阵")).not.toBeInTheDocument();
   });
 

@@ -43,6 +43,8 @@ import { canSubmitSolve as solveGate, solveGateReasons } from "../lib/poker/solv
 import type { DisplayUnit } from "../lib/poker/format";
 import { buildSeatViewModels } from "../lib/poker/table";
 import { deadCardsForSeat, heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
+import { reconcileSelectedActionId, selectionForAction } from "../lib/poker/handReview";
+import { BeliefRequestGate } from "../lib/range/beliefRequest";
 import { applySolvePoll } from "../lib/solver/poll";
 
 import AppShell, { type WorkspaceView } from "../components/AppShell";
@@ -101,7 +103,10 @@ export default function Home() {
   const [rangeCombos, setRangeCombos] = useState<RangeCombo[]>([]);
   const [rangeBelief, setRangeBelief] = useState<RangeBeliefView | null>(null);
   const [rangeBeliefLoading, setRangeBeliefLoading] = useState(false);
+  const [rangeBeliefStale, setRangeBeliefStale] = useState(false);
   const [beliefMode, setBeliefMode] = useState<BeliefMode>("prior");
+  const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
+  const [beliefSeatId, setBeliefSeatId] = useState<number | null>(null);
   const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
   const [activeRevisionNo, setActiveRevisionNo] = useState<number | null>(null);
@@ -122,6 +127,7 @@ export default function Home() {
   // duplicate/concurrent polling when a job is resubmitted or the page
   // unmounts).
   const solvePollToken = useRef(0);
+  const rangeBeliefRequestGate = useRef(new BeliefRequestGate());
 
   useEffect(() => {
     void loadSavedScenarios();
@@ -152,6 +158,10 @@ export default function Home() {
   }, [solveJob]);
 
   const rangeText = rangeTextBySide[rangeSide];
+  const selectedAction = useMemo(
+    () => selectionForAction(scenario.actionHistory, selectedActionId),
+    [scenario.actionHistory, selectedActionId],
+  );
 
   const hasDealFlop = scenario.actionHistory.some((event) => event.actionType === "deal_flop");
   const hasDealTurn = scenario.actionHistory.some((event) => event.actionType === "deal_turn");
@@ -186,8 +196,13 @@ export default function Home() {
 
   function invalidateDerivedAnalysisState() {
     solvePollToken.current += 1;
+    invalidateRangeBelief();
     setSolveJob(null);
-    setRangeBelief(null);
+  }
+
+  function invalidateRangeBelief() {
+    rangeBeliefRequestGate.current.invalidate();
+    setRangeBeliefStale(Boolean(rangeBelief));
     setRangeBeliefLoading(false);
   }
 
@@ -195,6 +210,7 @@ export default function Home() {
     setPastScenarios((past) => [...past, scenario]);
     setFutureScenarios([]);
     setScenario(next);
+    setSelectedActionId((current) => reconcileSelectedActionId(next.actionHistory, current));
     setSavedScenarioDirty(Boolean(activeScenarioId));
     setAnalysisStale(Boolean(analysis));
     setTeaching(null);
@@ -209,6 +225,7 @@ export default function Home() {
     setPastScenarios((past) => past.slice(0, -1));
     setFutureScenarios((future) => [scenario, ...future]);
     setScenario(previous);
+    setSelectedActionId((current) => reconcileSelectedActionId(previous.actionHistory, current));
     setSavedScenarioDirty(Boolean(activeScenarioId));
     setAnalysisStale(Boolean(analysis));
     setTeaching(null);
@@ -223,6 +240,7 @@ export default function Home() {
     setFutureScenarios((future) => future.slice(1));
     setPastScenarios((past) => [...past, scenario]);
     setScenario(next);
+    setSelectedActionId((current) => reconcileSelectedActionId(next.actionHistory, current));
     setSavedScenarioDirty(Boolean(activeScenarioId));
     setAnalysisStale(Boolean(analysis));
     setTeaching(null);
@@ -237,6 +255,8 @@ export default function Home() {
     setActiveScenarioId(null);
     setActiveRevisionNo(null);
     setSavedScenarioDirty(false);
+    setSelectedActionId(null);
+    setBeliefSeatId(null);
     syncRangeEditor(next);
     setState(null);
     setAnalysis(null);
@@ -270,18 +290,18 @@ export default function Home() {
   }
 
   function selectRangeSide(side: RangeSide) {
+    invalidateRangeBelief();
     setRangeSide(side);
     const selected = side === "heroRange" ? scenario.heroRange : scenario.villainRange;
     setRangeMatrix(selected?.matrix169 ?? {});
     setRangeSummary(null);
     setRangeCombos([]);
-    // The belief view follows the selected seat; refetch when a solver
-    // result exists, otherwise clear (prior-only / unavailable).
-    if (solveJob?.result) {
-      void fetchRangeBelief(side, solveJob);
-    } else {
-      setRangeBelief(null);
-    }
+    setBeliefSeatId(beliefSeatForSide(side));
+  }
+
+  function selectBeliefSeat(seatId: number) {
+    invalidateRangeBelief();
+    setBeliefSeatId(seatId);
   }
 
   function beliefSeatForSide(side: RangeSide): number | null {
@@ -290,13 +310,18 @@ export default function Home() {
     return other?.seatId ?? null;
   }
 
-  async function fetchRangeBelief(
-    side: RangeSide = rangeSide,
-    job: SolveJob | null = solveJob,
-  ) {
-    const seatId = beliefSeatForSide(side);
+  async function fetchRangeBelief({
+    seatId,
+    afterSequence,
+    job = solveJob,
+  }: {
+    seatId: number | null;
+    afterSequence: number;
+    job?: SolveJob | null;
+  }) {
     if (seatId == null) {
       setRangeBelief(null);
+      setRangeBeliefStale(false);
       return;
     }
     // The curated preflop provider is deliberately narrow and declines every
@@ -308,17 +333,34 @@ export default function Home() {
     const policy = solverPolicy
       ? [{ source: "preflop_policy" as const }, solverPolicy]
       : { source: "preflop_policy" as const };
+    const requestToken = rangeBeliefRequestGate.current.begin();
     setRangeBeliefLoading(true);
     try {
-      const payload = await rangesApi.belief({ scenario, seatId, policy });
+      const payload = await rangesApi.belief({ scenario, seatId, afterSequence, policy });
+      if (!rangeBeliefRequestGate.current.isCurrent(requestToken)) return;
       setRangeBelief(payload);
+      setRangeBeliefStale(false);
     } catch (error) {
+      if (!rangeBeliefRequestGate.current.isCurrent(requestToken)) return;
       setRangeBelief(null);
+      setRangeBeliefStale(false);
       setMessage(error instanceof Error ? error.message : "range belief 计算失败");
     } finally {
-      setRangeBeliefLoading(false);
+      if (rangeBeliefRequestGate.current.isCurrent(requestToken)) setRangeBeliefLoading(false);
     }
   }
+
+  // A selected player action drives the after-action range view. The API gets
+  // the full hand plus eventSequence so its own temporal contract can hide
+  // later board cards/actions; the decision cursor remains eventSequence - 1.
+  useEffect(() => {
+    if (!selectedAction) return;
+    const seatId = beliefSeatId ?? selectedAction.actorSeat;
+    void fetchRangeBelief({ seatId, afterSequence: selectedAction.eventSequence });
+    // Request identity is represented by the action id, selected seat and
+    // ScenarioSpec. The gate above rejects a response from an older render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenario, selectedActionId, beliefSeatId]);
 
   function syncRangeEditor(nextScenario: Scenario) {
     setRangeTextBySide((current) => ({
@@ -336,6 +378,8 @@ export default function Home() {
     setPastScenarios([]);
     setFutureScenarios([]);
     setScenario(record.scenario);
+    setSelectedActionId(null);
+    setBeliefSeatId(null);
     setActiveScenarioId(record.scenarioId);
     setActiveRevisionNo(record.revisionNo);
     setSavedScenarioDirty(false);
@@ -420,6 +464,8 @@ export default function Home() {
     try {
       const payload = await scenariosApi.analyze(record.scenarioId);
       setScenario(record.scenario);
+      setSelectedActionId(null);
+      setBeliefSeatId(null);
       setActiveScenarioId(record.scenarioId);
       setActiveRevisionNo(record.revisionNo);
       setSavedScenarioDirty(false);
@@ -441,6 +487,8 @@ export default function Home() {
     setPastScenarios([]);
     setFutureScenarios([]);
     setScenario(revision.scenario);
+    setSelectedActionId(null);
+    setBeliefSeatId(null);
     setActiveScenarioId(revision.scenarioId);
     setActiveRevisionNo(revision.revisionNo);
     setSavedScenarioDirty(false);
@@ -461,6 +509,8 @@ export default function Home() {
     try {
       const payload = await scenariosApi.analyzeRevision(revision.scenarioId, revision.revisionNo);
       setScenario(revision.scenario);
+      setSelectedActionId(null);
+      setBeliefSeatId(null);
       setActiveScenarioId(revision.scenarioId);
       setActiveRevisionNo(revision.revisionNo);
       setSavedScenarioDirty(false);
@@ -512,6 +562,8 @@ export default function Home() {
       setPastScenarios([]);
       setFutureScenarios([]);
       setScenario(record.scenario);
+      setSelectedActionId(null);
+      setBeliefSeatId(null);
       setActiveScenarioId(record.scenarioId);
       setActiveRevisionNo(record.revisionNo);
       setSavedScenarioDirty(false);
@@ -565,6 +617,8 @@ export default function Home() {
     const actionHistory = [...scenario.actionHistory, event];
     const next = { ...scenario, actionHistory, decisionPoint: { street: currentStreet, actorSeat: legal.actorSeat, afterSequence: actionHistory.length } };
     commitScenario(next);
+    setSelectedActionId(event.actionId);
+    setBeliefSeatId(event.actorSeat);
     await refreshState(next);
   }
 
@@ -588,10 +642,13 @@ export default function Home() {
     await refreshState(next);
   }
 
-  async function selectNode(sequence: number, street: string) {
-    const next = { ...scenario, decisionPoint: { ...scenario.decisionPoint, street, afterSequence: sequence } };
-    commitScenario(next);
-    await refreshState(next);
+  function selectAction(actionId: string) {
+    const selection = selectionForAction(scenario.actionHistory, actionId);
+    if (!selection) return;
+    invalidateRangeBelief();
+    setSelectedActionId(selection.actionId);
+    setBeliefSeatId(selection.actorSeat);
+    setBeliefMode("current");
   }
 
   async function runAnalysis() {
@@ -764,7 +821,13 @@ export default function Home() {
               : `求解${payload.status}${payload.error ? `：${payload.error}` : ""}`,
           );
           if (payload.status === "solved") {
-            void fetchRangeBelief(rangeSide, freshJob);
+            if (selectedAction) {
+              void fetchRangeBelief({
+                seatId: beliefSeatId ?? selectedAction.actorSeat,
+                afterSequence: selectedAction.eventSequence,
+                job: freshJob,
+              });
+            }
           }
           return;
         }
@@ -854,8 +917,8 @@ export default function Home() {
           <section className="panel compact-panel">
             <ActionTimeline
               events={scenario.actionHistory}
-              selectedSequence={scenario.decisionPoint.afterSequence}
-              onSelectNode={(sequence, street) => void selectNode(sequence, street)}
+              selectedActionId={selectedActionId}
+              onSelectAction={selectAction}
               onRefresh={() => void refreshState()}
             />
           </section>
@@ -918,13 +981,19 @@ export default function Home() {
             rangeCombos={rangeCombos}
             belief={rangeBelief}
             beliefLoading={rangeBeliefLoading}
+            beliefStale={rangeBeliefStale}
             beliefMode={beliefMode}
+            beliefSeatId={beliefSeatId ?? selectedAction?.actorSeat ?? beliefSeatForSide(rangeSide)}
+            beliefSeats={scenario.seats}
+            beliefEventSequence={selectedAction?.eventSequence ?? null}
+            beliefDecisionSequence={selectedAction?.decisionSequence ?? null}
             onRangeSideChange={selectRangeSide}
             onRangeTextChange={setCurrentRangeText}
             onApplyDefault={(key) => void applyDefaultRange(key)}
             onParse={() => void parseRange()}
             onCycleCell={(cell) => void cycleRangeCell(cell)}
             onBeliefModeChange={setBeliefMode}
+            onBeliefSeatChange={selectBeliefSeat}
           />
 
           <AnalyzeActions
