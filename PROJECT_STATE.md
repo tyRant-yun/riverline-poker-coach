@@ -7,7 +7,7 @@
 
 浏览器端 NLHE 德州扑克 AI 教练：规则引擎（PokerKit）重放牌局 → 结构化分析（Evidence）→ 教学解释（Coach）→ 练习（Practice）→ 翻后求解（Solver sidecar）。前端 Next.js（静态导出），后端 FastAPI + SQLite/PostgreSQL + Redis 队列。
 
-## 2. 当前进度（全部完成 ✅）
+## 2. 当前进度（核心实现存在；产品能力审计未通过）
 
 | 阶段 | 内容 | 提交 |
 |---|---|---|
@@ -28,7 +28,7 @@
 | RangeBelief V1.1 | **Grounding & Temporal Correctness**：solver job/artifact 绑定 scenario+spot fingerprint、exact policy sequence/actor seat/active seats；jobId 是 grounded 入口，裸 result 仅 `unverified`；target-seat-aware dead cards；`board_at_sequence` 防未来牌泄漏；prior/current union 保留完全淘汰 combo 的负 Delta；single-size off-tree sizing；frontend polling 使用新 artifact，scenario mutation/load/undo/redo 失效旧 solver/belief | local V1.1（2026-08-11） |
 | RangeBelief V2.0 | **8-max Preflop Policy（首个窄覆盖版本）**：内置、版本化的 `preflop_policy` provider；仅覆盖 8-max NLHE、全员 100BB、no-ante/no-rake、无前序入池、2.5BB RFI 的 UTG→SB 七个位置。以完整 combo×{Raise,Fold} 策略表重建该行动；节点外一律 `no_policy`，不近似映射。数据为 first-party curated baseline（`confidence=curated`），非 solver export | local V2.0（2026-08-11） |
 | TeachingAgent | 外部 teaching agent 接入 compose（LLM env 插值）+ LLM 超时 60→180s（另一 worktree：fix/teaching-agent，已推送 origin） | 694faa2 |
-| Hand Review Workbench | **整手逐决策复盘闭环已实现并通过最终 QA**：真实行动时间线与 actionId 选择、行动前/行动后双游标、按行动者自动 Range Belief（Prior/Current/Δ 与 unavailable/stale）、按 actionId 独立手动 Solver job、grounded SolverAssessment、逐决策教学、整手总结、不确定性与 priority finding 跳转；完成牌局可回看此前决策 | `89842f0`, `b3f3a50`（2026-08-11） |
+| Hand Review Workbench | **实现链路已存在，但 2026-08-11 产品能力审计未通过 P0 发布门**：UI 仍为 HU-only，无法构造后端支持的 6/8-max；真实 Range Belief 仅覆盖 UI 不可达的七个 8-max 2.5BB RFI；整手复盘使用本地模板，未调用外部 Teacher。既有 actionId、时间语义、SolverAssessment 与复盘展示仍保留 | `89842f0`, `b3f3a50`, `310cb2a`, `73c5f30`, `a4d1516` |
 
 分支：`main`（单分支工作流）+ `fix/teaching-agent`（worktree：德州扑克-worktree）。
 
@@ -45,6 +45,9 @@
 | tsc --noEmit | 0 错误 |
 | next build | ✓ |
 | Playwright | **7 passed**；含完整 Hand Review Workbench 流程 E2E |
+| 产品能力审计（真实 Range/构造） | **1 passed / 2 failed（预期红）**；8-max UI 与 HU Current Range 为 P0 失败 |
+| Range 覆盖矩阵 | **7/19 非 fixture 可用（36.8%）**；全部为 8-max 2.5BB RFI，真实 UI 端到端为 0/19 |
+| Agent 接线审计 | 单节点 **5 passed**；整手 **1 failed（预期红）**，8 个决策实际 0 次 Teacher 调用 |
 
 ## 4. 关键架构约束（不可违背）
 
@@ -109,10 +112,13 @@ curl -X POST http://127.0.0.1:8000/v1/ranges/trace -d '{"scenario": {...}, "seat
 
 ## 6.1 当前 Hand Review Workbench 状态
 
+> 注意：以下描述区分“实现存在”和“真实用户可完成”。首轮全链路审计结论见 `docs/product-full-chain-audit.md`；当前不得再将本功能称为产品级 100% 完成。
+
 - **行动与范围**：追加或选择玩家行动后，前端按 actor seat 请求该行动的行动后 Range Belief；`eventSequence` 用于范围 trace，`decisionSequence = eventSequence - 1` 用于行动前分析与 Solver。可用时显示 Prior / Current / Δ；`no_policy`、`unsupported_action`、`zero_probability_action` 等情况保留 Prior 并返回 unavailable，不生成假 Current。旧响应、场景 mutation、load、undo/redo 会被 request gate / fingerprint 标为 stale。
 - **逐节点 Solver**：选中历史玩家行动后，显式点击「提交 Solver」才创建该 `actionId` 的 job。gate 为翻后、恰好 2 位 active players、两位范围就绪；job 绑定 `actionId`、`decisionSequence`、`policySequence`、`actorSeat`、`scenarioFingerprint`、`spotFingerprint`。场景或节点变化会使不匹配 job stale；没有整手自动 bulk solve。
 - **整手教学**：`POST /v1/hand-reviews` 返回按真实行动顺序的 `decisionReviews`，每个节点拥有行动前快照、独立 EvidenceBundle、rangeUpdate、solverAssessment、teaching 和 warnings；整手结果另有 `wholeHandSummary`、`priorityFindings`、`uncertainty`。priority finding 可用 actionId 跳转回对应决策卡。已完成牌局仍能复盘此前的玩家行动。
 - **Solver 状态解释**：`primary`、`mixed`、`rare`、`absent`、`unscored` 是产品展示状态；5% 仅是记录在 metadata 的 `product_interpretation` 阈值。off-tree nearest-size、未验证/不匹配 artifact、无具体 combo、未支持节点均保持 unscored；系统不输出不受支持的 action-specific EV loss。
+- **能力审计缺口**：前端没有 table size/button/hero/per-seat 编辑器；默认 HU common actions 无产品 policy，Current/Δ 不可用；`/v1/hand-reviews` 的 rangeUpdate 仍是 deterministic v1 unavailable 占位，整手 teaching 固定为 local template，未调用配置的外部 Teacher。
 
 ## 7. 已知边界与剩余风险
 
@@ -120,6 +126,8 @@ curl -X POST http://127.0.0.1:8000/v1/ranges/trace -d '{"scenario": {...}, "seat
 - 求解器：仅翻后（flop+）且决策点恰好 2 活玩家；bunching 忽略并记录为近似（`assumptions` 字段）
 - 整手复盘已实现，但“有 Solver”不等于“整手所有节点都有 Solver”：Solver 必须按节点显式提交，且只消费与 actionId/节点 fingerprint 匹配的已完成 job；无 job、no-policy、off-tree、provenance mismatch 和不支持节点都保持原则性教学或 unscored。
 - 当前 `mixed` 的 5% 边界是产品解释，不是扑克理论阈值；`primary/mixed/rare/absent` 只描述实际行动在已验证 SolverNode 中的频率关系，不能单独推出好坏或 EV 损失。
+- 首轮真实能力审计：后端 104/104 个 2/6/8 人 table/button/hero 组合可构造，但 UI 只能编辑 HU；Range Belief 排除 fixture 后仅 7/19 可用且全部 UI 不可达，因此当前审计样本真实端到端可用率为 0/19。
+- 外部 Agent 仅接入单节点 `/v1/teaching` 与保存场景 `/teach`；整手 `/v1/hand-reviews` 对 8 个决策实际调用 Teacher 0 次，必须把本地模板与 Agent 输出明确区分。
 - **RangeBelief V2.0**：内置策略只是 8-max 100BB no-rake 2.5BB RFI（UTG→SB）的 curated 纯 raise/fold 基线，不是 solver frequency dataset；BB option、limp、open size 变体、面对 open/3-bet/4-bet、ante/rake/stack 变体仍会诚实阻断 belief 链（可用 fixture/manual policy 覆盖）。无 population/player-specific 模型；无完整 solver tree traversal，solver artifact 仅覆盖显式绑定的一个 action sequence/node；off-tree 用 nearest-size（等距取小）非插值；前端默认按选中行动者/范围侧映射 belief seat，也支持在范围面板选择 seat；前端 initialScenario 仍为 HU
 - 8-max 前端：前端 initialScenario 仍为 HU；多way 场景主要经 API 使用
 - docker 偶发：引擎恢复期端口绑定可能丢失（`docker port` 为空）→ `docker compose up -d --force-recreate api web`

@@ -1,7 +1,7 @@
 # Riverline 产品全链路覆盖审计
 
 日期：2026-08-11  
-状态：执行中  
+状态：首轮审计完成，P0 发布门未通过
 目的：验证真实用户能否完成任务，而不是仅验证已有 fixture 或被 mock 的成功路径。
 
 ## 1. 发布判定
@@ -105,3 +105,65 @@ npx playwright test --config playwright.audit.config.ts
 - 可在代码层修复的问题与必须补充数据/产品决策的问题分开；
 - 修复批次以“先可构造，再可用，再智能化，最后扩覆盖”为顺序；
 - 新发布门必须能在修复前稳定失败、修复后转绿。
+
+## 8. 首轮审计结论
+
+### 综合判定
+
+**当前产品不满足 P0 全链路发布标准。** 常规回归测试仍然证明规则、状态和既有组件没有回退，但不能证明用户能完成 8-max、获得可用 Range Belief 或让整手复盘调用 Agent。
+
+| 维度 | 实测结果 | 判定 |
+|---|---:|---|
+| 后端 2/6/8 人 table/button/hero 拓扑 | 104/104 可构造 | 后端能力存在 |
+| Range Belief（排除 fixture） | 7/19 可用，36.8% | 覆盖不足 |
+| 可用 Range 节点 | 仅 8-max 七个 2.5BB RFI | 覆盖极窄 |
+| 审计样本的真实 UI→Range 端到端能力 | 0/19 | P0 失败 |
+| UI 能力 Playwright | 1 passed / 2 failed | P0 失败 |
+| 单节点外部 Teacher | 5 条审计通过 | 有效但 UI provenance 不完整 |
+| 整手外部 Teacher | 8 个决策预期 8 次调用，实际 0 | P0 失败 |
+
+完整证据：
+
+- [Range/Table 覆盖报告](audits/range-table-coverage-report.md)
+- [Agent/Teaching 接线报告](audits/agent-teaching-wiring-report.md)
+
+### 已证实根因
+
+1. **前后端能力不可达**：后端支持 2–8 人，前端只提供 HU Hero/Villain 编辑面；
+2. **默认路径与策略覆盖错位**：产品默认 HU，但唯一内置真实策略是 8-max 精确 2.5BB RFI；
+3. **Range 链遇到首个缺 policy 即停止**：HU open/call、limp、BB option、3/4-bet 与抽样翻后线都在早期节点 `no_policy`；
+4. **整手复盘未注入 Teacher**：`/v1/hand-reviews` 直接使用本地 deterministic composer，外部 Teacher 调用数为 0；
+5. **旧 E2E 证明的是编排**：关键 Range、Solver、Review 响应被成功 fixture 拦截，无法作为真实覆盖证据。
+
+## 9. 建议修复批次
+
+### R1：让后端能力可从 UI 构造（P0）
+
+- 增加 table size 2–8、button seat、Hero seat、连续 seats、每 seat stack/cards/range；
+- position 应根据桌型与 button 自动派生并清楚展示，不允许制造与规则矛盾的任意 position；
+- import/export/load/reset/undo/redo 保留完整多座位状态；
+- 让 8-max 七个 curated RFI 节点第一次真正从 UI 可达；
+- 验收：8-max 红色 Playwright 转绿，并新增 6-max/8-max ActionBar 连续行动测试。
+
+### R2：把 Range Belief 从“诚实不可用”变成“可完成工作流”（P0）
+
+- 为默认 HU 常见 open/call/fold/3bet/4bet 定义有来源、版本和许可的 baseline policy；不得用 fixture 冒充产品策略；
+- 为不同 open size 明确 exact/off-tree 产品规则与 provenance；
+- 将历史节点手动 Solver 结果接入对应 actor action 的 belief provider 链，允许逐点补齐翻后 policy；
+- UI 对 `no_policy` 提供操作性下一步：选择受支持 baseline、求解该行动前节点、或明确只看 Prior；
+- 整手 review 的 `rangeUpdate` 必须消费真实 belief 结果，移除 deterministic v1 的固定 unavailable 占位；
+- 验收：J01/J02 默认 HU 路径、J04 七个 8-max RFI 与至少一条翻后 Solver-grounded trace 转绿。
+
+### R3：接通整手 Agent 并诚实显示来源（P0）
+
+- 给 `build_hand_review` 注入 review-scoped Teacher；每个真实决策只传该节点 bounded facts；
+- 外部成功、超时、schema drift、非法 evidence、未来牌隔离均走既有安全校验与本地降级；
+- decision 与 whole-hand contract 增加 `provider / teacherVersion / promptVersion / degraded / sourceKind`；
+- UI 明确区分 `external_agent` 与 `local_deterministic_template`；
+- 验收：J11 的 N 决策→N 次 bounded Teacher 调用红门转绿，整手 summary provenance 可见。
+
+### R4：重建发布门（P0）
+
+- 保留普通快速回归；新增 capability audit 作为独立必跑门；
+- P0 Range/Review/Agent 路径不得成功 mock；只有 Solver 计算本身可用持久化 deterministic artifact 替代长时求解；
+- 发布报告同时给出规则通过率、UI 可达率、真实 policy 覆盖率和 Agent 调用率，不再用单一“测试全绿”代表产品完成。
