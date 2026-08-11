@@ -19,6 +19,7 @@ from .models import (
     HandReviewSummary,
 )
 from .solver_assessment import assess_solver_action
+from .teaching import compose_hand_review_teaching
 
 
 def build_hand_review(
@@ -73,7 +74,7 @@ def build_hand_review(
             )
         reviews.append(review)
     uncertainty = tuple(dict.fromkeys(warning for review in reviews for warning in review.warnings))
-    return HandReviewResponse(
+    response = HandReviewResponse(
         hand_summary=HandReviewSummary(
             decision_count=len(reviews),
             reviewed_action_ids=tuple(review.action_id for review in reviews),
@@ -81,6 +82,7 @@ def build_hand_review(
         decision_reviews=tuple(reviews),
         uncertainty=uncertainty,
     )
+    return compose_hand_review_teaching(response)
 
 
 def _scenario_for_snapshot(scenario: ScenarioSpec, snapshot: DecisionSnapshot) -> ScenarioSpec:

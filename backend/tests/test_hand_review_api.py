@@ -119,6 +119,57 @@ def test_hand_review_returns_ordered_node_scoped_analysis_and_evidence():
         assert review["rangeUpdate"]["status"] == "unavailable"
 
 
+def test_hand_review_attaches_one_ordered_teaching_per_real_action_without_future_facts():
+    """Teaching is node-local even when the imported scenario contains a runout."""
+
+    client = TestClient(create_app(store=SQLiteStore(":memory:")))
+    response = client.post("/v1/hand-reviews", json=_completed_checkdown_payload())
+
+    assert response.status_code == 200, response.text
+    review = response.json()["review"]
+    decisions = review["decisionReviews"]
+    assert len(decisions) == 8
+    assert [item["actionId"] for item in decisions] == review["handSummary"]["reviewedActionIds"]
+    assert all(item["teaching"] is not None for item in decisions)
+    assert [item["teaching"]["teachingVersion"] for item in decisions] == [
+        "hand-review-teaching-1"
+    ] * len(decisions)
+
+    earliest = decisions[0]
+    teaching_blob = str(earliest["teaching"])
+    # The future turn and river cards are not visible before a1 and cannot be
+    # present in the local teaching's text or evidence references.
+    assert "9s" not in teaching_blob
+    assert "3h" not in teaching_blob
+    bundle_ids = {item["evidenceId"] for item in earliest["evidenceBundle"]["items"]}
+    for text in (
+        earliest["teaching"]["summary"],
+        earliest["teaching"]["uncertainty"],
+        *earliest["teaching"]["keyPoints"],
+    ):
+        assert {ref["evidenceId"] for ref in text["evidenceReferences"]} <= bundle_ids
+
+    assert review["wholeHandSummary"]["summary"]
+    assert review["priorityFindings"] == []
+
+
+def test_unscored_and_no_policy_teaching_are_honest_principle_only_language():
+    client = TestClient(create_app(store=SQLiteStore(":memory:")))
+    response = client.post("/v1/hand-reviews", json=_completed_checkdown_payload())
+
+    assert response.status_code == 200, response.text
+    teaching = response.json()["review"]["decisionReviews"][0]["teaching"]
+    text = " ".join(
+        [teaching["summary"]["text"], teaching["uncertainty"]["text"]]
+        + [point["text"] for point in teaching["keyPoints"]]
+    )
+    assert teaching["mode"] == "principle_only"
+    assert "Solver 错误" not in text
+    assert "策略失误" not in text
+    assert "EV 损失" not in text
+    assert "no_policy" in text
+
+
 def test_hand_review_honestly_degrades_when_hole_cards_and_equity_are_unavailable():
     client = TestClient(create_app(store=SQLiteStore(":memory:")))
 
@@ -271,6 +322,23 @@ def test_hand_review_solver_assessment_statuses_use_the_product_threshold(
             "kind": "product_interpretation",
         }
         assert "evLoss" not in assessment
+        findings = response.json()["review"]["priorityFindings"]
+        if expected_status in {"rare", "absent"}:
+            assert findings == [
+                {
+                    "actionId": "a4",
+                    "category": "solver_deviation",
+                    "mistakeTag": (
+                        "solver_rare_action"
+                        if expected_status == "rare"
+                        else "solver_absent_action"
+                    ),
+                    "severity": "review",
+                    "summary": response.json()["review"]["decisionReviews"][2]["teaching"]["summary"],
+                }
+            ]
+        else:
+            assert findings == []
     finally:
         queue.close()
 

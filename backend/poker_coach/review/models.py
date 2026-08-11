@@ -22,6 +22,7 @@ from poker_coach.domain.models import (
     SeatNumber,
     StateSnapshot,
     Street,
+    TeachingText,
 )
 from poker_coach.strategy.models import StrategyMatch
 
@@ -110,6 +111,45 @@ class ReviewSolverAssessment(DomainModel):
         return data
 
 
+class DecisionTeaching(DomainModel):
+    """A node-local explanation that may cite only this review's evidence."""
+
+    teaching_version: str = "hand-review-teaching-1"
+    mode: Literal["solver_grounded", "principle_only"] = "principle_only"
+    provider: Literal["local"] = "local"
+    summary: TeachingText
+    key_points: tuple[TeachingText, ...] = ()
+    uncertainty: TeachingText
+    mistake_tags: tuple[str, ...] = ()
+
+    def validate_evidence_references(self, bundle: EvidenceBundle) -> None:
+        references = list(self.summary.evidence_references)
+        references.extend(self.uncertainty.evidence_references)
+        for point in self.key_points:
+            references.extend(point.evidence_references)
+        missing = sorted({item.evidence_id for item in references} - bundle.ids())
+        if missing:
+            raise ValueError(f"decision teaching references unknown evidence: {missing}")
+
+
+class PriorityFinding(DomainModel):
+    """A stable, action-addressable review target for UI navigation/practice."""
+
+    action_id: str = Field(min_length=1, max_length=128)
+    category: Literal["solver_deviation"]
+    mistake_tag: Literal["solver_rare_action", "solver_absent_action"]
+    severity: Literal["review"] = "review"
+    summary: TeachingText
+
+
+class WholeHandTeaching(DomainModel):
+    """Aggregate wording derived only from already-composed node teachings."""
+
+    teaching_version: str = "hand-review-whole-hand-1"
+    summary: str = Field(min_length=1)
+    uncertainty: str = Field(min_length=1)
+
+
 class DecisionReview(DomainModel):
     """One real player action, analyzed only from its pre-action state."""
 
@@ -127,6 +167,7 @@ class DecisionReview(DomainModel):
     warnings: tuple[str, ...] = ()
     range_update: ReviewRangeUpdate = Field(default_factory=ReviewRangeUpdate)
     solver_assessment: ReviewSolverAssessment = Field(default_factory=ReviewSolverAssessment)
+    teaching: DecisionTeaching | None = None
 
 
 class HandReviewSummary(DomainModel):
@@ -142,4 +183,6 @@ class HandReviewResponse(DomainModel):
     hand_review_version: str = "hand-review-1"
     hand_summary: HandReviewSummary
     decision_reviews: tuple[DecisionReview, ...] = ()
+    whole_hand_summary: WholeHandTeaching | None = None
+    priority_findings: tuple[PriorityFinding, ...] = ()
     uncertainty: tuple[str, ...] = ()
