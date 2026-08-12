@@ -16,6 +16,7 @@ FastAPI flow over PostgreSQL.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 import os
 from threading import Barrier
 
@@ -26,9 +27,22 @@ from poker_coach.analysis import analyze_scenario
 from poker_coach.api import AppConfig, create_app
 from poker_coach.domain.models import ScenarioSpec
 from poker_coach.learning import LearningService
-from poker_coach.persistence import PostgresHandEventStore, PostgresStore, SQLiteStore
+from poker_coach.persistence import (
+    PostgresHandEventStore,
+    PostgresProjectionStore,
+    PostgresStore,
+    SQLiteStore,
+)
 from poker_coach.rules import PokerKitAdapter
-from poker_coach.simulator import ExpectedSequenceConflict, HandEventV1, RawHandEventV1
+from poker_coach.simulator import (
+    ExpectedSequenceConflict,
+    HandEventV1,
+    OutboxDispatcher,
+    OutboxIntentV1,
+    ProjectionIdentityV1,
+    ProjectionRunner,
+    RawHandEventV1,
+)
 
 PG_URL = os.getenv("POKER_COACH_TEST_PG_URL")
 
@@ -206,6 +220,80 @@ def test_live_hand_event_append_round_trip_and_same_expected_sequence_race(pg_st
     finally:
         first.close()
         second.close()
+
+
+def test_live_projection_rebuild_and_transactional_outbox_dispatch(pg_store):
+    event_store = PostgresHandEventStore(PG_URL)
+    projection_store = PostgresProjectionStore(PG_URL)
+    event = RawHandEventV1.from_event(
+        HandEventV1.model_validate(
+            {
+                "schemaVersion": 1,
+                "eventId": "evt-live-recovery",
+                "handId": "live-session:hand:recovery",
+                "sequence": 1,
+                "timestamp": "2026-08-12T00:00:01Z",
+                "source": "fixture",
+                "provenance": {
+                    "producer": "riverline-live-tests",
+                    "producerVersion": "1.0.0",
+                    "correlationId": "live-session",
+                },
+                "payload": {
+                    "kind": "hand_started",
+                    "ruleset": "nlhe",
+                    "tableSize": 2,
+                    "buttonSeat": 0,
+                    "smallBlind": 50,
+                    "bigBlind": 100,
+                    "startingStacks": {"0": 10_000, "1": 10_000},
+                    "rngSeed": 20260812,
+                },
+            }
+        )
+    )
+    intent = OutboxIntentV1.for_event(
+        event_id=event.event.event_id,
+        purpose="review_requested",
+        topic="hand.review.requested",
+        payload={"handId": event.event.hand_id},
+    )
+    identity = ProjectionIdentityV1(
+        projection_name="live_event_ids",
+        projection_version=1,
+    )
+
+    try:
+        event_store.append(
+            hand_id=event.event.hand_id,
+            expected_sequence=0,
+            events=(event,),
+            outbox_intents=(intent,),
+        )
+        runner = ProjectionRunner(
+            event_store,
+            projection_store,
+            identity,
+            lambda snapshot, item: {
+                "eventIds": [*(snapshot or {}).get("eventIds", []), item.event_id]
+            },
+        )
+        incremental = runner.run(event.event.hand_id)
+        rebuilt = runner.rebuild(event.event.hand_id)
+        delivered = []
+        result = OutboxDispatcher(event_store).dispatch_once(
+            worker_id="live-worker",
+            dispatch=lambda message: delivered.append(message.idempotency_key),
+            now=datetime(2026, 8, 12, tzinfo=timezone.utc),
+        )
+
+        assert rebuilt.payload == incremental.payload
+        assert rebuilt.fingerprint == incremental.fingerprint
+        assert result.dispatched_count == 1
+        assert delivered == [intent.idempotency_key]
+    finally:
+        projection_store.close()
+        event_store.close()
 
 
 def test_live_scenario_crud_parity_with_sqlite(pg_store, tmp_path):
@@ -399,8 +487,16 @@ def test_live_alembic_migration_upgrade_and_downgrade(pg_store):
             tables = {row[0] for row in cursor.fetchall()}
             cursor.execute("SELECT version_num FROM alembic_version")
             version = cursor.fetchone()[0]
-    assert {"scenarios", "analysis_runs", "learning_profiles"} <= tables
-    assert version == "0002"
+    assert {
+        "scenarios",
+        "analysis_runs",
+        "learning_profiles",
+        "hand_events",
+        "projection_checkpoints",
+        "projection_snapshots",
+        "outbox_messages",
+    } <= tables
+    assert version == "0003"
 
     # The migrated schema must satisfy the store contract.
     store = PostgresStore(PG_URL)

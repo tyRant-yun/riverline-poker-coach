@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Sequence
@@ -16,8 +17,14 @@ from poker_coach.simulator.event_store import (
     HandEventIdentityConflict,
     HandEventStoreError,
     HandEventStoreFailure,
+    OutboxIdentityConflict,
     RawHandEventV1,
     validate_append_batch,
+)
+from poker_coach.simulator.recovery import (
+    OutboxIntentV1,
+    OutboxMessageV1,
+    OutboxStatusV1,
 )
 
 
@@ -51,8 +58,12 @@ class SQLiteHandEventStore:
         schema = Path(__file__).with_name("hand_events_schema.sql").read_text(
             encoding="utf-8"
         )
+        outbox_schema = Path(__file__).with_name("outbox_schema.sql").read_text(
+            encoding="utf-8"
+        )
         with self._lock:
             self._connection.executescript(schema)
+            self._connection.executescript(outbox_schema)
 
     def close(self) -> None:
         with self._lock:
@@ -64,12 +75,14 @@ class SQLiteHandEventStore:
         hand_id: str,
         expected_sequence: int,
         events: Sequence[RawHandEventV1],
+        outbox_intents: Sequence[OutboxIntentV1] = (),
     ) -> HandEventAppendResult:
         batch = validate_append_batch(
             hand_id=hand_id,
             expected_sequence=expected_sequence,
             events=events,
         )
+        intents = _validate_outbox_intents(outbox_intents)
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
@@ -106,6 +119,25 @@ class SQLiteHandEventStore:
                         for item in batch
                     ],
                 )
+                self._connection.executemany(
+                    """
+                    INSERT INTO outbox_messages
+                        (message_id, idempotency_key, schema_version, topic,
+                         payload_json, status, attempt_count, available_at)
+                    VALUES (?, ?, ?, ?, ?, 'pending', 0,
+                            '1970-01-01T00:00:00+00:00')
+                    """,
+                    [
+                        (
+                            intent.message_id,
+                            intent.idempotency_key,
+                            intent.schema_version,
+                            intent.topic,
+                            _json(intent.payload),
+                        )
+                        for intent in intents
+                    ],
+                )
             except sqlite3.IntegrityError as exc:
                 self._connection.rollback()
                 message = str(exc).lower()
@@ -113,6 +145,11 @@ class SQLiteHandEventStore:
                     raise HandEventIdentityConflict(
                         "event_id_conflict",
                         "event_id is already present in the durable event log",
+                    ) from None
+                if "outbox" in message or "idempotency_key" in message:
+                    raise OutboxIdentityConflict(
+                        "outbox_identity_conflict",
+                        "outbox message_id or idempotency_key is already durable",
                     ) from None
                 raise HandEventIdentityConflict(
                     "sequence_conflict",
@@ -159,6 +196,108 @@ class SQLiteHandEventStore:
             ) from None
         return tuple(RawHandEventV1.from_json(row["raw_event_json"]) for row in rows)
 
+    def claim_outbox(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+        lease_seconds: int,
+        limit: int = 100,
+    ) -> tuple[OutboxMessageV1, ...]:
+        if not worker_id or lease_seconds <= 0 or limit <= 0:
+            raise ValueError("worker_id, lease_seconds and limit must be positive")
+        now_text = _utc_iso(now)
+        lease_text = _utc_iso(now + timedelta(seconds=lease_seconds))
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._connection.execute(
+                    "UPDATE outbox_messages SET status = 'pending', claimed_by = NULL, "
+                    "lease_expires_at = NULL WHERE status = 'processing' "
+                    "AND lease_expires_at <= ?",
+                    (now_text,),
+                )
+                rows = self._connection.execute(
+                    "SELECT message_id FROM outbox_messages "
+                    "WHERE status = 'pending' AND available_at <= ? "
+                    "ORDER BY message_id LIMIT ?",
+                    (now_text, limit),
+                ).fetchall()
+                message_ids = [str(row["message_id"]) for row in rows]
+                for message_id in message_ids:
+                    self._connection.execute(
+                        "UPDATE outbox_messages SET status = 'processing', "
+                        "attempt_count = attempt_count + 1, claimed_by = ?, "
+                        "lease_expires_at = ? WHERE message_id = ? AND status = 'pending'",
+                        (worker_id, lease_text, message_id),
+                    )
+                claimed = [
+                    self._connection.execute(
+                        "SELECT * FROM outbox_messages WHERE message_id = ?",
+                        (message_id,),
+                    ).fetchone()
+                    for message_id in message_ids
+                ]
+            except Exception:
+                self._connection.rollback()
+                raise
+            else:
+                self._connection.commit()
+        return tuple(_outbox_message_from_row(row) for row in claimed)
+
+    def load_outbox(self, message_id: str) -> OutboxMessageV1 | None:
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT * FROM outbox_messages WHERE message_id = ?",
+                (message_id,),
+            ).fetchone()
+        return None if row is None else _outbox_message_from_row(row)
+
+    def mark_outbox_dispatched(self, *, message_id: str, worker_id: str) -> None:
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = self._connection.execute(
+                    "UPDATE outbox_messages SET status = 'dispatched', "
+                    "claimed_by = NULL, lease_expires_at = NULL, last_error = NULL "
+                    "WHERE message_id = ? AND status = 'processing' AND claimed_by = ?",
+                    (message_id, worker_id),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("outbox claim is no longer owned by this worker")
+            except Exception:
+                self._connection.rollback()
+                raise
+            else:
+                self._connection.commit()
+
+    def retry_outbox(
+        self,
+        *,
+        message_id: str,
+        worker_id: str,
+        available_at: datetime,
+        error: str,
+    ) -> None:
+        if not error:
+            raise ValueError("outbox retry requires an error")
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = self._connection.execute(
+                    "UPDATE outbox_messages SET status = 'pending', available_at = ?, "
+                    "claimed_by = NULL, lease_expires_at = NULL, last_error = ? "
+                    "WHERE message_id = ? AND status = 'processing' AND claimed_by = ?",
+                    (_utc_iso(available_at), error[:512], message_id, worker_id),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("outbox claim is no longer owned by this worker")
+            except Exception:
+                self._connection.rollback()
+                raise
+            else:
+                self._connection.commit()
+
 
 class PostgresHandEventStore:
     """PostgreSQL adapter using a per-hand transaction advisory lock.
@@ -193,12 +332,14 @@ class PostgresHandEventStore:
         hand_id: str,
         expected_sequence: int,
         events: Sequence[RawHandEventV1],
+        outbox_intents: Sequence[OutboxIntentV1] = (),
     ) -> HandEventAppendResult:
         batch = validate_append_batch(
             hand_id=hand_id,
             expected_sequence=expected_sequence,
             events=events,
         )
+        intents = _validate_outbox_intents(outbox_intents)
         try:
             with self._transaction() as cursor:
                 cursor.execute(
@@ -236,6 +377,23 @@ class PostgresHandEventStore:
                             item.raw_json,
                         ),
                     )
+                for intent in intents:
+                    cursor.execute(
+                        """
+                        INSERT INTO outbox_messages
+                            (message_id, idempotency_key, schema_version, topic,
+                             payload_json, status, attempt_count, available_at)
+                        VALUES (%s, %s, %s, %s, %s, 'pending', 0,
+                                '1970-01-01T00:00:00+00:00')
+                        """,
+                        (
+                            intent.message_id,
+                            intent.idempotency_key,
+                            intent.schema_version,
+                            intent.topic,
+                            _json(intent.payload),
+                        ),
+                    )
         except HandEventStoreError:
             raise
         except Exception as exc:
@@ -263,16 +421,125 @@ class PostgresHandEventStore:
             for row in rows
         )
 
+    def claim_outbox(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+        lease_seconds: int,
+        limit: int = 100,
+    ) -> tuple[OutboxMessageV1, ...]:
+        if not worker_id or lease_seconds <= 0 or limit <= 0:
+            raise ValueError("worker_id, lease_seconds and limit must be positive")
+        now_text = _utc_iso(now)
+        lease_text = _utc_iso(now + timedelta(seconds=lease_seconds))
+        try:
+            with self._transaction() as cursor:
+                cursor.execute(
+                    "UPDATE outbox_messages SET status = 'pending', claimed_by = NULL, "
+                    "lease_expires_at = NULL WHERE status = 'processing' "
+                    "AND lease_expires_at <= %s",
+                    (now_text,),
+                )
+                cursor.execute(
+                    "SELECT message_id FROM outbox_messages "
+                    "WHERE status = 'pending' AND available_at <= %s "
+                    "ORDER BY message_id LIMIT %s FOR UPDATE SKIP LOCKED",
+                    (now_text, limit),
+                )
+                message_ids = [
+                    str(_first_value(row, "message_id")) for row in cursor.fetchall()
+                ]
+                claimed = []
+                for message_id in message_ids:
+                    cursor.execute(
+                        "UPDATE outbox_messages SET status = 'processing', "
+                        "attempt_count = attempt_count + 1, claimed_by = %s, "
+                        "lease_expires_at = %s WHERE message_id = %s "
+                        "RETURNING message_id, idempotency_key, schema_version, topic, "
+                        "payload_json, status, attempt_count, available_at, claimed_by, "
+                        "lease_expires_at, last_error",
+                        (worker_id, lease_text, message_id),
+                    )
+                    claimed.append(cursor.fetchone())
+        except Exception as exc:
+            raise _postgres_domain_error(exc) from None
+        return tuple(_outbox_message_from_row(row) for row in claimed)
+
+    def load_outbox(self, message_id: str) -> OutboxMessageV1 | None:
+        try:
+            with self._transaction() as cursor:
+                cursor.execute(
+                    "SELECT message_id, idempotency_key, schema_version, topic, "
+                    "payload_json, status, attempt_count, available_at, claimed_by, "
+                    "lease_expires_at, last_error FROM outbox_messages "
+                    "WHERE message_id = %s",
+                    (message_id,),
+                )
+                row = cursor.fetchone()
+        except Exception as exc:
+            raise _postgres_domain_error(exc) from None
+        return None if row is None else _outbox_message_from_row(row)
+
+    def mark_outbox_dispatched(self, *, message_id: str, worker_id: str) -> None:
+        try:
+            with self._transaction() as cursor:
+                cursor.execute(
+                    "UPDATE outbox_messages SET status = 'dispatched', "
+                    "claimed_by = NULL, lease_expires_at = NULL, last_error = NULL "
+                    "WHERE message_id = %s AND status = 'processing' AND claimed_by = %s",
+                    (message_id, worker_id),
+                )
+                if cursor.rowcount != 1:
+                    raise HandEventStoreFailure(
+                        "outbox_claim_lost",
+                        "outbox claim is no longer owned by this worker",
+                    )
+        except HandEventStoreError:
+            raise
+        except Exception as exc:
+            raise _postgres_domain_error(exc) from None
+
+    def retry_outbox(
+        self,
+        *,
+        message_id: str,
+        worker_id: str,
+        available_at: datetime,
+        error: str,
+    ) -> None:
+        if not error:
+            raise ValueError("outbox retry requires an error")
+        try:
+            with self._transaction() as cursor:
+                cursor.execute(
+                    "UPDATE outbox_messages SET status = 'pending', available_at = %s, "
+                    "claimed_by = NULL, lease_expires_at = NULL, last_error = %s "
+                    "WHERE message_id = %s AND status = 'processing' AND claimed_by = %s",
+                    (_utc_iso(available_at), error[:512], message_id, worker_id),
+                )
+                if cursor.rowcount != 1:
+                    raise HandEventStoreFailure(
+                        "outbox_claim_lost",
+                        "outbox claim is no longer owned by this worker",
+                    )
+        except HandEventStoreError:
+            raise
+        except Exception as exc:
+            raise _postgres_domain_error(exc) from None
+
     def _initialize(self) -> None:
-        schema = Path(__file__).with_name("hand_events_schema.sql").read_text(
-            encoding="utf-8"
+        schemas = (
+            Path(__file__).with_name("hand_events_schema.sql"),
+            Path(__file__).with_name("outbox_schema.sql"),
         )
         try:
             with self._transaction() as cursor:
-                for statement in schema.split(";\n"):
-                    statement = statement.strip()
-                    if statement:
-                        cursor.execute(statement)
+                for path in schemas:
+                    for statement in path.read_text(encoding="utf-8").split(";\n"):
+                        statement = statement.strip()
+                        if statement:
+                            cursor.execute(statement)
         except HandEventStoreError:
             raise
         except Exception as exc:
@@ -308,6 +575,11 @@ def _postgres_domain_error(exc: Exception) -> HandEventStoreError:
                 "event_id_conflict",
                 "event_id is already present in the durable event log",
             )
+        if constraint in {"pk_outbox_messages", "uq_outbox_messages_idempotency_key"}:
+            return OutboxIdentityConflict(
+                "outbox_identity_conflict",
+                "outbox message_id or idempotency_key is already durable",
+            )
         return HandEventIdentityConflict(
             "sequence_conflict",
             "hand sequence is already present in the durable event log",
@@ -320,6 +592,55 @@ def _postgres_domain_error(exc: Exception) -> HandEventStoreError:
     return HandEventStoreFailure(
         "storage_failure", "PostgreSQL hand event persistence failed"
     )
+
+
+def _utc_iso(value: datetime) -> str:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("outbox timestamps must be timezone-aware")
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _outbox_message_from_row(row) -> OutboxMessageV1:
+    def value(name: str, index: int):
+        try:
+            return row[name]
+        except (TypeError, IndexError):
+            return row[index]
+
+    return OutboxMessageV1(
+        message_id=str(value("message_id", 0)),
+        idempotency_key=str(value("idempotency_key", 1)),
+        topic=str(value("topic", 3)),
+        payload=json.loads(str(value("payload_json", 4))),
+        status=OutboxStatusV1(str(value("status", 5))),
+        attempt_count=int(value("attempt_count", 6)),
+        available_at=datetime.fromisoformat(str(value("available_at", 7))),
+        claimed_by=(
+            None if value("claimed_by", 8) is None else str(value("claimed_by", 8))
+        ),
+        lease_expires_at=(
+            None
+            if value("lease_expires_at", 9) is None
+            else datetime.fromisoformat(str(value("lease_expires_at", 9)))
+        ),
+        last_error=(
+            None if value("last_error", 10) is None else str(value("last_error", 10))
+        ),
+    )
+
+
+def _validate_outbox_intents(
+    intents: Sequence[OutboxIntentV1],
+) -> tuple[OutboxIntentV1, ...]:
+    batch = tuple(intents)
+    message_ids = [intent.message_id for intent in batch]
+    keys = [intent.idempotency_key for intent in batch]
+    if len(message_ids) != len(set(message_ids)) or len(keys) != len(set(keys)):
+        raise OutboxIdentityConflict(
+            "duplicate_outbox_identity_in_batch",
+            "outbox message_id and idempotency_key values must be unique within a batch",
+        )
+    return batch
 
 
 __all__ = ["PostgresHandEventStore", "SQLiteHandEventStore"]

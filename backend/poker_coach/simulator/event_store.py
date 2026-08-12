@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Protocol, Sequence, runtime_checkable
 
 from .contracts import HandEventV1
+from .recovery import OutboxIntentV1
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +76,10 @@ class HandEventStoreFailure(HandEventStoreError):
     pass
 
 
+class OutboxIdentityConflict(HandEventStoreError):
+    pass
+
+
 @runtime_checkable
 class HandEventStore(Protocol):
     """Atomic optimistic append and ordered read boundary.
@@ -90,6 +95,7 @@ class HandEventStore(Protocol):
         hand_id: str,
         expected_sequence: int,
         events: Sequence[RawHandEventV1],
+        outbox_intents: Sequence[OutboxIntentV1] = (),
     ) -> HandEventAppendResult: ...
 
     def read(self, hand_id: str) -> tuple[RawHandEventV1, ...]: ...
@@ -142,5 +148,6 @@ __all__ = [
     "HandEventStore",
     "HandEventStoreError",
     "HandEventStoreFailure",
+    "OutboxIdentityConflict",
     "RawHandEventV1",
 ]

@@ -53,6 +53,7 @@ from .event_store import (
     HandEventStoreError,
     HandEventStoreFailure,
     RawHandEventV1,
+    OutboxIdentityConflict,
 )
 from .orchestrator import (
     GameCommandError,
@@ -60,6 +61,23 @@ from .orchestrator import (
     GameOrchestrator,
     OpenHandCommandV1,
     PlayerActionCommandV1,
+)
+from .recovery import (
+    OutboxIntentV1,
+    OutboxDispatcher,
+    OutboxDispatchResultV1,
+    OutboxMessageV1,
+    OutboxStatusV1,
+    OutboxStore,
+    ProjectionCheckpointV1,
+    ProjectionError,
+    ProjectionIdentityV1,
+    ProjectionNeedsRebuild,
+    ProjectionRunner,
+    ProjectionSequenceError,
+    ProjectionSnapshotV1,
+    ProjectionStore,
+    ProjectionStoreFailure,
 )
 
 __all__ = [
@@ -107,9 +125,25 @@ __all__ = [
     "HandEventStoreError",
     "HandEventStoreFailure",
     "RawHandEventV1",
+    "OutboxIdentityConflict",
     "GameCommandResultV1",
     "GameCommandError",
     "GameOrchestrator",
     "OpenHandCommandV1",
     "PlayerActionCommandV1",
+    "ProjectionIdentityV1",
+    "ProjectionCheckpointV1",
+    "ProjectionError",
+    "ProjectionNeedsRebuild",
+    "ProjectionRunner",
+    "ProjectionSequenceError",
+    "ProjectionSnapshotV1",
+    "ProjectionStore",
+    "ProjectionStoreFailure",
+    "OutboxIntentV1",
+    "OutboxDispatcher",
+    "OutboxDispatchResultV1",
+    "OutboxMessageV1",
+    "OutboxStatusV1",
+    "OutboxStore",
 ]

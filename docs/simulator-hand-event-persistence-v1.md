@@ -4,7 +4,9 @@ Status: F1-02 append/read seam
 
 This seam persists the frozen `HandEventV1` envelope. It does not validate
 PokerKit rules, run a session orchestrator, update or delete events, build a
-projection/outbox/snapshot, or convert PHH.
+PHH projection, or convert PHH. F1-04 compatibly extends append with optional
+transactional outbox intents and provides projection recovery through separate
+ports; see `simulator-projection-outbox-recovery-v1.md`.
 
 ## Port semantics
 
@@ -14,7 +16,7 @@ store the exact string in `raw_event_json`; reads parse and return that same
 string, so key order, whitespace, `schemaVersion`, `source`, `provenance`, and
 `payload` are not reconstructed from database-specific JSON types.
 
-`HandEventStore.append(hand_id, expected_sequence, events)` defines
+`HandEventStore.append(hand_id, expected_sequence, events, outbox_intents=())` defines
 `expected_sequence` as the highest sequence the caller believes is already
 durable before the transaction. A new hand uses `0`. A non-empty batch must:
 
@@ -23,9 +25,10 @@ durable before the transaction. A new hand uses `0`. A non-empty batch must:
 - be ordered and contiguous from `expected_sequence + 1`.
 
 The adapter compares the durable head with `expected_sequence` inside the same
-transaction that inserts every event. Any mismatch or insert failure rolls the
-whole batch back. `read(hand_id)` returns the stored events in ascending
-sequence order. The port intentionally exposes no update or delete operation.
+transaction that inserts every event and optional outbox intent. Any mismatch,
+event insert failure, or outbox identity conflict rolls the whole batch back.
+`read(hand_id)` returns stored events in ascending sequence order. The port
+intentionally exposes no event update or delete operation.
 
 ## Constraints and concurrency
 
