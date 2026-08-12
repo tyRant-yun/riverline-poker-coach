@@ -149,3 +149,33 @@ def test_profiles_conflicts_and_bot_fallback_are_stable(tmp_path):
     assert stale.status_code == 409
     assert stale.json()["error"]["code"] == "revision_conflict"
     service.close()
+
+
+def test_active_hand_stacks_follow_pokerkit_and_survive_reconnect(tmp_path):
+    client, service = _client(tmp_path)
+    table = _create(client)
+    session_id = table["sessionId"]
+
+    assert any(seat["stack"] < 10_000 for seat in table["seats"])
+    assert {seat["seatId"]: seat["stack"] for seat in table["seats"]} != {
+        seat.seat_id: seat.stack for seat in service.session_store.load(session_id).session.topology.seats
+    }
+
+    service.close()
+    rebuilt = ContinuousTableService.from_sqlite_path(service.path)
+    rebuilt_client = TestClient(
+        create_app(config=AppConfig(rate_limit_per_minute=0), table_service=rebuilt)
+    )
+    after = rebuilt_client.get(f"/v1/tables/{session_id}").json()["table"]
+    assert [seat["stack"] for seat in after["seats"]] == [
+        seat["stack"] for seat in table["seats"]
+    ]
+
+    while not table["handComplete"]:
+        response = _hero_action(rebuilt_client, table, f"settle-{table['revision']}")
+        assert response.status_code == 200, response.text
+        table = response.json()["table"]
+    assert [seat["stack"] for seat in table["seats"]] == [
+        seat.stack for seat in rebuilt.session_store.load(session_id).session.topology.seats
+    ]
+    rebuilt.close()
