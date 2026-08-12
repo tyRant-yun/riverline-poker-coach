@@ -26,7 +26,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F1-01 Authoritative Session | `019ff3b0-f805-7ff3-b510-ff5e778bcaf0` | `completed` | `merged` | `codex/f1-01-authoritative-session` | `8dde576a0818be554a38e0420b025d4cd3bb51a7` | `141b1c57872353a8498f3aedba021e3726318315` | [F1-01 handoff](handoffs/F1-01.md) | Worker: backend 381 passed/8 skipped、27 focused passed、compileall/pip check；Controller: 18 session/contract/replay passed | F1-02 | F1-02 durable event append |
 | F1-02 Durable Event Append | `019ff3c7-554f-7c60-8b96-5e521dd617c9` | `completed` | `merged` | `codex/f1-02-durable-hand-event-append` | `6840ed5a5488b6af6681e1a9f565c49cfb7b8cbe` | `00c1fd6d019eb4a3ed285701eb560fdcc0416c59` | [F1-02 handoff](handoffs/F1-02.md) | Worker: backend 395 passed/9 skipped、14 focused passed、offline PG SQL/compileall/pip check；Controller: 14 passed/9 live-PG skipped | F1-03、F1-04 | F1-03 PokerKit orchestrator first |
 | F1-03 PokerKit GameOrchestrator | `019ff3e3-bda6-7e21-903e-d4fe0611a5a9` | `completed` | `merged` | `codex/f1-03-pokerkit-game-orchestrator` | `91fb7f08d760753259f611284318b512c5f30ed4` | `e46f4df666e2513750147862674e6d9ce64634fd` | [F1-03 handoff](handoffs/F1-03.md) | Worker: backend 433 passed/9 skipped、146 relevant passed、compileall/pip check；Controller: 146 relevant passed before and after integration | F1-04、F1-05、F1-06 | F1-04 projection/checkpoint/outbox recovery |
-| F1-04 Projection/Outbox Recovery | `019ff446-caf8-78a2-85cd-c582310780ad` | `completed`（第二轮） | `in_progress`（1 P1 待修） | `codex/f1-04-projection-outbox-recovery` | `9353fcd735adf9205877b7d8070c54c99089dc30` | `ddbe65c34167adbcbf43c515cbc0a99f71f6325a`（待续） | [F1-04 handoff](handoffs/F1-04.md)（待修订） | Worker: backend 457 passed/10 skipped、focused 65 passed/10 skipped；独立复核 2 P1 closed、1 P1 failed | — | 修复 ack/retry 使用旧 now 绕过实际 lease 到期 |
+| F1-04 Projection/Outbox Recovery | `019ff446-caf8-78a2-85cd-c582310780ad` | `completed` | `merged` | `codex/f1-04-projection-outbox-recovery` | `9353fcd735adf9205877b7d8070c54c99089dc30` | `efb1a5ae83b63fd52ee28845c32c56e009362ff2` | [F1-04 handoff](handoffs/F1-04.md) | Worker: backend 457 passed/10 skipped at ddbe65c；final focused 21 passed/10 skipped；independent P1 re-review PASS | F4-01 | F1-05 PHH adapter for MVP interchange |
 
 ## 下一入口
 
@@ -52,6 +52,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F1-04 首轮 Git/handoff/16 个 changed files 与质量证据一致，主控聚焦门 55 passed/10 live-PG skipped；双轴审查发现 outbox intent 未强制绑定本批 event、过期/ABA claim 可 ack/retry、未知持久化 schemaVersion 被静默按 V1 读取，以及 public payload 仅浅冻结。交付未集成，已退回原 Worker 以测试先行做兼容范围内修订；后续任务继续暂停。
 - 2026-08-12：产品负责人将执行目标调整为 MVP 尽快上线并开始迭代。主控不再亲自代码审查；F1-04 修订只将 3 个 P1 作为阻塞门，P2 若不能低成本收尾则登记 backlog。后续采用单任务、聚焦验证和成本分层模型。
 - 2026-08-12：F1-04 第二轮 handoff 回传 backend 457 passed/10 skipped。独立窄审查确认 event-intent 绑定和未知 schemaVersion 拒绝已关闭，但发现 dispatcher 在耗时 dispatch 后仍以 claim 时旧 `now` 做 ack/retry，可绕过实际 lease 到期；保持未集成，仅退回该单一 P1 修复。
+- 2026-08-12：F1-04 最终窄修使用存储端事务内当前时间验证 ack/retry lease，独立审查结论 PASS；final focused 21 passed/10 live-PG skipped，沿用前一修订提交的完整 backend 457 passed/10 skipped。三项交付与三项 handoff 治理提交以 `ff90f30` 至 `f389027` 进入 `codex/simulator-rebuild`。P2 nested payload 深冻结进入 post-MVP backlog；live PostgreSQL 仍未实测。
 
 ## 主控更新规则
 
