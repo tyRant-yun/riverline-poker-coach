@@ -37,6 +37,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F3-01 6-max Seat Priors | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-01-seat-priors` | `f9829b9f44d477510801ce07b92aa7719c755ee0` | `df06fd389f5e7412baec994f4a5b81f47850c18e` | [F3-01 handoff](handoffs/F3-01.md) | Worker: 68 focused passed；compileall/diff check；heuristic provenance explicit | F3-02 | Reuse Worker for public-event belief updates |
 | F2-06 Minimal Polling Table UI | `019ff505-db5d-7323-b396-a75ade283897` | `completed` | `merged` | `codex/f2-04-continuous-table-api` | `1391405` | `6d34e7a0b17edb564e423f43fcd1c29827803aa5` | [F2-06 handoff](handoffs/F2-06.md) | Worker: 11 focused tests；tsc；Next production build | Table browser smoke | Reuse Worker for one Playwright smoke only |
 | F3-02 Public-event Belief Consumer | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-01-seat-priors` | `0f5b1e4` | `b0fefbfe5091a78f9f28f8012535328ebf1ff6ae` | [F3-02 handoff](handoffs/F3-02.md) | Worker: 72 focused passed；compileall/diff check；private events rejected | F3-06 | Defer API/UI insight wiring to next budget |
+| F2-06S Browser Smoke | `019ff505-db5d-7323-b396-a75ade283897` | `in_progress` | `in_progress` | `codex/f2-04-continuous-table-api` | `a4acea3` | — | — | — | — | Single mocked Playwright create/action/next/reconnect/privacy smoke; final budget task |
 
 ## 下一入口
 
