@@ -29,6 +29,12 @@ from .bot_runtime import (
     FixedPolicyProvider,
     InvalidBotAction,
 )
+from .bot_providers import (
+    BLUEPRINT_PROFILE_IDS,
+    BOT_PROFILE_IDS,
+    LightweightBlueprintProvider,
+    build_bot_provider,
+)
 from .session import (
     DEFAULT_BIG_BLIND,
     DEFAULT_SMALL_BLIND,
@@ -114,6 +120,10 @@ __all__ = [
     "BotRuntime",
     "FixedPolicyProvider",
     "InvalidBotAction",
+    "BLUEPRINT_PROFILE_IDS",
+    "BOT_PROFILE_IDS",
+    "LightweightBlueprintProvider",
+    "build_bot_provider",
     "DEFAULT_BIG_BLIND",
     "DEFAULT_SMALL_BLIND",
     "DEFAULT_STARTING_STACK",
