@@ -35,12 +35,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F2-04 Continuous Table API | `019ff505-db5d-7323-b396-a75ade283897` | `completed` | `merged` | `codex/f2-04-continuous-table-api` | `dd7757e80e1038e38e91c4b6ea8090fb4d00242c` | `eac26af6932b329e55e69cf001467e52b089b45b` | [F2-04 handoff](handoffs/F2-04.md) | Worker focused suite + compileall；stack fix focused 4 passed；independent P1 re-review PASS | F2-06 | Reuse Worker for minimal polling table UI |
 | F4-01 Session Stats Projection | `019ff508-1e0f-7ec2-a536-ff90eab7836a` | `completed` | `merged` | `codex/f4-01-session-stats` | `a5c2e2bf1fde44172253f367a91b3e87b5cae46b` | `94c72bf685b2a18212d943e7ba299cc800162640` | [F4-01 handoff](handoffs/F4-01.md) | Worker: 11 focused passed；compileall；incremental=rebuild fingerprint | Stats API/review consumers | Feed F2-04/F4 review flow |
 | F3-01 6-max Seat Priors | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-01-seat-priors` | `f9829b9f44d477510801ce07b92aa7719c755ee0` | `df06fd389f5e7412baec994f4a5b81f47850c18e` | [F3-01 handoff](handoffs/F3-01.md) | Worker: 68 focused passed；compileall/diff check；heuristic provenance explicit | F3-02 | Reuse Worker for public-event belief updates |
-| F2-06 Minimal Polling Table UI | `019ff505-db5d-7323-b396-a75ade283897` | `in_progress` | `in_progress` | `codex/f2-04-continuous-table-api` | `1391405` | — | — | — | — | Reused F2 Worker; frontend-only table/create/action/reconnect/next hand |
-| F3-02 Public-event Belief Consumer | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `in_progress` | `in_progress` | `codex/f3-01-seat-priors` | `0f5b1e4` | — | — | — | — | Reused F3 Worker; actor-only likelihood + public blocker temporal updates |
+| F2-06 Minimal Polling Table UI | `019ff505-db5d-7323-b396-a75ade283897` | `completed` | `merged` | `codex/f2-04-continuous-table-api` | `1391405` | `6d34e7a0b17edb564e423f43fcd1c29827803aa5` | [F2-06 handoff](handoffs/F2-06.md) | Worker: 11 focused tests；tsc；Next production build | Table browser smoke | Reuse Worker for one Playwright smoke only |
+| F3-02 Public-event Belief Consumer | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-01-seat-priors` | `0f5b1e4` | `b0fefbfe5091a78f9f28f8012535328ebf1ff6ae` | [F3-02 handoff](handoffs/F3-02.md) | Worker: 72 focused passed；compileall/diff check；private events rejected | F3-06 | Defer API/UI insight wiring to next budget |
 
 ## 下一入口
 
-`F2-06 + F3-02`：复用原 Worker 并行推进最小轮询牌桌 UI 与基于公共事件的 Range Belief 更新。
+`F2-06 browser smoke`：仅补持续牌桌 create/action/next/reconnect 的 Playwright mock-contract smoke；完成后停止扩大范围，后续预算进入 F3-06/F4 review 接线。
 
 ## MVP 执行策略
 
@@ -86,6 +86,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F2-04 独立极窄 MVP 审查发现一个 P1：进行中牌局的 seat stack 投影错误读取仅手末更新的 session topology，而非 replayed PokerKit authority stacks，导致下注后/重连显示开手筹码。交付未集成，已退回原 Worker 只补 stack authority 负向测试与最小修复；F2-06 暂不启动，F3-01 继续独立推进。
 - 2026-08-12：F2-04 stack authority 修复经原 Reviewer 极窄复审 PASS，focused regression 4 passed；交付以 `075dfe0` 至 `370b46b` 集成。F3-01 Git/handoff 与 68 focused tests/compileall 证据一致，仅修正 thread ID 后以 `5e0d1bf` 至 `d486638` 集成。下一步复用两名原 Worker 分别推进 F2-06 与 F3-02，避免新上下文。
 - 2026-08-12：不创建新进程，F2-04 Worker 在同分支从 `1391405` 续接 F2-06 最小轮询牌桌 UI；F3-01 Worker 在同分支从 `0f5b1e4` 续接 F3-02 公共事件 Belief consumer。两者通过 `git show codex/simulator-rebuild:AGENTS.md` 读取新规则，避免为旧 worktree 缺少治理文件重启或复制无关提交。
+- 2026-08-12：F2-06 handoff/Git 与 11 focused tests、tsc、production build 证据一致，以 `00b9a9c`、`99ddb08` 集成。F3-02 handoff/Git 与 72 focused tests、compileall、private-event rejection 证据一致，以 `f422430`、`05c125f` 集成。剩余额度仅安排复用 F2 Worker 的单一 Playwright smoke，不再开功能链或新进程。
 
 ## 主控更新规则
 
