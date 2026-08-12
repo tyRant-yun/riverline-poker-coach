@@ -18,8 +18,8 @@
 
 ## 环境与命令执行
 
-- 本项目优先通过 **WSL（Ubuntu-24.04）** 执行 Python、Node、类 Unix 工具与测试。Codex Windows worktree 的 `.git` 指针可能包含宿主绝对路径；这类 worktree 的只读 Git 检查、提交、cherry-pick 与 worktree 控制优先使用宿主 Windows Git，避免在 WSL 中反复修正 Git 目录。不得借此触碰任务范围外文件或改变行尾。
-- 从 Windows 宿主终端调用时，使用 `wsl.exe -d Ubuntu-24.04 --cd <Linux 工作区路径> -- bash -lc '<command>'`；本工作区对应的 Linux 路径为 `/mnt/c/Users/Administrator/Documents/ChatGPT/德州扑克`。在 WSL 内继续使用 POSIX 命令与路径，不混用 PowerShell 语法。
+- 当前权威 Python runtime 是宿主 CPython 3.13，Python 与 pytest 使用 `py -3.13` 直接执行；不要经 WSL 转发。WSL Ubuntu-24.04 只用于确实需要且已安装的 POSIX 工具。Codex Windows worktree 的 `.git` 指针可能包含宿主绝对路径；这类 worktree 的只读 Git 检查、提交、cherry-pick 与 worktree 控制使用宿主 Windows Git，避免在 WSL 中反复修正 Git 目录。不得借此触碰任务范围外文件或改变行尾。
+- 确需从 Windows 宿主调用 WSL 时，使用 `wsl.exe -d Ubuntu-24.04 --cd <Linux 工作区路径> -- bash -lc '<command>'`；本工作区对应的 Linux 路径为 `/mnt/c/Users/Administrator/Documents/ChatGPT/德州扑克`。在同一次调用内不混用 PowerShell 与 POSIX 语法。
 - 先确认实际运行时、依赖和工作目录，再执行测试或构建；不要假定 Windows 与 WSL 的 Python、Node、包缓存或环境变量相同。把连续的只读检查和测试合并为少量批处理调用，避免为每个微小命令重复启动 WSL。
 - WSL 是默认命令环境，不改变安全与授权边界：文件修改仍优先使用补丁工具；网络、提权、破坏性操作及受限目录访问仍须遵循当前会话的权限规则。
 
