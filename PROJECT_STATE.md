@@ -4,6 +4,8 @@
 > 更新日期：2026-08-12
 > 当前阶段：F0 Simulator Foundation 完成，下一入口为 F1 Authoritative Session
 
+任务回传与依赖的权威入口：[`docs/orchestration/handoff-v1.md`](docs/orchestration/handoff-v1.md) 与主控单写的 [`docs/orchestration/ledger.md`](docs/orchestration/ledger.md)。
+
 ## 1. 产品与范围
 
 Riverline 的产品定位已从“孤立牌局分析页”扩展为**可观测的德州扑克认知模拟器**：用户可连续打牌；系统用不可变事件记录事实，重建牌局、统计与复盘；Bot、Advisor、Range Belief 和学习闭环都必须展示来源与近似边界。

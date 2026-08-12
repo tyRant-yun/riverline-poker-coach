@@ -4,6 +4,8 @@ Status: executable baseline after F0
 Date: 2026-08-12
 Product: observable Texas Hold'em cognitive simulator
 
+Orchestration authority: [`docs/orchestration/handoff-v1.md`](orchestration/handoff-v1.md) defines Worker completion/blocking reports; [`docs/orchestration/ledger.md`](orchestration/ledger.md) is the Controller-owned execution ledger.
+
 ## 1. Fixed scope and architecture invariants
 
 The first releasable mode is 6-max NLHE cash, 100BB, no ante and no rake. Seat IDs, event envelopes and provider contracts remain valid for 2–8 players, but a broader topology is not a promise of strategy coverage.
