@@ -32,6 +32,13 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 
 `F1-04`：在 durable event stream 上实现 projection cursor/checkpoint、可丢弃 snapshot cache 与 transactional outbox，证明重复消费幂等、失败恢复以及投影可重建。F1-05/F1-06 已解锁，但为控制额度与集成复杂度，等待 F1-04 稳定后再启动。
 
+## MVP 执行策略
+
+- 主控只做规划、依赖调度、handoff 验收、ledger 单写与集成；代码审查由独立任务执行，主控只消费结构化结论。
+- 以尽快交付可运行 MVP 并开始用户迭代为优先级；只把阻塞 MVP、数据正确性或恢复安全的 P0/P1 作为当前合并门，P2/P3 与抽象优化进入 backlog。
+- 默认单任务串行。Worker 运行聚焦测试和一次阶段完整门；主控不重复完整测试，合并前只做必要 smoke/受影响聚焦门。
+- 模型按成本选择：文档/台账用 Luna/Terra，一般实现用 Terra；Sol 仅用于窄范围的规则、事务、恢复高风险实现或独立审查。
+
 ## 主控验收记录
 
 - 2026-08-12：F0 交付提交 `b0f13e3` 与治理提交 `53d99c3` 构成从基线 `71acce7` 开始的严格线性提交链；handoff 的 31 个交付文件与 Git diff 一致。
@@ -43,6 +50,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F1-03 最终 handoff、三项交付提交及 20 个 changed files 已核对；`activeSeatIds` 保持旧 JSON 默认语义，sparse Hand Participant 的 stable seat ID 覆盖 adapter、replay、observation、stats、settlement 与 bust-out successor。主控在 Worker 分支及集成分支各复跑 146 项相关测试通过；完整 backend 的 Worker 实测为 433 passed/9 skipped。六项线性提交以 `acc1e88` 至 `f8b469d` 进入 `codex/simulator-rebuild`；live PostgreSQL 与 crash-safe 跨手 session repository 仍未声称完成。
 - 2026-08-12：F1-04 从已验收集成基线 `9353fcd` 派发至独立任务 `019ff446-caf8-78a2-85cd-c582310780ad`，使用 Sol/high 处理事务原子性、并发 claim 与失败恢复；F1-05/F1-06 暂不并行，以控制额度和集成风险。
 - 2026-08-12：F1-04 首轮 Git/handoff/16 个 changed files 与质量证据一致，主控聚焦门 55 passed/10 live-PG skipped；双轴审查发现 outbox intent 未强制绑定本批 event、过期/ABA claim 可 ack/retry、未知持久化 schemaVersion 被静默按 V1 读取，以及 public payload 仅浅冻结。交付未集成，已退回原 Worker 以测试先行做兼容范围内修订；后续任务继续暂停。
+- 2026-08-12：产品负责人将执行目标调整为 MVP 尽快上线并开始迭代。主控不再亲自代码审查；F1-04 修订只将 3 个 P1 作为阻塞门，P2 若不能低成本收尾则登记 backlog。后续采用单任务、聚焦验证和成本分层模型。
 
 ## 主控更新规则
 
