@@ -69,6 +69,7 @@ from .hand_lab_compat import (
     player_action_command_from_hand_lab,
     scenario_from_authoritative_events,
 )
+from .phh import HandHistoryCodec, PhhCodecError, PhhImportResultV1
 from .recovery import (
     OutboxIntentV1,
     OutboxClaimError,
@@ -145,6 +146,9 @@ __all__ = [
     "HandLabScenarioV1",
     "player_action_command_from_hand_lab",
     "scenario_from_authoritative_events",
+    "HandHistoryCodec",
+    "PhhCodecError",
+    "PhhImportResultV1",
     "ProjectionIdentityV1",
     "ProjectionCheckpointV1",
     "ProjectionError",
