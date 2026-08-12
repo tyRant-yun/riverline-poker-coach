@@ -1,146 +1,118 @@
 # PROJECT_STATE
 
-> Riverline 德州扑克 AI 教练（poker-coach-web）项目状态快照。
-> 更新日期：2026-08-11。本文件与 AGENT.MD 同级，供任何会话快速恢复上下文。
+> Riverline 可观测德州扑克认知模拟器状态快照
+> 更新日期：2026-08-12
+> 当前阶段：F0 Simulator Foundation 完成，下一入口为 F1 Authoritative Session
 
-## 1. 项目概览
+## 1. 产品与范围
 
-浏览器端 NLHE 德州扑克 AI 教练：规则引擎（PokerKit）重放牌局 → 结构化分析（Evidence）→ 教学解释（Coach）→ 练习（Practice）→ 翻后求解（Solver sidecar）。前端 Next.js（静态导出），后端 FastAPI + SQLite/PostgreSQL + Redis 队列。
+Riverline 的产品定位已从“孤立牌局分析页”扩展为**可观测的德州扑克认知模拟器**：用户可连续打牌；系统用不可变事件记录事实，重建牌局、统计与复盘；Bot、Advisor、Range Belief 和学习闭环都必须展示来源与近似边界。
 
-## 2. 当前进度（核心实现存在；产品能力审计未通过）
+第一正式产品模式固定为：
 
-| 阶段 | 内容 | 提交 |
+- 6-max NLHE cash；
+- 100BB 初始筹码；
+- 无 ante、无 rake；
+- 底层 seat/event/provider contract 保留 2–8 人通用性，但不承诺其他桌型的产品或策略覆盖。
+
+现有 Hand Lab、场景分析、多人 PokerKit replay/equity、Range Belief、异步 solver bridge、Hand Review、教学与前端 E2E hooks 在迁移期间继续受保护；F0 未重写前端或删除这些能力。
+
+## 2. F0 已冻结决策
+
+| 主题 | 决策 | 权威记录 |
 |---|---|---|
-| F1–F4 | 前端 V2：组件化、三栏 AppShell、Solver UX、座位就绪 | c3c9b9f … ed3e4e9 |
-| verify | hermes verify recipe 修复（cmd 引号 set 清 PYTHONPATH） | 6ef18d0 |
-| 8A | Schema v2：tableSize 2–8、knownHoleCardsBySeat/rangesBySeat、位置推导、v1→v2 归一化 | 2b4eb3a |
-| 8B | PokerKit 多人重放：N 人状态、盲注/ante、边池、分池、摊牌 | 2043e33 |
-| 8C | 多way 分析：equityBySeat、potOddsBySeat、activePlayerCount | 27435fc |
-| 8D | 8-max preflop knowledge：11 个 RFI/defend/vs-3bet 定性 artifacts | 05c3cb4 |
-| 8E | HU solver bridge：决策点 2 活玩家即可求解、有效筹码、bunching 记录 | 3898f50 |
-| 79bff76 | street 派生修复（按已发牌面而非 street_index） | 79bff76 |
-| UX | 52 张选牌器、复盘模式（只填自己手牌）、提亮 token、使用说明 | a56e5db |
-| Fresh | **全新一把**默认起点：0 输入/0 行动/只有盲注（POT 150）+ 测试基建加固 | 6ea3498 |
-| Closure | 收口轮：multiway MC 无偏采样（Exact↔MC parity）、fresh-hand 前端 null 契约+E2E、solver rangesBySeat 桥、seat-based 前端状态、domain 校验收紧、CI vitest | e0c2908 … 79a8437 |
-| UI-P1 | Hand Lab 前端精修（不推翻三栏）：BB 金额层+单位切换（默认 BB）、board 未发位=弱 empty slot（非 card-back）、seat/action 层级（position 优先+HERO pill+actor ring、call/raise 主蓝）、ScenarioEditor cards 单列+复盘两行+选牌按钮堆叠、History 降密度（title/rev+次级操作）、Range matrix weight 强度+hover+tooltip、Analyze 按钮四级分级+honest 文案、panel 分级、solver disabled 原因 ✓/✗、polling 保留 spot、shell 撑满 1480 宽视口、左栏 min-content 溢出修复（rail 不再压到桌子） | 6903fe8 … d346959 |
-| ReviewFix | 复盘模式/任意牌局**打到结束（决策点 1 活玩家）**不再 422：`BasicMetrics.active_player_count` ge=2→ge=1（equity 对单人局不计算；ge=2 仅限 equity 结果模型）；完成牌局 analyze/teaching 正常降级返回 200 | 32073a9 |
-| RangeBelief | **Range Belief Engine V1**：combo 级行动条件 Bayesian 更新（newReach=oldReach×P(action\|combo)）、PolicyProvider 抽象（solver/fixture/manual，支持有序 provider 链）、snapshot trace（仅自己行动/deal/prior 生成）、169 派生聚合（质量守恒）、Prior/Current/Δ UI、`POST /v1/ranges/belief` + `POST /v1/ranges/trace`（seat 驱动） | 5fee982 … 7e09eaa |
-| RangeBelief V1.1 | **Grounding & Temporal Correctness**：solver job/artifact 绑定 scenario+spot fingerprint、exact policy sequence/actor seat/active seats；jobId 是 grounded 入口，裸 result 仅 `unverified`；target-seat-aware dead cards；`board_at_sequence` 防未来牌泄漏；prior/current union 保留完全淘汰 combo 的负 Delta；single-size off-tree sizing；frontend polling 使用新 artifact，scenario mutation/load/undo/redo 失效旧 solver/belief | local V1.1（2026-08-11） |
-| RangeBelief V2.0 | **8-max Preflop Policy（首个窄覆盖版本）**：内置、版本化的 `preflop_policy` provider；仅覆盖 8-max NLHE、全员 100BB、no-ante/no-rake、无前序入池、2.5BB RFI 的 UTG→SB 七个位置。以完整 combo×{Raise,Fold} 策略表重建该行动；节点外一律 `no_policy`，不近似映射。数据为 first-party curated baseline（`confidence=curated`），非 solver export | local V2.0（2026-08-11） |
-| TeachingAgent | 外部 teaching agent 接入 compose（LLM env 插值）+ LLM 超时 60→180s（另一 worktree：fix/teaching-agent，已推送 origin） | 694faa2 |
-| Hand Review Workbench | **实现链路已存在，但 2026-08-11 产品能力审计未通过 P0 发布门**：UI 仍为 HU-only，无法构造后端支持的 6/8-max；真实 Range Belief 仅覆盖 UI 不可达的七个 8-max 2.5BB RFI；整手复盘使用本地模板，未调用外部 Teacher。既有 actionId、时间语义、SolverAssessment 与复盘展示仍保留 | `89842f0`, `b3f3a50`, `310cb2a`, `73c5f30`, `a4d1516` |
+| 目标拓扑 | 模块化单体 + 明确端口/适配器；规则、事件、Bot、Advisor、Belief、复盘/学习和投影分离 | ADR-0005 |
+| 规则与交换 | PokerKit 是唯一规则真相候选；PHH 只作为导入/导出交换格式 | ADR-0005/0006 |
+| 事件与读模型 | `HandEventV1` append-only；状态、统计与复盘均为可丢弃、可重建 projection | ADR-0006 |
+| Bot/Agent/Advisor | Bot 只消费权限安全 Observation；runtime 负责超时、异常、非法动作与固定降级；Advisor 不执行动作 | ADR-0007 |
+| Range Belief | 有来源的可解释近似，不伪装成对手真实底牌或精确联合真值 | ADR-0005/0007 |
+| 许可 | 仓库采用 AGPL-3.0-or-later；非商用不豁免 GPL/AGPL 义务 | ADR-0008、`LICENSE` |
+| 第三方治理 | 依赖与 artifact 必须登记来源、版本、许可证、修改、获取方式和 fingerprint | `THIRD_PARTY_NOTICES.md` |
+| Solver | AGPL solver 不进入主依赖；进程隔离是运行架构，不是自动许可结论 | ADR-0008 |
 
-分支：`main`（单分支工作流）+ `fix/teaching-agent`（worktree：德州扑克-worktree）。
+OpenSpiel、RLCard 和 PettingZoo 仅用于学习 Agent/训练 contract 与离线实验，不进入在线规则内核。
 
-## 3. 验证基线（2026-08-11，最终主线发布门）
+## 3. F0 代码基线
 
-> 以下结果在集成 QA-01 与 DOC-01 后的 `main` 上重新执行；这是本轮 Hand Review Workbench 的最终验收基线。
+新增 `backend/poker_coach/simulator/`，冻结以下 V1 公共 contract：
 
-| 门 | 结果 |
+- `HandEventV1`：`handId`、连续 `sequence`、`schemaVersion`、时间戳、source 和 provenance；事件 payload 为带判别字段的版本化 union；
+- `ObservationV1`：只包含行动 seat 自己的底牌和公共事实，禁止其他玩家底牌与内部 belief；
+- `LegalActionV1`：只使用 fold/check/call/bet/raise；金额语义为 none/cost/by/to；all-in 是 bet/raise 的最大端点；
+- `BotDecisionV1`：行动、provider/version、runtime 实测 latency、confidence/metadata，以及完整错误/回退 attempt provenance。
+
+序列化策略：领域内部使用 snake_case，JSON 边界固定 camelCase；`schemaVersion=1`；读取器拒绝未知字段与未知大版本，新增兼容字段只能有默认值，破坏性变化必须发布 V2 并在边界迁移。UI 展示结构不是领域 contract。
+
+F0 spike 实现：
+
+- `replay.py`：验证顺序/重复/hand 一致性并通过现有 PokerKit adapter 确定性重放，重建状态、结算、VPIP/PFR/3-bet 与 action count；
+- `observation.py`：从事件前缀构建权限安全 observation，并投影 PokerKit 合法行动；
+- `bot_runtime.py`：async provider contract、runtime timeout/exception/invalid-action 防线与确定性 fixed fallback；
+- `evaluator_benchmark.py`：固定 seed 的 5/6/7-card oracle differential、pairwise candidate differential、p50/p95 基准和采纳门。
+
+## 4. F0 验证证据
+
+验证环境：WSL Ubuntu-24.04 作为命令环境，宿主 CPython 3.13.14 作为仓库要求的 Python runtime；未联网、未安装候选依赖。
+
+| 门 | 2026-08-12 实测结果 |
 |---|---|
-| Backend pytest（仓库根，unset PYTHONPATH） | **339 passed + 8 skipped**（live-PG 需 POKER_COACH_TEST_PG_URL 才跑；含 Hand Review、grounded SolverAssessment 与 Range Belief 回归） |
-| compileall | OK |
-| pip check | **No broken requirements found** |
-| vitest（frontend） | **29 files / 150 tests**（含行动选择、Range Belief 竞态/stale、按 actionId Solver registry、整手教学与 priority navigation 回归） |
-| tsc --noEmit | 0 错误 |
-| next build | ✓ |
-| Playwright | **7 passed**；含完整 Hand Review Workbench 流程 E2E |
-| 产品能力审计（真实 Range/构造） | **1 passed / 2 failed（预期红）**；8-max UI 与 HU Current Range 为 P0 失败 |
-| Range 覆盖矩阵 | **7/19 非 fixture 可用（36.8%）**；全部为 8-max 2.5BB RFI，真实 UI 端到端为 0/19 |
-| Agent 接线审计 | 单节点 **5 passed**；整手 **1 failed（预期红）**，8 个决策实际 0 次 Teacher 调用 |
+| 完整 backend pytest | **371 passed, 8 skipped**（379 collected；skip 为既有 live-PG 条件测试） |
+| F0 新增 contract/spike tests | **17 passed**，包含序列化、信息隔离、乱序/重复、确定性 replay、Bot 四类路径、evaluator oracle/candidate gate |
+| `compileall` | OK |
+| `pip check` | `No broken requirements found.` |
+| evaluator oracle differential | 固定 seed `20260812`，5/6/7-card 共 **3,000** 样本，**0 mismatch** |
+| evaluator benchmark | 15,000 次；参考运行 p50 **6,404 ns/eval**、p95 **6,544 ns/eval**、约 **155k eval/s** |
+| PH Evaluator candidate | 本地未安装，未联网引入；采纳门明确为 **未通过**（准确性/打包/许可/运行时证据不足） |
 
-## 4. 关键架构约束（不可违背）
+Differential 在实现过程中发现并修复当前 evaluator 的 double-trips full-house 漏判（例如 `JJJKKKx` 应选 full house）。修复后专项回归和完整 pytest 均通过。
 
-- **E2E 即契约**：7 条 Playwright E2E 的交互钩子必须保留——文案（`规则校验通过…`、`范围已标准化为…`、`3 events`、`已载入…`）、按钮名（`校验场景`、`标准化范围`、`生成分析`、`教学解释`、`保存场景`、`重新分析`、`历史`、`Call 50`、`Check`、`Deal flop`、`提交 Solver`、`编辑范围`、`生成整手复盘`）、aria-label（`牌面 1..3`、`169 格范围矩阵`、`AA weight`、`范围侧`、`默认范围`、`教学问题`、`导入 JSON`、`收起范围矩阵`、`combo inspector AKs`）、类名（`.teaching-panel`、`.teaching-summary`、`.revision-row`、`.solve-panel`、`.solve-status`、`.sg-grid`）。注意：`Call 50` 是 Playwright substring 匹配——BB 模式下按钮 aria-label 为 `Call 50（0.5 BB）`（视觉 0.5 BB + `50 chips` 小字），不要改回纯文本 `Call 50`（会与 BB 显示冲突）。
-- **后端是规则唯一权威**：前端不伪造规则事实；后端 JSON 字段（camelCase）不改名；solver 数值只重新聚合不重算。
-- **不可变语义**：undo/redo、appendAction 的 amount/amountType 映射（call→cost、bet→by、raise_to/all_in→to）。
-- **颜色只走 token**：globals.css 的 `--color-*`/`--felt-*` 系列，组件零裸 hex；提亮只动 token。
-- **版本锁**：vitest 3.x ↔ vite@^6 ↔ @vitejs/plugin-react@^5；vitest 需 globals:true。
-- **pydantic validator 禁原地赋值**：validate_assignment=True 下必须 `model_copy(update=...)` 末尾返回（防无限递归）。
-- **复盘/空场景诚实降级**：hero/villain 手牌缺失时 equity 不计算（显式警告），不伪造对手信息；策略匹配与教学（原则性）不受影响。
-- **Equity MC 采样契约**：range weights 只在 proposal 中用一次；multiway/pair 必须整元组独立抽样+整体 rejection（接受样本即精确联合分布），禁止逐 seat conditional rejection 或对结果再乘权重。
-- **seat 契约**：seat IDs 必须连续 0..table_size-1；knownHoleCardsBySeat 每个 seat 恰 2 张（空数组=缺失）；solver 的 range 真相源是 rangesBySeat（按两个 active seat 解析），Hero/Villain 仅是 Coach 视角。
-- **169 Matrix 只是 View（RangeBelief）**：belief 底层状态是具体 two-card combo（canonical key 高位在前、镜像 solver 格式，如 `5c4c`/`2d2c`/`Ac4c`）；禁止把 169 cell 当推理状态。聚合必须质量守恒：`sum(matrix169.probabilityMass) ≈ sum(combo probabilities) ≈ 1`；suit-specific combo（AsKs vs AhKh）保留各自 reach/likelihood 后才聚合到同一 cell。
-- **reach 与 probability 分离（RangeBelief）**：`reach`=沿行动序列的未归一化质量，`probability`=归一化条件信念（sum≈1）。likelihood=0 → combo 直接从 belief 移除；全零必须报 `zero_probability_action`（禁止 uniform fallback）。
-- **无 policy 不伪造（RangeBelief）**：no_policy / unsupported_action / zero_probability_action 显式降级；内置 `preflop_policy` 只覆盖已声明的 8-max RFI node，其他翻前自身动作仍必须诚实停止（或由 fixture/manual/solver 覆盖）；`available=false` 响应只给 reason + prior，不给假 current。
-- **Solver provenance（RangeBelief V1.1）**：生产 grounded policy 必须通过 persisted `jobId`；job 保存 `scenarioFingerprint`、`spotFingerprint`、`policySequence`、`actorSeat`、`activeSeats`、`street`，请求会重建 exact node spot 并拒绝 `solver_artifact_mismatch`。一个 artifact 只覆盖其显式 policy sequence；裸 `source=solver,result` 仅兼容读取并标记 `confidence=unverified`，不得称为 grounded。
-- **Policy 抽象（RangeBelief）**：PolicySource 枚举（solver/fixture/preflop_policy/population/heuristic/manual/unknown）；`ActionPolicyProvider.get_action_frequencies(scenario, seatId, sequence, combos)`；API `policy` 支持**有序 provider 链**（如 fixture 覆盖翻前 call + solver 覆盖翻后 bet）；solver 输出零重算——SolverPolicyAdapter 只做 `SolverNode.hands[].strategy → PolicyResult` 映射。
-- **Off-tree sizing（RangeBelief）**：显式 ActionMapping 解析 `Bet(250)/Raise(625)/AllIn(9750)/Check/Call/Fold`；off-tree 用 nearest-size（等距取小，确定性），`observedSize/mappedSize/offTree` 进 metadata 与 UI；禁止插值 strategy。
-- **Temporal/dead-card semantics（RangeBelief V1.1）**：belief dead cards = visible board at the requested sequence + known hole cards of other seats；target seat own known cards 不删除自己的 strategic range；full imported board 的未来牌只在对应 deal/endpoint 可见。domain range validation 同样按 selected decision node 处理。
-- **Delta union（RangeBelief V1.1）**：169 cell 与 combo view 遍历 `union(prior,current)`；current 完全淘汰的 combo 以 probability/reach=0 保留，`comboCount` 表示 union 中 concrete combo 数。
-- **Belief seat 驱动（RangeBelief）**：domain/API 全部 seatId 驱动；禁止新增 heroBelief/villainBelief 字段（HU 前端可继续叫 Hero/Villain）。
-- **Domain 约束**：RangeSpec 具体 combos 不得包含 selected decision node 上的 visible board 或其他 seats 的 known hole cards；target seat own cards 与 future board cards 不作为该 seat belief 的 blockers；action_history sequence 必须连续从 1 开始；decision_point.actor_seat 必须与 replay 一致。
+F0 未触及 `frontend/`，因此未重复执行 Vitest、tsc、build 或 Playwright。任务输入确认的继承集成基线为：Vitest **30 files / 157 tests**、tsc/build 通过、Playwright **8 E2E + 3 capability audit** 通过；这些数字不是本分支的新实测结果。
 
-## 5. PokerKit 地面真值（8B 探针实测）
+## 5. 迁移期间不可破坏的能力
 
-- 座位映射：`seat = (buttonSeat + playerIndex + 1) % N`，button = player N-1
-- 盲注：HU 金额反转（player0=BB 100、player1=SB/BTN 50）；N≥3 player0=SB、player1=BB
-- preflop 首动：HU=BTN；N≥3=UTG（seat (button+3)%N）；postflop 每街 SB 先动（fold 则下一活玩家）
-- ante：`Automation.ANTE_POSTING` 自动逐人发
-- 结算：fold→push=池−赢家自投；all-in/摊牌→push 全池；split→各半；reason 看操作 `HoleCardsShowingOrMucking`
+- 后端仍是规则唯一权威；前端不得重算或伪造规则/solver 数值；
+- `ScenarioSpec` 与 Hand Lab 仍是单手实验/复盘边界，不能升级为持续 session 的事件真相；
+- 多人 `tableSize 2..8`、连续 seat ID、边池/分池、按 seat range/equity 与 temporal dead-card 语义继续有效；
+- Range Belief 底层保持具体 combo 的 reach/probability，169 matrix 只是 view；无 policy、未来信息、off-tree 和 provenance mismatch 必须诚实降级；
+- Solver artifact 必须绑定场景/节点 fingerprint 和精确 policy sequence；不能把 HU 翻后结果包装成 6-max 全节点真值；
+- 已通过的交互文案、按钮名、aria-label、class 和 action amount 语义属于 E2E 兼容面。具体清单与历史能力证据保留在 `docs/product-remediation-execution.md`、`docs/product-full-chain-audit.md` 和既有测试中。
 
-## 6. 运行方式
+## 6. 当前明确风险
+
+- F0 event store 是内存/fixture 级 contract spike；尚无 durable session aggregate、并发追加控制、幂等 command 或数据库迁移；
+- `ObservationV1` 已证明不泄漏，但还没有覆盖完整 session 调度器内所有 reveal/showdown 权限；
+- Bot runtime 已证明 provider 边界与降级，不含真正的进程/RPC 隔离、资源配额或长期运行 soak；
+- PH Evaluator 未安装，不能声称候选准确、可打包或更快；若 F5 重新评估，必须在隔离 extras 中固定版本并核对分发许可证元数据；
+- 当前 evaluator oracle spike 不是穷举证明；已有 3,000 个确定性随机样本与回归用例，F5 仍需更大 differential corpus；
+- 现有 Range Belief/solver 覆盖仍是显式窄节点，不等于 6-max 完整策略；
+- 本次未重新验证前端继承基线；未来任何 frontend 变更必须重新跑全部前端门。
+
+## 7. 下一阶段入口：F1 Authoritative Session
+
+F1 只能建立在 F0 V1 contract 与 ADR 上，建议按以下依赖顺序推进：
+
+1. `F1-01`：定义 `GameSession`/`HandId`/`SessionId` 所有权、6-max 100BB table config 与 2–8 topology 校验；
+2. `F1-02`：实现持久化 `hand_events` append port 与 PostgreSQL/SQLite adapters，加入 `(hand_id, sequence)`/`event_id` 唯一约束和 expected-sequence 乐观追加；依赖 F1-01；
+3. `F1-03`：实现 command → PokerKit-backed `GameOrchestrator` reducer → atomic event append，保证筹码守恒和固定 seed fingerprint；依赖 F1-01/F1-02；
+4. `F1-04`：实现 projection cursor/checkpoint、snapshot cache 与 transactional outbox，证明重复消费幂等和失败恢复；依赖 F1-02，可与 F1-03 后半并行；
+5. `F1-05`：PHH import/export adapter 与 round-trip golden fixtures；依赖 F1-03；
+6. `F1-06`：建立现有 `ScenarioSpec`/Hand Lab 兼容 bridge，保留当前 API/E2E hooks；依赖 F1-03；
+7. `F1-07`：故障恢复、重放 fingerprint、筹码守恒、1,000-hand seeded soak 和 rollback 演练；依赖 F1-02–F1-06。
+
+F1 出口门：固定 seed 的 6-max session 可跨进程恢复；事件连续且不可重复；每手筹码守恒、结算一致；所有投影丢弃后可重建；现有 Hand Lab/E2E 兼容面无回退。后续 F2–F6 的任务、依赖和验收门见 `docs/simulator-refactor-master-plan.md`。
+
+## 8. 常用验证命令
 
 ```bash
-# A. compose 全栈（生产形态：redis/postgres/worker/solver-worker）
-docker compose up -d --build
-# 前端 http://127.0.0.1:3000 · 后端 http://127.0.0.1:8000/health
+# 在 WSL Ubuntu-24.04 中，从仓库根执行；需使用 Python 3.13
+unset PYTHONPATH PYTHONHOME
+py -3.13 -m pytest -q
+py -3.13 -m compileall -q backend/poker_coach backend/tests
+py -3.13 -m pip check
 
-# B. 本地开发（单机 SQLite + 进程内 worker，不依赖 docker）
-# 注意：必须显式置空 DB/Redis URL，否则 .env 会让 uvicorn 挂起在连接
-unset PYTHONPATH PYTHONHOME && export POKER_COACH_DATABASE_URL="" POKER_COACH_REDIS_URL=""
-py -3.13 -m uvicorn poker_coach.api.app:app --app-dir backend --port 8000
-cd frontend && npm run dev -- --hostname 127.0.0.1 --port 3000
+cd backend
+py -3.13 -m poker_coach.simulator.evaluator_benchmark \
+  --samples-per-size 1000 --rounds 5 --seed 20260812
 ```
 
-测试命令（一律 `unset PYTHONPATH`，Hermes 每命令注入 venv 会污染）：
-- 后端：`py -3.13 -m pytest -v`（仓库根；-q 管道输出在部分环境被吞，用 -v）
-- 前端：`cd frontend && npx vitest run` / `npx playwright test`（E2E 前确认 3000/8000 空闲或 compose down）
-
-Range Belief API 速查：
-```bash
-# 当前 belief（含 prior/current/delta + matrix169）；policy 可缺省（prior-only）
-curl -X POST http://127.0.0.1:8000/v1/ranges/belief -H 'Content-Type: application/json' \
-  -d '{"scenario": {...}, "seatId": 6, "policy": {"source": "solver", "jobId": "..."}}'
-# 内置翻前 policy：仅 8-max、100BB、no-ante/no-rake、2.5BB RFI（UTG→SB）
-curl -X POST http://127.0.0.1:8000/v1/ranges/belief -H 'Content-Type: application/json' \
-  -d '{"scenario": {...}, "seatId": 3, "policy": {"source": "preflop_policy"}}'
-# 完整 snapshot 链
-curl -X POST http://127.0.0.1:8000/v1/ranges/trace -d '{"scenario": {...}, "seatId": 6}'
-# policy 支持有序链：[{source: fixture, frequencies}, {source: solver, jobId}]
-```
-
-## 6.1 当前 Hand Review Workbench 状态
-
-> 注意：以下描述区分“实现存在”和“真实用户可完成”。首轮全链路审计结论见 `docs/product-full-chain-audit.md`；当前不得再将本功能称为产品级 100% 完成。
-
-- **行动与范围**：追加或选择玩家行动后，前端按 actor seat 请求该行动的行动后 Range Belief；`eventSequence` 用于范围 trace，`decisionSequence = eventSequence - 1` 用于行动前分析与 Solver。可用时显示 Prior / Current / Δ；`no_policy`、`unsupported_action`、`zero_probability_action` 等情况保留 Prior 并返回 unavailable，不生成假 Current。旧响应、场景 mutation、load、undo/redo 会被 request gate / fingerprint 标为 stale。
-- **逐节点 Solver**：选中历史玩家行动后，显式点击「提交 Solver」才创建该 `actionId` 的 job。gate 为翻后、恰好 2 位 active players、两位范围就绪；job 绑定 `actionId`、`decisionSequence`、`policySequence`、`actorSeat`、`scenarioFingerprint`、`spotFingerprint`。场景或节点变化会使不匹配 job stale；没有整手自动 bulk solve。
-- **整手教学**：`POST /v1/hand-reviews` 返回按真实行动顺序的 `decisionReviews`，每个节点拥有行动前快照、独立 EvidenceBundle、rangeUpdate、solverAssessment、teaching 和 warnings；整手结果另有 `wholeHandSummary`、`priorityFindings`、`uncertainty`。priority finding 可用 actionId 跳转回对应决策卡。已完成牌局仍能复盘此前的玩家行动。
-- **Solver 状态解释**：`primary`、`mixed`、`rare`、`absent`、`unscored` 是产品展示状态；5% 仅是记录在 metadata 的 `product_interpretation` 阈值。off-tree nearest-size、未验证/不匹配 artifact、无具体 combo、未支持节点均保持 unscored；系统不输出不受支持的 action-specific EV loss。
-- **能力审计缺口**：前端没有 table size/button/hero/per-seat 编辑器；默认 HU common actions 无产品 policy，Current/Δ 不可用；`/v1/hand-reviews` 的 rangeUpdate 仍是 deterministic v1 unavailable 占位，整手 teaching 固定为 local template，未调用配置的外部 Teacher。
-
-## 7. 已知边界与剩余风险
-
-- 复盘/空手牌场景：equity 不可用是**有意**的（hero 或 villain 手牌缺失即不计算）；牌局打到结束（决策点 1 活玩家）同样合法降级——`BasicMetrics.active_player_count` 允许 1，equity 不计算（`ge=2` 仅限 equity 结果模型）
-- 求解器：仅翻后（flop+）且决策点恰好 2 活玩家；bunching 忽略并记录为近似（`assumptions` 字段）
-- 整手复盘已实现，但“有 Solver”不等于“整手所有节点都有 Solver”：Solver 必须按节点显式提交，且只消费与 actionId/节点 fingerprint 匹配的已完成 job；无 job、no-policy、off-tree、provenance mismatch 和不支持节点都保持原则性教学或 unscored。
-- 当前 `mixed` 的 5% 边界是产品解释，不是扑克理论阈值；`primary/mixed/rare/absent` 只描述实际行动在已验证 SolverNode 中的频率关系，不能单独推出好坏或 EV 损失。
-- 首轮真实能力审计：后端 104/104 个 2/6/8 人 table/button/hero 组合可构造，但 UI 只能编辑 HU；Range Belief 排除 fixture 后仅 7/19 可用且全部 UI 不可达，因此当前审计样本真实端到端可用率为 0/19。
-- 外部 Agent 仅接入单节点 `/v1/teaching` 与保存场景 `/teach`；整手 `/v1/hand-reviews` 对 8 个决策实际调用 Teacher 0 次，必须把本地模板与 Agent 输出明确区分。
-- **RangeBelief V2.0**：内置策略只是 8-max 100BB no-rake 2.5BB RFI（UTG→SB）的 curated 纯 raise/fold 基线，不是 solver frequency dataset；BB option、limp、open size 变体、面对 open/3-bet/4-bet、ante/rake/stack 变体仍会诚实阻断 belief 链（可用 fixture/manual policy 覆盖）。无 population/player-specific 模型；无完整 solver tree traversal，solver artifact 仅覆盖显式绑定的一个 action sequence/node；off-tree 用 nearest-size（等距取小）非插值；前端默认按选中行动者/范围侧映射 belief seat，也支持在范围面板选择 seat；前端 initialScenario 仍为 HU
-- 8-max 前端：前端 initialScenario 仍为 HU；多way 场景主要经 API 使用
-- docker 偶发：引擎恢复期端口绑定可能丢失（`docker port` 为空）→ `docker compose up -d --force-recreate api web`
-- E2E hermetic：playwright webServer env 已清 PYTHONPATH/PYTHONHOME/DB/Redis URL/LLM key，不依赖外部服务
-- live-PG 测试：conftest 防止 .env 激活；连接 5s 超时快速失败
-
-### 本轮明确未完成（后续阶段）
-
-- 扩展 curated preflop policy：BB option、limp、不同 open size、面对 open/3-bet/4-bet，以及 ante/rake/有效筹码变体；如需 solver 频率，必须引入带来源与许可的完整数据集，不能把当前 baseline 标作 solver-backed。
-- 无 population 或 player-specific model，亦未引入 ML、Deep CFR。
-- 无完整 solver tree traversal / historical inference；solver policy 只可用于显式绑定的单一 action sequence。
-- 无 multiway solver policy；现有 solver 仍仅支持翻后恰好两名 active players。
-
-## 8. 服务当前状态
-
-compose 全栈运行中：api / web / postgres(healthy) / redis(healthy) / worker / solver-worker 全部 Up；web 200、api /health ok。
+本地服务、Range Belief、Solver 与 Hand Review 的历史运行细节仍见 `docs/使用说明.md`；F0 不改变这些入口。

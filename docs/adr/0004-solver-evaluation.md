@@ -1,6 +1,8 @@
 # ADR-0004：Solver 技术评估与策略数据接入边界
 
-状态：已接受（技术评估完成；求解服务与数据导入待后续阶段；许可路径已确认：隔离服务路径，postflop-solver sidecar）
+状态：已接受（技术评估部分继续有效；许可路径部分由 ADR-0008 取代）
+
+> 2026-08-12 更新：仓库现采用 AGPL-3.0-or-later；“主项目保持宽松许可”与“sidecar 自动解决许可边界”的历史判断不再生效。当前治理见 ADR-0008 与 `THIRD_PARTY_NOTICES.md`。
 
 日期：2026-08-10
 
@@ -40,7 +42,7 @@
 
 - 立即生效：`docs/solver-import-spec.md` 定义 solver 输出导入规范；任何有来源、有许可证、通过校验的求解数据可以 `solver_backed` 来源等级进入策略库，教学层自动获得频率引用许可（仅 `exact`/获批 `compatible` 匹配，ADR-0003）。
 - 未来求解服务：以 `TexasHoldemSolverJava`（MIT、CFR+ 同族、命令行可调用、结果与 PioSOLVER 对齐）为首个引擎适配候选做 spike；rs-poker（Apache-2.0）为高性能备选；robopoker 仅评估用于训练桌 bot，不产生策略频率来源。
-- **许可路径（用户已放宽：非商用、无收益）**：AGPL 的传染义务不以商用为前提，故 AGPL 引擎（TexasSolver/postflop-solver）只有两条引入路径——① 隔离 API 服务（AGPL 引擎独立进程，主项目保持宽松许可，推荐）；② 项目整体采用 AGPL-3.0。路径未选定前维持只读研究；solver 输出数据（JSON）不属于代码，任何路径下都可自由导入。
+- **许可路径（由 ADR-0008 取代）**：Riverline 已采用 AGPL-3.0-or-later，非商用不豁免 copyleft 义务；AGPL solver 仍不进入主依赖图。进程隔离不是许可结论，solver artifact 也只有在来源、版本、配置、许可证、修改和 fingerprint 完整且审查通过后才能导入。
 - AGPL 项目只产出"数据契约理解"；导入适配器与校验器为独立设计，不复制 AGPL 源码。
 
 ## 决策 2：SolveJob 作为独立异步服务（设计约束，暂不实现）

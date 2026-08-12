@@ -157,7 +157,9 @@ def _best_hand_key_cached(cards: tuple[str, ...]) -> tuple[int, tuple[int, ...]]
         quad = groups[0][1]
         kicker = max(value for value in rank_set if value != quad)
         return 7, (quad, kicker)
-    if groups[0][0] == 3 and len(groups) > 1 and groups[1][0] == 2:
+    # A second trip rank supplies the pair for the best full house just as a
+    # natural pair does (for example KKKJJJx -> KKKJJ).
+    if groups[0][0] == 3 and len(groups) > 1 and groups[1][0] >= 2:
         return 6, (groups[0][1], groups[1][1])
     if high is not None:
         return 4, (high,)

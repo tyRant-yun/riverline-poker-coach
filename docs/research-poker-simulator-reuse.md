@@ -3,6 +3,7 @@
 > 调研日期：2026-08-12
 > 产品基线：`product-vision-instrumented-poker-simulator.md`
 > 来源范围：GitHub 原仓库的 README、代码与 LICENSE，项目官方文档，以及论文项目页。本文不是法律意见。
+> 许可决策更新：Riverline 已采用 AGPL-3.0-or-later；候选组件与产物的实际使用仍必须经过 `THIRD_PARTY_NOTICES.md` 台账与 ADR-0008 provenance 门。
 
 ## 结论先行
 

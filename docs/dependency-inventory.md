@@ -1,6 +1,8 @@
 # 依赖与许可证清单
 
-更新时间：2026-08-10
+更新时间：2026-08-12
+
+> 当前权威台账为根目录 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)。本文件保留早期依赖盘点；许可治理以 ADR-0008 为准。
 
 ## 当前盘点
 
@@ -49,14 +51,13 @@
 
 ## 许可证政策
 
-- 每次新增或升级依赖必须记录名称、版本、许可证、来源和用途。
-- 直接依赖和锁文件解析出的间接依赖都必须进入自动化清单。
-- 必须标记 MIT、Apache-2.0、BSD、AGPL 等许可证，并在引入前审查传染性义务。
-- **项目定位**：用户明确本项目**非商用、无收益**，可以适当放宽复用边界（2026-08-10 确认）。但注意 AGPL 的传染性义务**不以商用为前提**：无论是否营利，把 AGPL 代码并入本项目都会要求合并作品按 AGPL 分发并提供源码。**已选定路径：隔离服务路径**——AGPL 引擎（`b-inary/postflop-solver`）作为独立 sidecar 进程/HTTP 服务运行，与主项目仅通过 API 交互（不构成衍生作品），主项目保持宽松许可；solver 输出数据（求解结果 JSON）不属于代码，可自由导入。若未来公开分发或部署给第三方使用，需另行处理 AGPL 义务。
-- 许可干净、可直接复用的候选：TexasHoldemSolverJava（MIT）、rs-poker（Apache-2.0）、krukah/robopoker（MIT，MCTS，仅训练桌 bot 方向，当前不采用）。求解引擎最终选型：postflop-solver（AGPL，sidecar 隔离服务，见 docs/solver-integration-design.md）；TexasSolver 为 B 方案。
-- 路径已选定（2026-08-10）：AGPL 引擎以 sidecar 隔离服务形态引入，其源码只存在于独立进程/独立容器，不进主项目仓库与依赖清单（ADR-0004、docs/solver-integration-design.md）。
-- OpenSpiel、RLCard 不进入生产部署依赖；研究验证放在隔离环境并单独记录。
-- 上游版本升级必须重新跑金标牌谱、属性测试和许可证检查。
+- Riverline 仓库采用 `AGPL-3.0-or-later`；非商用/无收益不放宽 GPL/AGPL 义务。
+- 每次新增或升级依赖必须记录名称、精确版本/commit、许可证、来源、用途、完整性 hash、修改和决策证据。
+- 直接依赖和锁文件解析出的间接依赖都必须进入发布 SBOM/NOTICE 清单。
+- 进程、容器和 HTTP 边界只作故障/部署隔离，不声明自动解决许可证组合判断。
+- `postflop-solver` 等 AGPL solver 不进入主依赖图，只能作为有完整源码、构建、修改与 artifact provenance 的可选研究 producer；任何发布/网络使用另行审查。
+- OpenSpiel、RLCard、PettingZoo 不进入在线规则依赖；研究验证使用隔离环境和独立锁定。
+- 上游版本升级必须重新跑金标牌谱、属性/差分测试和许可证检查。
 
 ## 待办
 
