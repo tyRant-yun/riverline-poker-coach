@@ -2,7 +2,7 @@
 
 > Riverline 可观测德州扑克认知模拟器状态快照
 > 更新日期：2026-08-12
-> 当前阶段：F0 Simulator Foundation 完成，下一入口为 F1 Authoritative Session
+> 当前阶段：F1 Authoritative Session 收口中；F1-05 P1 修订进行中，随后执行 F1-07 恢复/soak 出口门
 
 任务回传与依赖的权威入口：[`docs/orchestration/handoff-v1.md`](docs/orchestration/handoff-v1.md) 与主控单写的 [`docs/orchestration/ledger.md`](docs/orchestration/ledger.md)。
 
@@ -89,9 +89,9 @@ F0 未触及 `frontend/`，因此未重复执行 Vitest、tsc、build 或 Playwr
 - 现有 Range Belief/solver 覆盖仍是显式窄节点，不等于 6-max 完整策略；
 - 本次未重新验证前端继承基线；未来任何 frontend 变更必须重新跑全部前端门。
 
-## 7. 下一阶段入口：F1 Authoritative Session
+## 7. 当前阶段入口：F1 Authoritative Session 收口
 
-F1 只能建立在 F0 V1 contract 与 ADR 上，建议按以下依赖顺序推进：
+F1 建立在 F0 V1 contract 与 ADR 上；F1-01 至 F1-04、F1-06 已集成，F1-05 正在修订独立审查发现的两个 P1，之后只剩 F1-07 出口门。完整历史以中央 ledger 为准：
 
 1. `F1-01`：定义 `GameSession`/`HandId`/`SessionId` 所有权、6-max 100BB table config 与 2–8 topology 校验；
 2. `F1-02`：实现持久化 `hand_events` append port 与 PostgreSQL/SQLite adapters，加入 `(hand_id, sequence)`/`event_id` 唯一约束和 expected-sequence 乐观追加；依赖 F1-01；

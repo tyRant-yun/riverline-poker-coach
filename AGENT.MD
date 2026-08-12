@@ -36,7 +36,7 @@
 
 ## 任务回传与台账
 
-- 所有独立 Codex 开发任务开始前必须阅读 `docs/orchestration/handoff-v1.md`，并读取中央 `docs/orchestration/ledger.md` 中的依赖入口。
+- 所有独立 Codex 开发任务开始前必须阅读 `docs/orchestration/handoff-v1.md`；中央 `docs/orchestration/ledger.md` 只读取本任务状态行、直接依赖和“下一入口”，不重复加载历史验收记录。任务 prompt 必须列出本次真正需要的契约/测试文件，禁止默认全量阅读 master plan、全部 ADR 或历史 handoff。
 - 结束前先提交范围内交付内容，再生成并提交 `docs/orchestration/handoffs/<task-id>.md`；最终回复必须按 handoff contract 结构化回传，且与仓库 handoff 文件一致。
 - 每个质量门必须记录命令、结果和是否由本任务实测；不得把未运行或仅继承的基线声称为已通过。
 - Worker 不直接修改 ledger 中央状态行，只新增自己的 handoff；主控验收/合并后单写 ledger，避免并行冲突。

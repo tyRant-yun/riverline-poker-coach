@@ -18,6 +18,14 @@
 4. Worker 的最终消息结构化回传同一组事实；不得用最终消息补写或覆盖 handoff 中的不同结论。
 5. Controller 验证 branch、commits、changed files、quality gates 和风险；验收/合并后由 Controller 更新 ledger。
 
+## MVP 快速通道
+
+- Worker 只加载：本 contract、ledger 中自己的状态/直接依赖/下一入口，以及任务 prompt 明确列出的契约和测试。不得把“了解仓库”扩成全量扫描或完整读取全部规划、ADR、历史 handoff。
+- 普通实现任务只运行受影响的 focused tests；完整 backend/frontend 门由 Controller 按 2–3 个已集成交付组成的批次、阶段出口或发布前统一安排。规则、持久化、恢复等高风险任务可在 prompt 明确要求一次完整门。
+- 独立审查只用于规则权威、私牌/权限、持久化一致性、恢复安全和发布门。审查输入限定为 base..head diff、精确契约片段和 focused tests，不做默认全仓双轴审查。
+- 相互独立、文件所有权不重叠且依赖已满足的任务可以并发；Controller 同时最多维持两个实现任务，并预留一个短审查槽。相同规则/持久化链仍串行。
+- 小改动优先续用原 Worker 修订，避免创建新进程并重复加载上下文；P2/P3、代码味道和非 MVP 抽象进入 backlog。
+
 `head_commit` 是**任务交付内容的最高提交**，不包含随后写入 handoff 文件的治理提交。这避免 handoff 文件必须预知包含自身的 commit SHA。Controller 仍须从 Git 独立读取实际 branch tip。`commits` 同样只列任务交付提交，不列纯 handoff 治理提交。
 
 ## 文件与状态

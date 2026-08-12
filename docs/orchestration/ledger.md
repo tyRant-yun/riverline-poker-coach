@@ -38,8 +38,11 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 
 - 主控只做规划、依赖调度、handoff 验收、ledger 单写与集成；代码审查由独立任务执行，主控只消费结构化结论。
 - 以尽快交付可运行 MVP 并开始用户迭代为优先级；只把阻塞 MVP、数据正确性或恢复安全的 P0/P1 作为当前合并门，P2/P3 与抽象优化进入 backlog。
-- 默认单任务串行。Worker 运行聚焦测试和一次阶段完整门；主控不重复完整测试，合并前只做必要 smoke/受影响聚焦门。
-- 模型按成本选择：文档/台账用 Luna/Terra，一般实现用 Terra；Sol 仅用于窄范围的规则、事务、恢复高风险实现或独立审查。
+- 默认最多两个互不冲突的实现任务并行，并预留一个短审查槽；同一规则/持久化依赖链串行。任务按可体验的纵向切片合并，避免过细拆分造成重复启动和 handoff。
+- Worker 普通任务只运行 focused tests；完整 backend/frontend 门每 2–3 个集成交付、阶段出口或发布前运行一次。规则、持久化、恢复高风险任务仍可明确要求一次完整门；主控不重复 Worker 已实测的门。
+- 独立审查只用于规则权威、私牌/权限、持久化一致性、恢复安全和发布门；只读 base..head diff、精确契约片段和 focused tests，不默认做全仓 Standards/Spec 双轴审查。
+- Worker 只读 handoff contract、ledger 的本任务/直接依赖/下一入口及 prompt 点名的契约/测试；禁止默认加载全部 master plan、ADR、历史 handoff 或全量扫描仓库。
+- 模型按成本选择：文档/台账用 Luna/Terra low/medium，一般实现与普通验收用 Terra medium；Sol 仅用于已点名的规则、事务、恢复 P1 或阶段发布审查。
 
 ## 主控验收记录
 
@@ -59,6 +62,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F1-06 handoff 校正后与 Git 事实一致；独立窄审查仅检查规则真相、stable/sparse seats、信息隔离、authoritative all-in 与既有 API hooks，结论 PASS。Worker 实测 focused 51 passed、backend 470 passed/10 skipped；主控未重复测试。交付及 handoff 以 `cb8f68d`、`6cb9953`、`6dcd26b` 进入 `codex/simulator-rebuild`。
 - 2026-08-12：F1-05 从集成提交 `0780d2d` 派发至任务 `019ff4c4-26dd-7020-b60c-84f097bae0ba`，使用 Terra/medium 单任务实现最小 PHH exchange/round-trip；不并行启动其他任务。
 - 2026-08-12：F1-05 首轮 delivery/handoff 与 Git 事实及 Worker 质量证据一致（focused 5 passed；backend 475 passed/10 skipped），但独立 MVP P0/P1 审查发现普通 PHH 导出会泄漏未公开私牌，以及 import 未核对标准 `finishing_stacks`/`winnings`、可静默吞掉不一致结算或潜在 rake。交付未集成，已仅退回这两个 P1 做测试先行修复；F1-07 保持暂停。
+- 2026-08-12：控制面审计确认主要吞吐损耗来自严格单任务串行、F1-03/F1-04 三轮审查返工、每任务约 5.8 万字符固定上下文和每 15 分钟心跳重复读取，而非 WSL 本身。治理切换为最多两个独立实现槽、风险型一次审查、focused-per-task/批次全量门和增量心跳；WSL 启动损耗只通过批处理命令规避。
 
 ## 主控更新规则
 
