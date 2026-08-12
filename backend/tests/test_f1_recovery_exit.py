@@ -157,6 +157,51 @@ def _assert_completed_hand_invariants(opened, result, durable):
     )
 
 
+def test_recover_does_not_settle_without_durable_hand_completed_terminal_event(
+    tmp_path,
+):
+    scratch = SQLiteHandEventStore(":memory:")
+    opened, completed, _, _ = _play_policy_hand(
+        scratch,
+        _new_session("session-missing-completion"),
+        rng_seed=20260814,
+        policy="fold",
+    )
+    assert opened.active_hand is not None
+    full_stream = scratch.read(opened.active_hand.hand_id)
+    assert full_stream[-1].event.payload.kind == "hand_completed"
+    crash_stream = full_stream[:-1]
+    assert replay_hand(
+        tuple(item.event for item in crash_stream)
+    ).state.hand_in_progress is False
+    scratch.close()
+
+    path = tmp_path / "missing-hand-completed.sqlite3"
+    sessions = SQLiteGameSessionStore(path)
+    events = SQLiteHandEventStore(path)
+    initial = sessions.save(
+        _new_session("session-missing-completion"), expected_revision=0
+    )
+    stored = sessions.save(opened, expected_revision=initial.revision)
+    events.append(
+        hand_id=opened.active_hand.hand_id,
+        expected_sequence=0,
+        events=crash_stream,
+    )
+
+    recovered = sessions.recover(
+        "session-missing-completion", event_store=events
+    )
+
+    assert completed.session.active_hand is None
+    assert recovered == stored
+    assert sessions.load("session-missing-completion") == stored
+    assert recovered.session.active_hand is not None
+    assert recovered.session.button_seat == 0
+    sessions.close()
+    events.close()
+
+
 def test_real_sqlite_restart_recovers_mid_hand_and_cross_hand_session_progression(
     tmp_path,
 ):

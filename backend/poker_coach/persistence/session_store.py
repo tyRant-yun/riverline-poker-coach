@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 
+from poker_coach.simulator.contracts import HandCompletedPayloadV1
 from poker_coach.simulator.event_store import HandEventStore
 from poker_coach.simulator.replay import replay_hand
 from poker_coach.simulator.session import GameSession
@@ -170,7 +171,9 @@ class SQLiteGameSessionStore:
         if not durable:
             return stored
         replayed = replay_hand(durable)
-        if replayed.state.hand_in_progress:
+        if replayed.state.hand_in_progress or not isinstance(
+            durable[-1].payload, HandCompletedPayloadV1
+        ):
             return stored
         successor = stored.session.complete_active_hand(
             hand_id=active.hand_id,
