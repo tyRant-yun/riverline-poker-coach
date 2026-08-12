@@ -34,6 +34,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F3-03 Formula/L0 Advisor | `019ff500-f1ba-7af2-9663-5c4aa1826bf6` | `completed` | `merged` | `codex/f3-03-formula-advisor` | `6d94bb4` | `903024a5e288810591ac0207fd747d770c166950` | [F3-03 handoff](handoffs/F3-03.md) | Worker: 38 focused passed；compileall；1,000 samples p95 0.0137ms | F3-06 | Wire L0 result into table API/advisor UI |
 | F2-04 Continuous Table API | `019ff505-db5d-7323-b396-a75ade283897` | `in_progress` | `in_progress` | `codex/f2-04-continuous-table-api` | `dd7757e80e1038e38e91c4b6ea8090fb4d00242c` | — | — | — | — | Hero + 5 bots, durable consecutive hands, reconnect, safe projection |
 | F4-01 Session Stats Projection | `019ff508-1e0f-7ec2-a536-ff90eab7836a` | `completed` | `merged` | `codex/f4-01-session-stats` | `a5c2e2bf1fde44172253f367a91b3e87b5cae46b` | `94c72bf685b2a18212d943e7ba299cc800162640` | [F4-01 handoff](handoffs/F4-01.md) | Worker: 11 focused passed；compileall；incremental=rebuild fingerprint | Stats API/review consumers | Feed F2-04/F4 review flow |
+| F3-01 6-max Seat Priors | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `in_progress` | `in_progress` | `codex/f3-01-seat-priors` | `f9829b9f44d477510801ce07b92aa7719c755ee0` | — | — | — | — | Provenance/coverage-aware heuristic seat priors; no action updates/API/UI |
 
 ## 下一入口
 
@@ -79,6 +80,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F3-03 Git/handoff 事实核验后仅修正错误 thread ID；38 focused tests、compileall 和本机 1,000 样本 p95 0.0137ms 证据接受，无独立审查或全量测试。交付以 `21a7574`、`742ab7a`、`fa06693` 集成，解锁 L0 Advisor API/UI 接线。
 - 2026-08-12：第二实现槽继续派发 F4-01 会话统计投影至任务 `019ff508-1e0f-7ec2-a536-ff90eab7836a`；与 F2-04 API 文件所有权分离，使用 Terra/medium、真实 SQLite focused tests，目标是连续桌上线即有 VPIP/PFR/3Bet 数据池。
 - 2026-08-12：F4-01 Git/handoff 事实一致，11 focused tests 与 compileall 通过；重复投递、restart 和 rebuild fingerprint 等价证据接受，无独立审查或完整测试。交付以 `0d0a734`、`07664eb` 集成，统计 read model 可由连续桌 API/复盘消费。
+- 2026-08-12：F4-01 验收后空出的实现槽派发 F3-01 6-max seat priors 至任务 `019ff514-afc8-7513-89c0-c0c4bbd6f7fa`；与 F2-04 API 文件所有权分离，使用 Terra/medium、focused-only，先解锁可解释且诚实降级的 Range Belief consumer。
 
 ## 主控更新规则
 
