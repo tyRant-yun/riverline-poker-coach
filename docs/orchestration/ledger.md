@@ -24,10 +24,11 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 |---|---|---|---|---|---|---|---|---|---|---|
 | F0 Simulator Foundation | `019ff359-28b9-7630-992f-b22c82ab1686` | `completed` | `merged` | `codex/f0-simulator-foundation` | `71acce7` | `b0f13e34c3947dd790ada996554bc7216774411e` | [F0 handoff](handoffs/F0.md) | Backend 371 passed/8 skipped；compileall/pip check；17 F0 tests；3,000 evaluator samples/0 mismatch；frontend not measured | F1-01 | F1-01 Authoritative Session ownership/config |
 | F1-01 Authoritative Session | `019ff3b0-f805-7ff3-b510-ff5e778bcaf0` | `completed` | `merged` | `codex/f1-01-authoritative-session` | `8dde576a0818be554a38e0420b025d4cd3bb51a7` | `141b1c57872353a8498f3aedba021e3726318315` | [F1-01 handoff](handoffs/F1-01.md) | Worker: backend 381 passed/8 skipped、27 focused passed、compileall/pip check；Controller: 18 session/contract/replay passed | F1-02 | F1-02 durable event append |
+| F1-02 Durable Event Append | `019ff3c7-554f-7c60-8b96-5e521dd617c9` | `in_progress` | `in_progress` | 首次提交时由 Worker 建立 | `6840ed5a5488b6af6681e1a9f565c49cfb7b8cbe` | — | `handoffs/F1-02.md`（待回传） | 待 Worker 实测 | — | F1-03/F1-04 only after acceptance |
 
 ## 下一入口
 
-`F1-01`：定义 `GameSession`、`HandId`、`SessionId` 所有权，冻结 6-max 100BB no-ante/no-rake table configuration，并验证底层 2–8 seat topology。F0 contracts/ADRs/handoff 已由主控验收并快进至 `codex/simulator-rebuild@53d99c3`；它不授权提前启动 F1-02 或其他并行阶段。
+`F1-02`：实现 durable hand-event append/read port、SQLite/PostgreSQL adapters、唯一约束与 expected-sequence 原子追加。F1-01 已验收并进入 `codex/simulator-rebuild`；F1-03/F1-04 必须等待 F1-02 主控验收。
 
 ## 主控验收记录
 
