@@ -37,6 +37,15 @@ from .policy import (
 from .providers.fixture import FixturePolicyProvider
 from .providers.preflop import PREFLOP_POLICY_VERSION, PreflopPolicyProvider
 from .providers.solver import SolverPolicyAdapter
+from .seat_priors import (
+    SeatPriorCoverageV1,
+    SeatPriorProvider,
+    SeatPriorProvenanceV1,
+    SeatPriorQueryV1,
+    SeatPriorResultV1,
+    SeatPriorUnavailableReason,
+    default_seat_prior_provider,
+)
 from .trace import RangeBeliefTrace, board_at_sequence, build_range_trace, dead_cards_for_belief
 from .update import apply_dead_cards, snapshot_from_range, update_range_belief
 from .views import RangeBeliefComboView, RangeBeliefView, build_belief_view
@@ -62,6 +71,12 @@ __all__ = [
     "RangeBeliefTrace",
     "RangeBeliefView",
     "RangeUpdateMetadata",
+    "SeatPriorCoverageV1",
+    "SeatPriorProvider",
+    "SeatPriorProvenanceV1",
+    "SeatPriorQueryV1",
+    "SeatPriorResultV1",
+    "SeatPriorUnavailableReason",
     "SolverPolicyAdapter",
     "UnsupportedActionError",
     "ZeroProbabilityActionError",
@@ -71,6 +86,7 @@ __all__ = [
     "build_range_trace",
     "board_at_sequence",
     "dead_cards_for_belief",
+    "default_seat_prior_provider",
     "cards_from_key",
     "combo_key",
     "match_observed_action",
