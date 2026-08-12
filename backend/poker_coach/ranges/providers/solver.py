@@ -17,7 +17,7 @@ from decimal import Decimal
 from poker_coach.domain.models import ScenarioSpec
 from poker_coach.solver.types import SolverNode, SolveResult
 
-from ..belief import NoPolicyError, PolicySource
+from ..belief import NoPolicyError, PolicySequenceMismatchError, PolicySource
 from ..policy import PolicyResult
 
 
@@ -31,11 +31,17 @@ class SolverPolicyAdapter:
         oop_seat: int,
         ip_seat: int,
         reference_pot: int | None = None,
+        policy_sequence: int | None = None,
+        actor_seat: int | None = None,
+        confidence: str = "grounded",
     ):
         self._result = result
         self._oop_seat = oop_seat
         self._ip_seat = ip_seat
         self._reference_pot = reference_pot
+        self._policy_sequence = policy_sequence
+        self._actor_seat = actor_seat
+        self._confidence = confidence
 
     def node_for_seat(self, seat_id: int) -> SolverNode | None:
         if seat_id == self._oop_seat:
@@ -51,6 +57,16 @@ class SolverPolicyAdapter:
         sequence: int,
         combos: tuple[str, ...],
     ) -> PolicyResult:
+        if self._policy_sequence is not None and sequence != self._policy_sequence:
+            raise PolicySequenceMismatchError(
+                "solver artifact is bound to policy sequence "
+                f"{self._policy_sequence}, not observed sequence {sequence}"
+            )
+        if self._actor_seat is not None and seat_id != self._actor_seat:
+            raise NoPolicyError(
+                f"solver artifact is bound to actor seat {self._actor_seat}, "
+                f"not seat {seat_id}"
+            )
         node = self.node_for_seat(seat_id)
         if node is None:
             raise NoPolicyError(
@@ -70,4 +86,5 @@ class SolverPolicyAdapter:
             likelihood_only=False,
             reference_pot=self._reference_pot,
             node=scenario.decision_point.street.value,
+            confidence=self._confidence,
         )

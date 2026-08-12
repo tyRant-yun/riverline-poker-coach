@@ -5,9 +5,13 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+import fakeredis
 from fastapi.testclient import TestClient
 
-from poker_coach.api import create_app
+from poker_coach.api import AppConfig, create_app
+from poker_coach.persistence.sqlite_store import SQLiteStore
+from poker_coach.solver import SolverJobQueue
+from poker_coach.solver.adapter import parse_result
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -107,6 +111,64 @@ def fixture_policy_payload() -> dict:
     }
 
 
+def eight_max_rfi_payload() -> dict:
+    positions = ("button", "small_blind", "big_blind", "utg", "utg+1", "mp", "hj", "co")
+    return {
+        "schemaVersion": 2,
+        "gameVariant": "nlhe",
+        "tableSize": 8,
+        "smallBlind": 50,
+        "bigBlind": 100,
+        "buttonSeat": 0,
+        "heroSeat": 3,
+        "seats": [
+            {"seatId": seat_id, "startingStack": 10000, "position": position}
+            for seat_id, position in enumerate(positions)
+        ],
+        "board": [],
+        "actionHistory": [
+            {
+                "actionId": "utg-open",
+                "sequence": 1,
+                "street": "preflop",
+                "actorSeat": 3,
+                "actionType": "raise_to",
+                "amount": 250,
+                "amountType": "to",
+            }
+        ],
+        "decisionPoint": {"street": "preflop", "actorSeat": 4, "afterSequence": 1},
+        "assumptions": {},
+        "rangesBySeat": {
+            "3": {
+                "rangeId": "utg-prior",
+                "name": "UTG prior",
+                "version": "1",
+                "source": "user_defined",
+                "matrix169": {"AA": "1", "A5s": "1"},
+            }
+        },
+    }
+
+
+def hu_open_payload(*, amount: int = 200) -> dict:
+    payload = belief_scenario_payload(actions=1)
+    payload["board"] = []
+    payload["actionHistory"] = [
+        {
+            "actionId": "btn-open",
+            "sequence": 1,
+            "street": "preflop",
+            "actorSeat": 0,
+            "actionType": "raise_to",
+            "amount": amount,
+            "amountType": "to",
+        }
+    ]
+    payload["decisionPoint"] = {"street": "preflop", "actorSeat": 1, "afterSequence": 1}
+    return payload
+
+
 def solver_result_payload() -> dict:
     return {
         "metadata": {
@@ -183,6 +245,88 @@ def test_belief_without_policy_is_unavailable_and_honest():
     assert payload["matrix169"] is not None
 
 
+def test_belief_with_builtin_8max_preflop_policy_is_curated_and_exact_node_only():
+    client = TestClient(create_app())
+    response = client.post(
+        "/v1/ranges/belief",
+        json={
+            "scenario": eight_max_rfi_payload(),
+            "seatId": 3,
+            "policy": {"source": "preflop_policy"},
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["source"] == "preflop_policy"
+    assert payload["confidence"] == "curated"
+    assert payload["update"]["actionLabel"] == "Raise(250)"
+    assert payload["update"]["node"].endswith("8max-rfi-utg-2.5bb")
+    # The view intentionally unions prior/current cells, so the folded A5s
+    # cell remains visible with zero current mass and a negative delta.
+    assert Decimal(payload["matrix169"]["AA"]["probabilityMass"]) == Decimal("1")
+    assert Decimal(payload["matrix169"]["A5s"]["probabilityMass"]) == Decimal("0")
+
+
+def test_builtin_preflop_policy_rejects_unrecognized_extra_fields():
+    client = TestClient(create_app())
+    response = client.post(
+        "/v1/ranges/belief",
+        json={
+            "scenario": eight_max_rfi_payload(),
+            "seatId": 3,
+            "policy": {"source": "preflop_policy", "version": "anything"},
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_policy"
+
+
+def test_belief_with_builtin_hu_policy_exposes_curated_versioned_node_metadata():
+    client = TestClient(create_app())
+    response = client.post(
+        "/v1/ranges/belief",
+        json={
+            "scenario": hu_open_payload(),
+            "seatId": 0,
+            "policy": {"source": "preflop_policy"},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["source"] == "preflop_policy"
+    assert payload["confidence"] == "curated"
+    assert payload["update"]["node"] == "preflop-policy/hu-100bb-0.1/hu-btn-open-2bb"
+    assert payload["update"]["policyVersion"] == "hu-100bb-0.1"
+    assert payload["update"]["assumptions"] == [
+        "HU NLHE",
+        "100BB effective stacks",
+        "no ante / no rake",
+        "BTN open fixed to the product default 2BB",
+        "deterministic membership interpretation of default.btn_open.100bb",
+    ]
+    assert sum(Decimal(value["probability"]) for value in payload["combos"].values()) == Decimal("1")
+
+
+def test_hu_unsupported_size_preserves_the_specific_curated_policy_reason():
+    client = TestClient(create_app())
+    response = client.post(
+        "/v1/ranges/belief",
+        json={
+            "scenario": hu_open_payload(amount=220),
+            "seatId": 0,
+            "policy": {"source": "preflop_policy"},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["available"] is False
+    assert "exact 2BB" in payload["unavailableReason"]
+
+
 def test_belief_with_solver_result_policy():
     client = TestClient(create_app())
     scenario = belief_scenario_payload(actions=4)
@@ -226,6 +370,81 @@ def test_belief_with_solver_result_at_preflop_is_invalid_policy():
     )
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_policy"
+
+
+def test_belief_with_solver_job_requires_and_verifies_exact_node_provenance():
+    server = fakeredis.FakeServer()
+    queue = SolverJobQueue(client=fakeredis.FakeRedis(server=server))
+    app = create_app(
+        config=AppConfig(),
+        store=SQLiteStore(":memory:"),
+        solver_queue=queue,
+    )
+    client = TestClient(app)
+    try:
+        before_action = belief_scenario_payload()
+        before_action["board"] = ["Qs", "7d", "2c"]
+        before_action["rangesBySeat"]["1"]["matrix169"] = {"AKs": "1"}
+        submitted = client.post("/v1/solve/jobs", json={"scenario": before_action})
+        assert submitted.status_code == 202, submitted.text
+        job_id = submitted.json()["jobId"]
+        queue.finish(
+            job_id,
+            status="solved",
+            result=parse_result(solver_result_payload()),
+        )
+
+        after_action = belief_scenario_payload(actions=4)
+        after_action["board"] = ["Qs", "7d", "2c"]
+        after_action["rangesBySeat"]["1"]["matrix169"] = {"AKs": "1"}
+        response = client.post(
+            "/v1/ranges/belief",
+            json={
+                "scenario": after_action,
+                "seatId": 1,
+                "policy": [
+                    {"source": "fixture", "frequencies": {"call": {"AKs": {"call": "1"}}}},
+                    {"source": "solver", "jobId": job_id},
+                ],
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["confidence"] == "grounded"
+        assert response.json()["update"]["actionType"] == "bet"
+
+        wrong_scenario = {**after_action, "board": ["Qh", "8h", "3s"]}
+        mismatch = client.post(
+            "/v1/ranges/belief",
+            json={
+                "scenario": wrong_scenario,
+                "seatId": 1,
+                "policy": {"source": "solver", "jobId": job_id},
+            },
+        )
+        assert mismatch.status_code == 422
+        assert mismatch.json()["error"]["code"] == "solver_artifact_mismatch"
+    finally:
+        queue.close()
+
+
+def test_raw_solver_result_is_explicitly_unverified_compatibility_input():
+    client = TestClient(create_app())
+    scenario = belief_scenario_payload(actions=4)
+    scenario["rangesBySeat"]["1"]["matrix169"] = {"AKs": "1"}
+    scenario["board"] = ["Qs", "7d", "2c"]
+    response = client.post(
+        "/v1/ranges/belief",
+        json={
+            "scenario": scenario,
+            "seatId": 1,
+            "policy": [
+                {"source": "fixture", "frequencies": {"call": {"AKs": {"call": "1"}}}},
+                {"source": "solver", "result": solver_result_payload()},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["confidence"] == "unverified"
 
 
 def test_trace_returns_snapshot_chain():

@@ -67,7 +67,7 @@
 
 ## 6. 数据产物
 
-- `backend/tests/fixtures/solve-summary-spike1.json`：448 行手牌级策略/EV/equity（OOP 根 + IP 回应节点），供阶段 2 Adapter 测试作参考数据（solver 输出数据，可自由导入）。
+- `backend/tests/fixtures/solve-summary-spike1.json`：448 行手牌级策略/EV/equity（OOP 根 + IP 回应节点），供阶段 2 Adapter 测试作参考数据；它仍须保留 producer、版本、配置、许可证与 fingerprint provenance，不能因是 JSON 就假定可自由导入。
 
 ## 7. 下一步（阶段 2）
 

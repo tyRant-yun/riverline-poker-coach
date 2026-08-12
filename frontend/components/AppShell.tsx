@@ -3,10 +3,11 @@
 
 import type { ReactNode } from "react";
 
-export type WorkspaceView = "handlab" | "solver" | "train" | "library";
+export type WorkspaceView = "handlab" | "table" | "solver" | "train" | "library";
 
 const VIEWS: { id: WorkspaceView; label: string }[] = [
   { id: "handlab", label: "Hand Lab" },
+  { id: "table", label: "持续牌桌" },
   { id: "solver", label: "Solver" },
   { id: "train", label: "Train" },
   { id: "library", label: "Library" },

@@ -16,6 +16,7 @@ type Props = {
   onValidate: () => void;
   onAnalyze: () => void;
   onTeach: () => void;
+  onHandReview: () => void;
   onPractice: () => void;
   onSave: () => void;
   onExport: () => void;
@@ -32,6 +33,7 @@ export default function AnalyzeActions({
   onValidate,
   onAnalyze,
   onTeach,
+  onHandReview,
   onPractice,
   onSave,
   onExport,
@@ -80,6 +82,9 @@ export default function AnalyzeActions({
         </button>
         <button className="action-button" onClick={onTeach} disabled={busy}>
           教学解释
+        </button>
+        <button className="action-button" onClick={onHandReview} disabled={busy}>
+          生成整手复盘
         </button>
         <button className="quiet-button" onClick={onPractice} disabled={busy}>
           生成练习

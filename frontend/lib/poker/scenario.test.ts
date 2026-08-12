@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  deadCardsForSeat,
   getKnownCardsForSeat,
   getRangeForSeat,
   syncSeatSourcesFromLegacy,
@@ -71,6 +72,20 @@ describe("getKnownCardsForSeat", () => {
     });
     // A one-card entry is invalid data; the legacy hero cards win the fallback.
     expect(getKnownCardsForSeat(scenario, 0)).toEqual(["As", "Kd"]);
+  });
+});
+
+describe("deadCardsForSeat", () => {
+  it("keeps the target seat's known cards available while blocking other seats", () => {
+    const scenario = makeScenario({
+      knownHoleCardsBySeat: {
+        "0": ["As", "Ks"],
+        "3": ["Qh", "Qd"],
+      },
+      board: ["2c"],
+    });
+    expect(deadCardsForSeat(scenario, 0)).toEqual(["2c", "Qh", "Qd"]);
+    expect(deadCardsForSeat(scenario, 3)).toEqual(["2c", "As", "Ks"]);
   });
 });
 

@@ -25,6 +25,28 @@ export type FinalState = {
 
 export type StateResponse = { finalState: FinalState };
 
+export type ContinuousTable = {
+  sessionId: string;
+  handId: string | null;
+  handSequence: number;
+  buttonSeat: number;
+  heroSeat: number;
+  revision: number;
+  board: string[];
+  pot: number;
+  street: string | null;
+  seats: { seatId: number; stack: number; status: string; committed: number }[];
+  heroHoleCards: string[];
+  currentActor: number | null;
+  heroLegalActions: { action: string; amountSemantics: string; minAmount?: number; maxAmount?: number }[];
+  actionHistory: { sequence: number; street: string; actorSeat: number; action: string; amount: number | null }[];
+  handComplete: boolean;
+  result: { winnerSeats: number[]; payouts: Record<string, number> } | null;
+  botDecisionProvenance: { sequence: number; actorSeat: number; profileId: string; provider: string; degraded: boolean; fallbackReason: string | null }[];
+};
+
+export type ContinuousTableResponse = { schemaVersion: number; idempotent?: boolean; table: ContinuousTable };
+
 export type AnalysisResponse = {
   analysis: {
     metrics: Record<string, string | number | null>;
@@ -142,6 +164,20 @@ export type SolveJob = {
   executionMs?: number | null;
   /** Present on the submit response only; the spot the job was built from. */
   spot?: SolverSpotPayload | null;
+  provenance?: {
+    scenarioFingerprint: string;
+    spotFingerprint: string;
+    decisionSequence: number;
+    policySequence: number;
+    actorSeat: number;
+    activeSeats: number[];
+    street: string;
+  } | null;
+  scenarioFingerprint?: string;
+  spotFingerprint?: string;
+  policySequence?: number;
+  actorSeat?: number;
+  activeSeats?: number[];
   result?: {
     metadata?: {
       solver: string;

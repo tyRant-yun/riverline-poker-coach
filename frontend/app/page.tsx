@@ -4,7 +4,7 @@
 // and cross-feature wiring live here; rendering lives in features/components.
 // F2: AppShell + three-column workspace + tabbed result workspace.
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import type {
   SolveJob,
@@ -33,17 +33,35 @@ import type { SeatViewModel } from "../types/poker";
 import {
   analysisApi,
   coachApi,
+  handReviewApi,
   practiceApi,
   rangesApi,
   scenariosApi,
   solverApi,
 } from "../lib/api/client";
+import { adaptHandReviewResponse } from "../lib/api/handReviewAdapter";
 import { notationFromMatrix, notationFromMatrixExplicit } from "../lib/poker/matrix";
 import { canSubmitSolve as solveGate, solveGateReasons } from "../lib/poker/solve";
 import type { DisplayUnit } from "../lib/poker/format";
 import { buildSeatViewModels } from "../lib/poker/table";
-import { heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
-import { applySolvePoll } from "../lib/solver/poll";
+import { deadCardsForSeat, getRangeForSeat, heroCards, syncSeatSourcesFromLegacy } from "../lib/poker/scenario";
+import { changeButtonSeat, changeHeroSeat, resizeTable, type TableSize } from "../lib/poker/scenarioTopology";
+import { projectSelectedDecisionScenario, reconcileSelectedActionId, selectionForAction } from "../lib/poker/handReview";
+import { BeliefRequestGate } from "../lib/range/beliefRequest";
+import {
+  buildHandReviewRequest,
+  emptyWholeHandReviewState,
+  invalidateWholeHandReview,
+  selectedReviewAssessment,
+  type WholeHandReviewState,
+} from "../lib/poker/wholeHandReview";
+import {
+  emptySolveJobRegistry,
+  projectionFingerprint,
+  selectedSolveJob,
+  solveJobRegistryReducer,
+  type SolveJobNode,
+} from "../lib/solver/registry";
 
 import AppShell, { type WorkspaceView } from "../components/AppShell";
 import PokerTable from "../components/poker/PokerTable";
@@ -57,6 +75,8 @@ import ResultWorkspace, { type ResultTab } from "../features/workspace/ResultWor
 import TeachingPanel from "../features/coach/TeachingPanel";
 import PracticePanel from "../features/practice/PracticePanel";
 import SolverWorkspace from "../features/solver/SolverWorkspace";
+import WholeHandReviewPanel from "../features/review/WholeHandReviewPanel";
+import ContinuousTablePage from "../features/table/ContinuousTablePage";
 
 const initialScenario: Scenario = {
   schemaVersion: 1,
@@ -88,20 +108,25 @@ export default function Home() {
   const [analysisStale, setAnalysisStale] = useState(false);
   const [teaching, setTeaching] = useState<TeachingResponse["response"] | null>(null);
   const [teachingMeta, setTeachingMeta] = useState<TeachingMeta | null>(null);
-  const [solveJob, setSolveJob] = useState<SolveJob | null>(null);
+  const [solveJobs, dispatchSolveJob] = useReducer(solveJobRegistryReducer, emptySolveJobRegistry);
   const [practice, setPractice] = useState<PracticeQuestion | null>(null);
   const [practiceOutcome, setPracticeOutcome] = useState<PracticeOutcome | null>(null);
   const [teachingDepth, setTeachingDepth] = useState("intermediate");
   const [teachingQuestion, setTeachingQuestion] = useState("");
   const [rangeSide, setRangeSide] = useState<RangeSide>("villainRange");
   const [rangeTextBySide, setRangeTextBySide] = useState<Record<RangeSide, string>>({ heroRange: "22+, A5s+, K9o+", villainRange: "22+, A5s+, K9o+" });
+  const [rangeTextBySeat, setRangeTextBySeat] = useState<Record<string, string>>({});
+  const [rangeSeatId, setRangeSeatId] = useState(1);
   const [defaultRanges, setDefaultRanges] = useState<DefaultRanges>({});
   const [rangeMatrix, setRangeMatrix] = useState<Record<string, string>>({});
   const [rangeSummary, setRangeSummary] = useState<RangeSummary | null>(null);
   const [rangeCombos, setRangeCombos] = useState<RangeCombo[]>([]);
   const [rangeBelief, setRangeBelief] = useState<RangeBeliefView | null>(null);
   const [rangeBeliefLoading, setRangeBeliefLoading] = useState(false);
+  const [rangeBeliefStale, setRangeBeliefStale] = useState(false);
   const [beliefMode, setBeliefMode] = useState<BeliefMode>("prior");
+  const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
+  const [beliefSeatId, setBeliefSeatId] = useState<number | null>(null);
   const [savedScenarios, setSavedScenarios] = useState<SavedScenario[]>([]);
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null);
   const [activeRevisionNo, setActiveRevisionNo] = useState<number | null>(null);
@@ -118,10 +143,13 @@ export default function Home() {
   const [displayUnit, setDisplayUnit] = useState<DisplayUnit>("bb");
   const [activeView, setActiveView] = useState<WorkspaceView>("handlab");
   const [resultTab, setResultTab] = useState<ResultTab>("evidence");
-  // Generation token that supersedes stale solver poll loops (prevents
-  // duplicate/concurrent polling when a job is resubmitted or the page
-  // unmounts).
-  const solvePollToken = useRef(0);
+  const [wholeHandReview, setWholeHandReview] = useState<WholeHandReviewState>(emptyWholeHandReviewState);
+  // Each action node owns a polling generation. Resubmitting or unmounting
+  // only supersedes that node's loop, never another action's job.
+  const solvePollTokens = useRef<Record<string, number>>({});
+  const rangeBeliefRequestGate = useRef(new BeliefRequestGate());
+  const stateRefreshToken = useRef(0);
+  const wholeHandReviewToken = useRef(0);
 
   useEffect(() => {
     void loadSavedScenarios();
@@ -133,7 +161,15 @@ export default function Home() {
   // Stop any in-flight solver polling when the workspace unmounts.
   useEffect(() => {
     return () => {
-      solvePollToken.current += 1;
+      for (const actionId of Object.keys(solvePollTokens.current)) {
+        solvePollTokens.current[actionId] += 1;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      wholeHandReviewToken.current += 1;
     };
   }, []);
 
@@ -147,35 +183,73 @@ export default function Home() {
   useEffect(() => {
     if (practice) setResultTab("practice");
   }, [practice]);
+  const rangeSeatForEditor = scenario.tableSize === 2
+    ? beliefSeatForSide(rangeSide) ?? scenario.heroSeat
+    : scenario.seats.some((seat) => seat.seatId === rangeSeatId) ? rangeSeatId : scenario.heroSeat;
+  const rangeText = scenario.tableSize === 2
+    ? rangeTextBySide[rangeSide]
+    : rangeTextBySeat[String(rangeSeatForEditor)] ?? notationFromMatrix(getRangeForSeat(scenario, rangeSeatForEditor)?.matrix169 ?? {});
+  const selectedAction = useMemo(
+    () => selectionForAction(scenario.actionHistory, selectedActionId),
+    [scenario.actionHistory, selectedActionId],
+  );
+  const selectedDecisionScenario = useMemo(
+    () => selectedAction ? projectSelectedDecisionScenario(scenario, selectedAction) : null,
+    [scenario, selectedAction],
+  );
+  const solveNodes = useMemo(() => {
+    return scenario.actionHistory.reduce<Record<string, SolveJobNode>>((nodes, event) => {
+      const selection = selectionForAction(scenario.actionHistory, event.actionId);
+      if (!selection) return nodes;
+      const projection = projectSelectedDecisionScenario(scenario, selection);
+      nodes[selection.actionId] = {
+        decisionSequence: selection.decisionSequence,
+        actorSeat: selection.actorSeat,
+        projectionFingerprint: projectionFingerprint(projection),
+      };
+      return nodes;
+    }, {});
+  }, [scenario]);
+  const selectedProjectionFingerprint = selectedAction
+    ? solveNodes[selectedAction.actionId]?.projectionFingerprint ?? null
+    : null;
+  const selectedSolveEntry = selectedAction ? solveJobs[selectedAction.actionId] ?? null : null;
+  const solveJob = selectedSolveJob(solveJobs, selectedActionId, selectedProjectionFingerprint);
+
+  useEffect(() => {
+    dispatchSolveJob({ type: "reconcile", actions: solveNodes });
+  }, [solveNodes]);
+
   useEffect(() => {
     if (solveJob) setResultTab("solver");
   }, [solveJob]);
+  // The editor always owns `scenario`. This projection is read-only and is
+  // the single scenario source for the selected decision workspace.
+  const workspaceScenario = selectedDecisionScenario ?? scenario;
 
-  const rangeText = rangeTextBySide[rangeSide];
-
-  const hasDealFlop = scenario.actionHistory.some((event) => event.actionType === "deal_flop");
-  const hasDealTurn = scenario.actionHistory.some((event) => event.actionType === "deal_turn");
-  const hasDealRiver = scenario.actionHistory.some((event) => event.actionType === "deal_river");
+  const hasDealFlop = workspaceScenario.actionHistory.some((event) => event.actionType === "deal_flop");
+  const hasDealTurn = workspaceScenario.actionHistory.some((event) => event.actionType === "deal_turn");
+  const hasDealRiver = workspaceScenario.actionHistory.some((event) => event.actionType === "deal_river");
   const pendingDealStreet = state?.actorSeat === null
-    ? (!hasDealFlop && scenario.board.length >= 3
+    ? (!hasDealFlop && workspaceScenario.board.length >= 3
       ? "preflop"
-      : !hasDealTurn && scenario.board.length >= 4
+      : !hasDealTurn && workspaceScenario.board.length >= 4
         ? "flop"
-        : !hasDealRiver && scenario.board.length >= 5
+        : !hasDealRiver && workspaceScenario.board.length >= 5
           ? "turn"
           : null)
     : null;
-  const currentStreet = pendingDealStreet ?? state?.street ?? scenario.decisionPoint.street;
+  const currentStreet = pendingDealStreet ?? state?.street ?? workspaceScenario.decisionPoint.street;
   const legal = state?.legalActions;
   const actorPosition =
     legal?.actorSeat != null
-      ? scenario.seats.find((seat) => seat.seatId === legal.actorSeat)?.position ?? null
+      ? workspaceScenario.seats.find((seat) => seat.seatId === legal.actorSeat)?.position ?? null
       : null;
   const boardInput = useMemo(() => [...scenario.board, "", "", "", "", ""].slice(0, 5), [scenario.board]);
 
   const tableSeats = useMemo<SeatViewModel[]>(
-    () => buildSeatViewModels(scenario, state),
-    [scenario, state],
+    () => buildSeatViewModels(workspaceScenario, state),
+    [workspaceScenario, state],
   );
 
   function updateScenario(patch: Partial<Scenario>) {
@@ -184,42 +258,85 @@ export default function Home() {
     setMessage("场景已修改，需要重新校验或分析。");
   }
 
+  function commitTopology(next: Scenario) {
+    commitScenario(next);
+    setSelectedActionId(null);
+    setBeliefSeatId(null);
+    setRangeSeatId(next.heroSeat);
+    syncRangeEditor(next);
+    setState(null);
+    void refreshState(next, undefined, true);
+  }
+
+  function invalidateDerivedAnalysisState() {
+    invalidateRangeBelief();
+    invalidateWholeHandReviewState();
+  }
+
+  function invalidateWholeHandReviewState() {
+    wholeHandReviewToken.current += 1;
+    setWholeHandReview((current) => invalidateWholeHandReview(current));
+  }
+
+  function invalidateRangeBelief() {
+    rangeBeliefRequestGate.current.invalidate();
+    setRangeBeliefStale(Boolean(rangeBelief));
+    setRangeBeliefLoading(false);
+  }
+
   function commitScenario(next: Scenario) {
     setPastScenarios((past) => [...past, scenario]);
     setFutureScenarios([]);
     setScenario(next);
+    setSelectedActionId((current) => reconcileSelectedActionId(next.actionHistory, current));
     setSavedScenarioDirty(Boolean(activeScenarioId));
     setAnalysisStale(Boolean(analysis));
     setTeaching(null);
     setPractice(null);
     setPracticeOutcome(null);
-    setRangeBelief(null);
+    invalidateDerivedAnalysisState();
   }
 
   function undo() {
     const previous = pastScenarios[pastScenarios.length - 1];
     if (!previous) return;
+    const restoredSelection = selectionForAction(previous.actionHistory, selectedActionId);
     setPastScenarios((past) => past.slice(0, -1));
     setFutureScenarios((future) => [scenario, ...future]);
     setScenario(previous);
+    setSelectedActionId((current) => reconcileSelectedActionId(previous.actionHistory, current));
     setSavedScenarioDirty(Boolean(activeScenarioId));
     setAnalysisStale(Boolean(analysis));
     setTeaching(null);
     setPractice(null);
     setPracticeOutcome(null);
+    invalidateDerivedAnalysisState();
+    void refreshState(
+      restoredSelection ? projectSelectedDecisionScenario(previous, restoredSelection) : previous,
+      undefined,
+      !restoredSelection,
+    );
   }
 
   function redo() {
     const next = futureScenarios[0];
     if (!next) return;
+    const restoredSelection = selectionForAction(next.actionHistory, selectedActionId);
     setFutureScenarios((future) => future.slice(1));
     setPastScenarios((past) => [...past, scenario]);
     setScenario(next);
+    setSelectedActionId((current) => reconcileSelectedActionId(next.actionHistory, current));
     setSavedScenarioDirty(Boolean(activeScenarioId));
     setAnalysisStale(Boolean(analysis));
     setTeaching(null);
     setPractice(null);
     setPracticeOutcome(null);
+    invalidateDerivedAnalysisState();
+    void refreshState(
+      restoredSelection ? projectSelectedDecisionScenario(next, restoredSelection) : next,
+      undefined,
+      !restoredSelection,
+    );
   }
 
   async function resetScenario() {
@@ -228,12 +345,14 @@ export default function Home() {
     setActiveScenarioId(null);
     setActiveRevisionNo(null);
     setSavedScenarioDirty(false);
+    setSelectedActionId(null);
+    setBeliefSeatId(null);
     syncRangeEditor(next);
     setState(null);
     setAnalysis(null);
     setAnalysisStale(false);
     setMessage("场景已重置；原场景仍可通过撤销恢复。");
-    await refreshState(next);
+    await refreshState(next, undefined, true);
   }
 
   function updateBoard(index: number, value: string) {
@@ -261,18 +380,30 @@ export default function Home() {
   }
 
   function selectRangeSide(side: RangeSide) {
+    invalidateRangeBelief();
     setRangeSide(side);
-    const selected = side === "heroRange" ? scenario.heroRange : scenario.villainRange;
+    const selectedSeat = beliefSeatForSide(side) ?? scenario.heroSeat;
+    setRangeSeatId(selectedSeat);
+    const selected = getRangeForSeat(scenario, selectedSeat);
     setRangeMatrix(selected?.matrix169 ?? {});
     setRangeSummary(null);
     setRangeCombos([]);
-    // The belief view follows the selected seat; refetch when a solver
-    // result exists, otherwise clear (prior-only / unavailable).
-    if (solveJob?.result) {
-      void fetchRangeBelief(side);
-    } else {
-      setRangeBelief(null);
-    }
+    setBeliefSeatId(beliefSeatForSide(side));
+  }
+
+  function selectBeliefSeat(seatId: number) {
+    invalidateRangeBelief();
+    setBeliefSeatId(seatId);
+  }
+
+  function selectRangeSeat(seatId: number) {
+    invalidateRangeBelief();
+    setRangeSeatId(seatId);
+    const selected = getRangeForSeat(scenario, seatId);
+    setRangeMatrix(selected?.matrix169 ?? {});
+    setRangeSummary(null);
+    setRangeCombos([]);
+    setBeliefSeatId(seatId);
   }
 
   function beliefSeatForSide(side: RangeSide): number | null {
@@ -281,42 +412,87 @@ export default function Home() {
     return other?.seatId ?? null;
   }
 
-  async function fetchRangeBelief(side: RangeSide = rangeSide) {
-    const seatId = beliefSeatForSide(side);
+  async function fetchRangeBelief({
+    seatId,
+    afterSequence,
+    job = solveJob,
+  }: {
+    seatId: number | null;
+    afterSequence: number;
+    job?: SolveJob | null;
+  }) {
     if (seatId == null) {
       setRangeBelief(null);
+      setRangeBeliefStale(false);
       return;
     }
-    const policy = solveJob?.result
-      ? { source: "solver" as const, result: solveJob.result }
+    // The curated preflop provider is deliberately narrow and declines every
+    // non-RFI node; chaining it before the solver lets a trace ground an
+    // eligible 8-max open without guessing at the rest of the hand.
+    const solverPolicy = job?.status === "solved" && job.result
+      ? { source: "solver" as const, jobId: job.jobId }
       : undefined;
+    const policy = solverPolicy
+      ? [{ source: "preflop_policy" as const }, solverPolicy]
+      : { source: "preflop_policy" as const };
+    const requestToken = rangeBeliefRequestGate.current.begin();
     setRangeBeliefLoading(true);
     try {
-      const payload = await rangesApi.belief({ scenario, seatId, policy });
+      const payload = await rangesApi.belief({ scenario, seatId, afterSequence, policy });
+      if (!rangeBeliefRequestGate.current.isCurrent(requestToken)) return;
       setRangeBelief(payload);
+      setRangeBeliefStale(false);
     } catch (error) {
+      if (!rangeBeliefRequestGate.current.isCurrent(requestToken)) return;
       setRangeBelief(null);
+      setRangeBeliefStale(false);
       setMessage(error instanceof Error ? error.message : "range belief 计算失败");
     } finally {
-      setRangeBeliefLoading(false);
+      if (rangeBeliefRequestGate.current.isCurrent(requestToken)) setRangeBeliefLoading(false);
     }
   }
+
+  // A selected player action drives the after-action range view. The API gets
+  // the full hand plus eventSequence so its own temporal contract can hide
+  // later board cards/actions; the decision cursor remains eventSequence - 1.
+  useEffect(() => {
+    if (!selectedAction) return;
+    const seatId = beliefSeatId ?? selectedAction.actorSeat;
+    void fetchRangeBelief({ seatId, afterSequence: selectedAction.eventSequence });
+    // Request identity is represented by the action id, selected seat and
+    // ScenarioSpec. The gate above rejects a response from an older render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenario, selectedActionId, beliefSeatId, solveJob?.jobId, solveJob?.status]);
 
   function syncRangeEditor(nextScenario: Scenario) {
     setRangeTextBySide((current) => ({
       heroRange: nextScenario.heroRange ? notationFromMatrix(nextScenario.heroRange.matrix169) : current.heroRange,
       villainRange: nextScenario.villainRange ? notationFromMatrix(nextScenario.villainRange.matrix169) : current.villainRange,
     }));
-    const selected = rangeSide === "heroRange" ? nextScenario.heroRange : nextScenario.villainRange;
+    setRangeTextBySeat((current) => Object.fromEntries(nextScenario.seats.map((seat) => [
+      String(seat.seatId),
+      getRangeForSeat(nextScenario, seat.seatId)
+        ? notationFromMatrix(getRangeForSeat(nextScenario, seat.seatId)!.matrix169)
+        : current[String(seat.seatId)] ?? "22+, A5s+, K9o+",
+    ])));
+    const selectedSeat = nextScenario.tableSize === 2
+      ? (rangeSide === "heroRange"
+        ? nextScenario.heroSeat
+        : nextScenario.seats.find((seat) => seat.seatId !== nextScenario.heroSeat)?.seatId ?? nextScenario.heroSeat)
+      : nextScenario.seats.some((seat) => seat.seatId === rangeSeatId) ? rangeSeatId : nextScenario.heroSeat;
+    const selected = getRangeForSeat(nextScenario, selectedSeat);
     setRangeMatrix(selected?.matrix169 ?? {});
     setRangeSummary(null);
     setRangeCombos([]);
   }
 
   async function loadSaved(record: SavedScenario) {
+    invalidateDerivedAnalysisState();
     setPastScenarios([]);
     setFutureScenarios([]);
     setScenario(record.scenario);
+    setSelectedActionId(null);
+    setBeliefSeatId(null);
     setActiveScenarioId(record.scenarioId);
     setActiveRevisionNo(record.revisionNo);
     setSavedScenarioDirty(false);
@@ -397,9 +573,12 @@ export default function Home() {
 
   async function reanalyzeSaved(record: SavedScenario) {
     setBusy(true);
+    invalidateDerivedAnalysisState();
     try {
       const payload = await scenariosApi.analyze(record.scenarioId);
       setScenario(record.scenario);
+      setSelectedActionId(null);
+      setBeliefSeatId(null);
       setActiveScenarioId(record.scenarioId);
       setActiveRevisionNo(record.revisionNo);
       setSavedScenarioDirty(false);
@@ -417,9 +596,12 @@ export default function Home() {
   }
 
   function loadRevision(revision: ScenarioRevision) {
+    invalidateDerivedAnalysisState();
     setPastScenarios([]);
     setFutureScenarios([]);
     setScenario(revision.scenario);
+    setSelectedActionId(null);
+    setBeliefSeatId(null);
     setActiveScenarioId(revision.scenarioId);
     setActiveRevisionNo(revision.revisionNo);
     setSavedScenarioDirty(false);
@@ -436,9 +618,12 @@ export default function Home() {
 
   async function reanalyzeRevision(revision: ScenarioRevision, title: string) {
     setBusy(true);
+    invalidateDerivedAnalysisState();
     try {
       const payload = await scenariosApi.analyzeRevision(revision.scenarioId, revision.revisionNo);
       setScenario(revision.scenario);
+      setSelectedActionId(null);
+      setBeliefSeatId(null);
       setActiveScenarioId(revision.scenarioId);
       setActiveRevisionNo(revision.revisionNo);
       setSavedScenarioDirty(false);
@@ -486,9 +671,12 @@ export default function Home() {
         tags: ["imported"],
       });
       const record = payload.scenario as SavedScenario;
+      invalidateDerivedAnalysisState();
       setPastScenarios([]);
       setFutureScenarios([]);
       setScenario(record.scenario);
+      setSelectedActionId(null);
+      setBeliefSeatId(null);
       setActiveScenarioId(record.scenarioId);
       setActiveRevisionNo(record.revisionNo);
       setSavedScenarioDirty(false);
@@ -505,24 +693,32 @@ export default function Home() {
     }
   }
 
-  async function refreshState(nextScenario = scenario, successMessage?: string) {
+  async function refreshState(
+    nextScenario = workspaceScenario,
+    successMessage?: string,
+    syncEditorDecision = !selectedAction,
+  ) {
+    const requestToken = ++stateRefreshToken.current;
     setBusy(true);
     try {
       const payload = await scenariosApi.state(nextScenario);
+      if (stateRefreshToken.current !== requestToken) return;
       setState(payload.finalState);
-      setScenario((current) => ({
-        ...current,
-        decisionPoint: {
-          street: payload.finalState.street,
-          actorSeat: payload.finalState.actorSeat ?? current.heroSeat,
-          afterSequence: nextScenario.decisionPoint.afterSequence,
-        },
-      }));
+      if (syncEditorDecision) {
+        setScenario((current) => ({
+          ...current,
+          decisionPoint: {
+            street: payload.finalState.street,
+            actorSeat: payload.finalState.actorSeat ?? current.heroSeat,
+            afterSequence: nextScenario.decisionPoint.afterSequence,
+          },
+        }));
+      }
       setMessage(successMessage ?? "规则校验通过，当前状态已更新。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "规则校验失败");
     } finally {
-      setBusy(false);
+      if (stateRefreshToken.current === requestToken) setBusy(false);
     }
   }
 
@@ -542,7 +738,9 @@ export default function Home() {
     const actionHistory = [...scenario.actionHistory, event];
     const next = { ...scenario, actionHistory, decisionPoint: { street: currentStreet, actorSeat: legal.actorSeat, afterSequence: actionHistory.length } };
     commitScenario(next);
-    await refreshState(next);
+    setSelectedActionId(event.actionId);
+    setBeliefSeatId(event.actorSeat);
+    await refreshState(next, undefined, true);
   }
 
   async function deal(street: "deal_flop" | "deal_turn" | "deal_river") {
@@ -562,13 +760,39 @@ export default function Home() {
       decisionPoint: { street: street.replace("deal_", ""), actorSeat: state?.actorSeat ?? scenario.heroSeat, afterSequence: actionHistory.length },
     };
     commitScenario(next);
-    await refreshState(next);
+    // A deal is a state transition, not a selectable player decision. Keeping
+    // the preceding action selected would leave the ActionBar on its
+    // historical projection and block the next real player action.
+    setSelectedActionId(null);
+    setBeliefSeatId(null);
+    // A deal advances to a new decision node, so adopt the backend-replayed
+    // actor even when the preceding player action was selected.
+    await refreshState(next, undefined, true);
   }
 
-  async function selectNode(sequence: number, street: string) {
-    const next = { ...scenario, decisionPoint: { ...scenario.decisionPoint, street, afterSequence: sequence } };
-    commitScenario(next);
-    await refreshState(next);
+  function selectAction(actionId: string, allowToggle = true) {
+    const selection = selectionForAction(scenario.actionHistory, actionId);
+    if (!selection) return;
+    invalidateRangeBelief();
+    if (allowToggle && selectedActionId === selection.actionId) {
+      setSelectedActionId(null);
+      setBeliefSeatId(null);
+      void refreshState(scenario, undefined, true);
+      return;
+    }
+    setSelectedActionId(selection.actionId);
+    setBeliefSeatId(selection.actorSeat);
+    setBeliefMode("current");
+    void refreshState(projectSelectedDecisionScenario(scenario, selection), undefined, false);
+  }
+
+  function navigateToReviewedAction(actionId: string) {
+    selectAction(actionId, false);
+    requestAnimationFrame(() => {
+      const target = document.getElementById(`action-timeline-${actionId}`);
+      target?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+      target?.focus();
+    });
   }
 
   async function runAnalysis() {
@@ -588,10 +812,10 @@ export default function Home() {
         : activeScenarioId
           ? `/v1/scenarios/${activeScenarioId}/analyze`
           : "/v1/analysis";
-      const analysisPath = activeScenarioId && !savedScenarioDirty ? path : "/v1/analysis";
+      const analysisPath = !selectedAction && activeScenarioId && !savedScenarioDirty ? path : "/v1/analysis";
       const payload =
         analysisPath === "/v1/analysis"
-          ? await analysisApi.run(scenario)
+          ? await analysisApi.run(workspaceScenario)
           : historicalRevision
             ? await scenariosApi.analyzeRevision(activeScenarioId!, activeRevisionNo!)
             : await scenariosApi.analyze(activeScenarioId!);
@@ -624,7 +848,11 @@ export default function Home() {
   }
 
   function setCurrentRangeText(value: string) {
-    setRangeTextBySide((current) => ({ ...current, [rangeSide]: value }));
+    if (scenario.tableSize === 2) {
+      setRangeTextBySide((current) => ({ ...current, [rangeSide]: value }));
+      return;
+    }
+    setRangeTextBySeat((current) => ({ ...current, [String(rangeSeatForEditor)]: value }));
   }
 
   async function applyDefaultRange(key: string) {
@@ -638,16 +866,22 @@ export default function Home() {
 
   async function normalizeRange(notation = rangeText, side = rangeSide) {
     try {
-      const deadCards = side === "heroRange"
-        ? [...heroCards(scenario), ...(scenario.villainHoleCards ?? []), ...scenario.board]
-        : [...heroCards(scenario), ...scenario.board];
+      const targetSeat = scenario.tableSize === 2 ? beliefSeatForSide(side) : rangeSeatForEditor;
+      const deadCards = targetSeat == null ? [...scenario.board] : deadCardsForSeat(scenario, targetSeat);
       const payload = await rangesApi.parse(notation, deadCards);
       setRangeMatrix(payload.range.matrix169);
       setRangeSummary(payload.summary);
       setRangeCombos(payload.combos ?? []);
       setCurrentRangeText(notation);
-      updateScenario({ [side]: payload.range } as Partial<Scenario>);
-      setMessage(`${side === "heroRange" ? "Hero" : "Villain"} 范围已标准化为 ${Object.keys(payload.range.matrix169).length} 个矩阵格。`);
+      if (scenario.tableSize === 2) {
+        updateScenario({ [side]: payload.range } as Partial<Scenario>);
+      } else if (targetSeat != null) {
+        updateScenario({
+          rangesBySeat: { ...(scenario.rangesBySeat ?? {}), [String(targetSeat)]: payload.range },
+          ...(targetSeat === scenario.heroSeat ? { heroRange: payload.range } : {}),
+        });
+      }
+      setMessage(`${scenario.tableSize === 2 ? (side === "heroRange" ? "Hero" : "Villain") : `Seat ${targetSeat}`} 范围已标准化为 ${Object.keys(payload.range.matrix169).length} 个矩阵格。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "范围解析失败");
     }
@@ -673,7 +907,7 @@ export default function Home() {
   async function runTeaching() {
     setBusy(true);
     try {
-      const payload = await coachApi.explain({ scenario, depth: teachingDepth, question: teachingQuestion || undefined });
+      const payload = await coachApi.explain({ scenario: workspaceScenario, depth: teachingDepth, question: teachingQuestion || undefined });
       setTeaching(payload.response);
       setTeachingMeta({
         provider: payload.provider ?? "local",
@@ -688,16 +922,49 @@ export default function Home() {
     }
   }
 
+  async function runWholeHandReview() {
+    const requestToken = ++wholeHandReviewToken.current;
+    const request = buildHandReviewRequest(scenario, solveJobs);
+    setWholeHandReview((current) => ({ ...current, status: "loading", error: null }));
+    try {
+      const rawResponse = await handReviewApi.review(request);
+      // The API boundary returns wire data. Keep the pure adapter explicit so
+      // presentation never derives poker facts from the editable scenario.
+      const review = adaptHandReviewResponse(rawResponse);
+      if (wholeHandReviewToken.current !== requestToken) return;
+      setWholeHandReview({ status: "success", review, error: null });
+      setMessage(
+        review.decisionReviews.length
+          ? "整手复盘已生成；可点击决策卡或优先复盘点跳转。"
+          : "整手复盘已生成；这手牌没有可评分的玩家决策。",
+      );
+    } catch (error) {
+      if (wholeHandReviewToken.current !== requestToken) return;
+      setWholeHandReview((current) => ({
+        ...current,
+        status: "error",
+        error: error instanceof Error ? error.message : "整手复盘生成失败",
+      }));
+    }
+  }
+
   async function submitSolve() {
+    if (!selectedAction || !selectedProjectionFingerprint) {
+      setMessage("请先在行动时间线中选择一条真实玩家行动，再求解此点。");
+      return;
+    }
     setBusy(true);
     try {
-      const payload = await solverApi.submit(scenario);
-      setSolveJob({
-        jobId: payload.jobId,
-        status: payload.status,
-        spot: payload.spot ?? null,
+      const payload = await solverApi.submit(workspaceScenario);
+      dispatchSolveJob({
+        type: "submitted",
+        actionId: selectedAction.actionId,
+        decisionSequence: selectedAction.decisionSequence,
+        actorSeat: selectedAction.actorSeat,
+        projectionFingerprint: selectedProjectionFingerprint,
+        job: payload,
       });
-      void pollSolveJob(payload.jobId);
+      void pollSolveJob(selectedAction.actionId, payload);
       setMessage("求解作业已提交（独立 Solver 容器执行，通常 1–3 分钟）。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "求解提交失败");
@@ -707,11 +974,11 @@ export default function Home() {
   }
 
   async function cancelSolve() {
-    if (!solveJob) return;
+    if (!selectedAction || !selectedSolveEntry) return;
     setBusy(true);
     try {
-      const payload = await solverApi.cancel(solveJob.jobId);
-      setSolveJob((job) => (job ? { ...job, status: payload.status } : job));
+      const payload = await solverApi.cancel(selectedSolveEntry.job.jobId);
+      dispatchSolveJob({ type: "cancelled", actionId: selectedAction.actionId, status: payload.status });
       setMessage(`求解取消请求已发送（${payload.status}）。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "取消请求失败");
@@ -720,35 +987,26 @@ export default function Home() {
     }
   }
 
-  async function pollSolveJob(jobId: string) {
-    const token = ++solvePollToken.current;
+  async function pollSolveJob(actionId: string, submittedJob: SolveJob) {
+    const token = (solvePollTokens.current[actionId] ?? 0) + 1;
+    solvePollTokens.current[actionId] = token;
     for (let attempt = 0; attempt < 120; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 3000));
-      if (solvePollToken.current !== token) return; // superseded by a newer poll
+      if (solvePollTokens.current[actionId] !== token) return; // node was resubmitted or unmounted
       try {
-        const payload = await solverApi.get(jobId);
-        if (solvePollToken.current !== token) return;
+        const payload = await solverApi.get(submittedJob.jobId);
+        if (solvePollTokens.current[actionId] !== token) return;
         // Merge onto the previous job instead of replacing it: the submit
         // response's spot (assumptions -> bunching_ignored) must survive
         // every poll cycle.
-        setSolveJob((previous) =>
-          applySolvePoll(previous, {
-            jobId,
-            status: payload.status,
-            error: payload.error,
-            executionMs: payload.executionMs,
-            result: payload.result,
-          }),
-        );
+        const pollPayload = { ...payload, jobId: submittedJob.jobId };
+        dispatchSolveJob({ type: "polled", actionId, job: pollPayload });
         if (["solved", "failed", "cancelled"].includes(payload.status)) {
           setMessage(
             payload.status === "solved"
               ? "求解完成；策略频率可作为 solver_backed 证据引用。"
               : `求解${payload.status}${payload.error ? `：${payload.error}` : ""}`,
           );
-          if (payload.status === "solved") {
-            void fetchRangeBelief();
-          }
           return;
         }
       } catch {
@@ -760,7 +1018,7 @@ export default function Home() {
   async function generatePractice() {
     setBusy(true);
     try {
-      const payload = await practiceApi.generate({ scenario, profileId: "local-browser", mistakeTag: "pot_odds" });
+      const payload = await practiceApi.generate({ scenario: workspaceScenario, profileId: "local-browser", mistakeTag: "pot_odds" });
       setPractice(payload.question);
       setPracticeOutcome(null);
       setMessage("验证练习已生成；先选择行动，再查看证据答案。");
@@ -790,8 +1048,9 @@ export default function Home() {
   // ranges for them (legacy hero/villain or Schema v2 rangesBySeat). The
   // backend re-validates every spot; this only blocks obviously invalid
   // submissions.
-  const canSubmitSolve = solveGate(scenario, state, currentStreet, busy);
-  const solveReasons = solveGateReasons(scenario, state, currentStreet);
+  const canSubmitSolve = Boolean(selectedAction) && solveGate(workspaceScenario, state, currentStreet, busy);
+  const solveReasons = solveGateReasons(workspaceScenario, state, currentStreet);
+  const selectedActionIsLatest = selectedAction?.actionId === scenario.actionHistory[scenario.actionHistory.length - 1]?.actionId;
 
   const handLab = (
     <>
@@ -809,6 +1068,9 @@ export default function Home() {
               onRedo={redo}
               onUpdateScenario={updateScenario}
               onUpdateBoard={updateBoard}
+              onTableSizeChange={(tableSize) => commitTopology(resizeTable(scenario, tableSize as TableSize))}
+              onButtonSeatChange={(seatId) => commitTopology(changeButtonSeat(scenario, seatId))}
+              onHeroSeatChange={(seatId) => commitTopology(changeHeroSeat(scenario, seatId))}
             />
           </section>
 
@@ -837,10 +1099,24 @@ export default function Home() {
           <section className="panel compact-panel">
             <ActionTimeline
               events={scenario.actionHistory}
-              selectedSequence={scenario.decisionPoint.afterSequence}
-              onSelectNode={(sequence, street) => void selectNode(sequence, street)}
+              selectedActionId={selectedActionId}
+              onSelectAction={selectAction}
               onRefresh={() => void refreshState()}
             />
+            {selectedAction && (
+              <p className="muted small">
+                {selectedSolveEntry?.stale
+                  ? "此行动的 Solver job 已过期：场景或节点 fingerprint 不再匹配，可重新提交。"
+                  : selectedSolveEntry
+                    ? `此行动的 Solver 状态：${selectedSolveEntry.job.status}`
+                    : "已选择行动前节点；点击「提交 Solver」仅求解此点。"}
+                {selectedSolveEntry?.stale && ["queued", "running", "cancellation_requested"].includes(selectedSolveEntry.job.status) && (
+                  <button className="text-button" onClick={() => void cancelSolve()}>
+                    取消求解
+                  </button>
+                )}
+              </p>
+            )}
           </section>
         </aside>
 
@@ -869,7 +1145,7 @@ export default function Home() {
             </div>
             <PokerTable
               seats={tableSeats}
-              board={scenario.board}
+              board={workspaceScenario.board}
               pot={state?.pot ?? null}
               unit={displayUnit}
               bigBlind={scenario.bigBlind}
@@ -877,7 +1153,7 @@ export default function Home() {
             <ActionBar
               legal={legal ?? null}
               currentStreet={currentStreet}
-              busy={busy}
+              busy={busy || Boolean(selectedAction && !selectedActionIsLatest)}
               boardLength={scenario.board.length}
               raiseAmount={raiseAmount}
               pot={state?.pot ?? null}
@@ -901,13 +1177,23 @@ export default function Home() {
             rangeCombos={rangeCombos}
             belief={rangeBelief}
             beliefLoading={rangeBeliefLoading}
+            beliefStale={rangeBeliefStale}
             beliefMode={beliefMode}
+            beliefSeatId={beliefSeatId ?? selectedAction?.actorSeat ?? beliefSeatForSide(rangeSide)}
+            beliefSeats={scenario.seats}
+            beliefEventSequence={selectedAction?.eventSequence ?? null}
+            beliefDecisionSequence={selectedAction?.decisionSequence ?? null}
             onRangeSideChange={selectRangeSide}
+            rangeSeatId={rangeSeatForEditor}
+            rangeSeats={scenario.seats}
+            isHeadsUp={scenario.tableSize === 2}
+            onRangeSeatChange={selectRangeSeat}
             onRangeTextChange={setCurrentRangeText}
             onApplyDefault={(key) => void applyDefaultRange(key)}
             onParse={() => void parseRange()}
             onCycleCell={(cell) => void cycleRangeCell(cell)}
             onBeliefModeChange={setBeliefMode}
+            onBeliefSeatChange={selectBeliefSeat}
           />
 
           <AnalyzeActions
@@ -920,6 +1206,7 @@ export default function Home() {
             onValidate={() => void refreshState()}
             onAnalyze={() => void runAnalysis()}
             onTeach={() => void runTeaching()}
+            onHandReview={() => void runWholeHandReview()}
             onPractice={() => void generatePractice()}
             onSave={() => void saveScenario()}
             onExport={exportScenario}
@@ -941,13 +1228,20 @@ export default function Home() {
         busy={busy}
         solveJob={solveJob}
         canSubmitSolve={canSubmitSolve}
-        heroHoleCards={heroCards(scenario)}
-        seats={scenario.seats}
-        heroSeat={scenario.heroSeat}
+        heroHoleCards={heroCards(workspaceScenario)}
+        seats={workspaceScenario.seats}
+        heroSeat={workspaceScenario.heroSeat}
         solveGate={solveReasons}
         onSolveSubmit={() => void submitSolve()}
         onSolveCancel={() => void cancelSolve()}
         onPracticeAnswer={(action) => void answerPractice(action)}
+        solverAssessment={selectedReviewAssessment(wholeHandReview.review, selectedActionId)}
+      />
+      <WholeHandReviewPanel
+        state={wholeHandReview}
+        busy={busy}
+        onGenerate={() => void runWholeHandReview()}
+        onNavigate={navigateToReviewedAction}
       />
     </>
   );
@@ -957,7 +1251,7 @@ export default function Home() {
       <section className="panel table-panel">
         <PokerTable
           seats={tableSeats}
-          board={scenario.board}
+          board={workspaceScenario.board}
           pot={state?.pot ?? null}
           unit={displayUnit}
           bigBlind={scenario.bigBlind}
@@ -966,10 +1260,11 @@ export default function Home() {
       <SolverWorkspace
         solveJob={solveJob}
         canSubmit={canSubmitSolve}
-        heroHoleCards={heroCards(scenario)}
+        heroHoleCards={heroCards(workspaceScenario)}
         gate={solveReasons}
         onSubmit={() => void submitSolve()}
         onCancel={() => void cancelSolve()}
+        solverAssessment={selectedReviewAssessment(wholeHandReview.review, selectedActionId)}
       />
     </div>
   );
@@ -1024,6 +1319,7 @@ export default function Home() {
   return (
     <AppShell activeView={activeView} onViewChange={setActiveView}>
       {activeView === "handlab" && handLab}
+      {activeView === "table" && <ContinuousTablePage />}
       {activeView === "solver" && solverView}
       {activeView === "train" && trainView}
       {activeView === "library" && libraryView}

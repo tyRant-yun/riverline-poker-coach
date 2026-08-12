@@ -19,9 +19,11 @@ import type {
   SolveJob,
   SolverSpotPayload,
   StateResponse,
+  ContinuousTableResponse,
   TeachingResponse,
 } from "../../types/api";
 import type { RangeBeliefTraceResponse, RangeBeliefView } from "../../types/rangeBelief";
+import type { HandReviewApiResponse } from "../../types/handReview";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -95,6 +97,8 @@ export const analysisApi = {
 
 export type BeliefPolicyPayload =
   | { source: "fixture"; frequencies: Record<string, Record<string, Record<string, string>>> }
+  | { source: "preflop_policy" }
+  | { source: "solver"; jobId: string }
   | { source: "solver"; result: NonNullable<SolveJob["result"]> }
   | { source: "manual" };
 
@@ -127,7 +131,7 @@ export const coachApi = {
 
 export const solverApi = {
   submit: (scenario: Scenario) =>
-    request<{ jobId: string; status: string; spot?: SolverSpotPayload | null }>(
+    request<SolveJob>(
       "/v1/solve/jobs",
       { scenario, maxIterations: 200 },
     ),
@@ -141,4 +145,19 @@ export const practiceApi = {
     request<{ question: PracticeQuestion }>("/v1/practice/generate", payload),
   attempt: (questionId: string, selectedAction: string) =>
     request<{ outcome: PracticeOutcome }>(`/v1/practice/${questionId}/attempt`, { selectedAction }),
+};
+
+export const handReviewApi = {
+  review: (payload: { scenario: Scenario; solverJobs?: Record<string, string> }) =>
+    request<HandReviewApiResponse>("/v1/hand-reviews", payload),
+};
+
+export const continuousTableApi = {
+  create: (payload: { commandId: string; seed?: number; botProfile: string; sessionId?: string }) =>
+    request<ContinuousTableResponse>("/v1/tables", { schemaVersion: 1, ...payload }),
+  get: (sessionId: string) => requestGet<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}`),
+  action: (sessionId: string, payload: Record<string, unknown>) =>
+    request<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/actions`, { schemaVersion: 1, ...payload }),
+  nextHand: (sessionId: string, payload: { commandId: string; expectedRevision: number }) =>
+    request<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/hands`, { schemaVersion: 1, ...payload }),
 };

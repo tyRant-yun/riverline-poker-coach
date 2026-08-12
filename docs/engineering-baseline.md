@@ -2,6 +2,8 @@
 
 更新时间：2026-08-10
 
+> 2026-08-12：产品与许可基线已由可观测认知模拟器 F0 重构更新。首发模式为 6-max 100BB no-ante/no-rake，仓库为 AGPL-3.0-or-later；本文件的早期 MVP 范围与许可描述仅作历史记录。当前权威入口为 `docs/simulator-refactor-master-plan.md`、ADR-0005..0008 与 `PROJECT_STATE.md`。
+
 ## 审计结论
 
 初始审计时仓库是空白 Git 仓库；当时工作区唯一的原有业务外文件是用户提供的未跟踪 `AGENT.MD`。后续已建立阶段性提交；本次工作始终未修改它。
@@ -19,7 +21,7 @@
 - API、数据库和前端不得暴露 PokerKit 类型。
 - 金额使用整数最小筹码单位，不使用浮点数存储筹码。
 - 确定性计算、枚举、模拟、策划策略、Solver 结果和原理教学必须标明来源等级。
-- 不引入 TexasSolver 或 postflop-solver 的 AGPL 源代码（用户已放宽：项目非商用、无收益；AGPL 引入仅限"整体 AGPL 许可"或"隔离 API 服务"两条路径，见 docs/dependency-inventory.md 许可证政策；路径选定前维持只读研究）。
+- 不把 TexasSolver 或 postflop-solver 的 AGPL 源代码放入主依赖；仓库本身采用 AGPL-3.0-or-later，非商用不豁免义务，sidecar 也不自动形成许可隔离（见 ADR-0008 与 `THIRD_PARTY_NOTICES.md`）。
 - 首版不实现动态 Solver、视觉输入、第三方牌桌接入、真钱和多人桌。
 
 ## 当前限制

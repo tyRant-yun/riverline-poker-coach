@@ -101,6 +101,10 @@ class ExternalModelTeacher:
         self._adapter = adapter or PokerKitAdapter()
         self.degraded = False
         self.last_error: str | None = None
+        # Kept separate from ``degraded``: the single-node API may safely
+        # sanitize a response, while review can choose the stricter
+        # per-decision local fallback required by its contract.
+        self.last_validation_issue: str | None = None
 
     def explain(
         self,
@@ -125,10 +129,16 @@ class ExternalModelTeacher:
             response = _sanitize_response(raw, bundle, legal_actions)
             self.degraded = False
             self.last_error = None
+            self.last_validation_issue = (
+                "invalid_evidence_reference"
+                if _has_unknown_evidence_references(raw, bundle.ids())
+                else None
+            )
             return response
         except Exception as exc:  # degradation is the designed safety path
             self.degraded = True
             self.last_error = str(exc)
+            self.last_validation_issue = None
             return self._fallback.explain(
                 scenario, analysis=analysis, depth=depth, user_question=user_question
             )
@@ -309,6 +319,35 @@ def _sanitize_response(raw: Any, bundle: EvidenceBundle, legal_actions: LegalAct
     response = response.model_copy(update=updated)
     response.validate_evidence_references(bundle)
     return response
+
+
+def _has_unknown_evidence_references(raw: Any, valid_ids: set[str]) -> bool:
+    """Report invalid raw references without weakening response sanitization.
+
+    This is deliberately a narrow diagnostic used by the stricter hand-review
+    contract. It does not consider arbitrary user strings: only values in an
+    evidence-reference field can trigger review's local fallback.
+    """
+
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            if key in _REF_LIST_FIELDS:
+                candidates = value if isinstance(value, list) else [value]
+                for candidate in candidates:
+                    evidence_id = (
+                        candidate
+                        if isinstance(candidate, str)
+                        else candidate.get("evidenceId")
+                        if isinstance(candidate, dict)
+                        else None
+                    )
+                    if isinstance(evidence_id, str) and evidence_id not in valid_ids:
+                        return True
+            if _has_unknown_evidence_references(value, valid_ids):
+                return True
+    elif isinstance(raw, list):
+        return any(_has_unknown_evidence_references(item, valid_ids) for item in raw)
+    return False
 
 
 _REF_LIST_FIELDS = {

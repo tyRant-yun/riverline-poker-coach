@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib.metadata import version as package_version
+from random import Random
 from typing import Any
 
 from poker_coach.domain.models import (
@@ -20,6 +21,8 @@ from poker_coach.domain.models import (
     StateSnapshot,
     Street,
 )
+
+from .contracts import SeededDealV1
 
 
 class ReplayError(ValueError):
@@ -68,6 +71,47 @@ class PokerKitAdapter:
 
     engine_name = "pokerkit"
     engine_version = package_version("pokerkit")
+
+    def deal_seeded(self, scenario: ScenarioSpec, *, rng_seed: int) -> SeededDealV1:
+        """Drive PokerKit's dealing state machine from one explicit RNG seed."""
+
+        from pokerkit import Deck
+
+        deck = list(Deck.STANDARD)
+        Random(rng_seed).shuffle(deck)
+        state, seat_map = self._create_state_before_hole_deal(scenario)
+        hole_cards: dict[int, list[str]] = {
+            seat_id: [] for seat_id in seat_map.seat_to_player
+        }
+
+        while state.can_deal_hole():
+            player_index = state.hole_dealee_index
+            if player_index is None:
+                raise ReplayError("deal_state", "PokerKit did not identify a hole-card recipient")
+            card = deck.pop()
+            state.deal_hole(card)
+            hole_cards[seat_map.player_to_seat[player_index]].append(_card_code(card))
+
+        board: list[str] = []
+        while len(board) < 5:
+            while state.status and state.actor_index is not None:
+                state.check_or_call()
+            if not state.can_burn_card():
+                raise ReplayError("deal_state", "PokerKit did not request the next burn card")
+            state.burn_card(deck.pop())
+            if not state.can_deal_board() or state.board_dealing_count is None:
+                raise ReplayError("deal_state", "PokerKit did not request the next board deal")
+            cards = tuple(deck.pop() for _ in range(state.board_dealing_count))
+            state.deal_board(cards)
+            board.extend(_card_code(card) for card in cards)
+
+        return SeededDealV1(
+            hole_cards_by_seat={
+                seat: (cards[0], cards[1])
+                for seat, cards in hole_cards.items()
+            },
+            board=tuple(board),
+        )
 
     def replay(self, scenario: ScenarioSpec) -> ReplayResult:
         if scenario.rake_config.enabled:
@@ -159,15 +203,35 @@ class PokerKitAdapter:
         return result
 
     def _create_initial_state(self, scenario: ScenarioSpec) -> tuple[Any, _SeatMap]:
+        state, seat_map = self._create_state_before_hole_deal(scenario)
+        n = scenario.table_size
+        for player_index in range(n):
+            seat_id = seat_map.player_to_seat[player_index]
+            cards = scenario.known_hole_cards_by_seat.get(seat_id)
+            if cards is not None and len(cards) == 2:
+                state.deal_hole("".join(cards), player_index=player_index)
+            else:
+                state.deal_hole("????", player_index=player_index)
+        return state, seat_map
+
+    def _create_state_before_hole_deal(
+        self, scenario: ScenarioSpec
+    ) -> tuple[Any, _SeatMap]:
         from pokerkit import Automation, Mode, NoLimitTexasHoldem
 
         n = scenario.table_size
         button_seat = scenario.button_seat
+        table_seats = sorted(seat.seat_id for seat in scenario.seats)
+        button_index = table_seats.index(button_seat)
         # PokerKit orders players from the small blind around to the button:
-        # player 0 = seat left of the button, ..., player n-1 = button seat.
+        # player 0 = next active table seat left of the button, ...,
+        # player n-1 = button seat. Stable table-seat IDs may be sparse.
         # Heads-up is the same formula (player 0 = the non-button seat), and
         # PokerKit internally reverses the blind amounts for two players.
-        player_to_seat = {index: (button_seat + index + 1) % n for index in range(n)}
+        player_to_seat = {
+            index: table_seats[(button_index + index + 1) % n]
+            for index in range(n)
+        }
         seat_to_player = {seat: index for index, seat in player_to_seat.items()}
         seat_map = _SeatMap(
             seat_to_player=seat_to_player,
@@ -201,13 +265,6 @@ class PokerKitAdapter:
         # reversing them internally for heads-up).
         state.post_blind_or_straddle(0)
         state.post_blind_or_straddle(1)
-        for player_index in range(n):
-            seat_id = player_to_seat[player_index]
-            cards = scenario.known_hole_cards_by_seat.get(seat_id)
-            if cards is not None and len(cards) == 2:
-                state.deal_hole("".join(cards), player_index=player_index)
-            else:
-                state.deal_hole("????", player_index=player_index)
         return state, seat_map
 
     def _blind_schedule(

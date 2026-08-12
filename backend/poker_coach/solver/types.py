@@ -45,6 +45,18 @@ class SolverSpot(DomainModel):
     assumptions: tuple[str, ...] = ()
 
 
+class SolverJobProvenance(DomainModel):
+    """Identity of the exact solver node represented by a queued job."""
+
+    scenario_fingerprint: str = Field(min_length=64, max_length=64)
+    spot_fingerprint: str = Field(min_length=64, max_length=64)
+    decision_sequence: Annotated[int, Field(ge=0)]
+    policy_sequence: Annotated[int, Field(ge=1)]
+    actor_seat: Annotated[int, Field(ge=0)]
+    active_seats: tuple[Annotated[int, Field(ge=0)], Annotated[int, Field(ge=0)]]
+    street: Street
+
+
 class SolveMetadata(DomainModel):
     solver: str
     version: str

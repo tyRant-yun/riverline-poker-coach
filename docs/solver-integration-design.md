@@ -2,6 +2,8 @@
 
 版本：v1 · 日期：2026-08-10 · 状态：已评审（只读设计，未实现）· **实施状态：阶段 2–5 已完成（2026-08-10，`poker_coach/solver` 包）**
 
+> 许可更新（2026-08-12）：仓库已采用 AGPL-3.0-or-later。本文“主项目保持宽松许可”及 sidecar 自动构成独立作品的历史判断由 ADR-0008 取代；进程/HTTP 隔离只作为架构手段。AGPL solver 仍不进入主依赖图，任何研究 producer 和输出 artifact 都须遵循 `THIRD_PARTY_NOTICES.md` provenance 要求。
+
 目标：完成一次 **Coach Spot → Solver → Coach Answer** 的完整闭环设计——把成熟求解引擎作为**计算引擎依赖（sidecar）**接入现有 Poker Coach，而不是自研 CFR。本文档只读分析现有仓库架构，确定模块落点、`ScenarioSpec → SolverSpot` 字段映射、以及 `SolveResult` 如何被现有回答流程消费。不含任何代码改动。
 
 ## 1. 选型结论（用户已确认，2026-08-10）
@@ -13,7 +15,7 @@
 | B 方案 | TexasSolver（C++，AGPL） | `PokerSolver` 已暴露 `build_game_tree/train/stop/estimate_tree_memory/dump_strategy` 等生命周期接口，sidecar 化最容易；若 postflop-solver 与运行环境冲突则启用 |
 | 不采用 | robopoker（MCTS 全家桶）、OpenSpiel（真实求解）、noambrown/poker_solver | 前者过重（abstraction/MCCFR/arena/backend 均用不上）；OpenSpiel 保留为测试工具；poker_solver 至多作为结果验证器（exploitability/best response 参考） |
 
-**许可路径（已确认）**：项目非商用、无收益，采用**隔离服务路径**——AGPL 引擎作为独立进程/HTTP 服务运行，与主项目仅通过 API 交互，主项目保持宽松许可；solver 输出数据（JSON）不属于代码，可自由导入。若未来公开分发或部署给第三方使用，需另行处理 AGPL 义务（用户已知悉）。
+**当前许可路径（ADR-0008）**：Riverline 仓库采用 AGPL-3.0-or-later；非商用不豁免 GPL/AGPL 义务。AGPL solver 不进入主依赖图，sidecar 只解决运行隔离，不自动形成许可隔离。任何 solver producer 或 JSON artifact 在使用前都必须记录来源、版本、许可证、配置、修改和 fingerprint，并完成针对实际组合/部署方式的审查。
 
 ## 2. 模块落点（现有仓库架构映射）
 
@@ -121,7 +123,7 @@ Solver 输出是数学策略，Coach 需要人类可理解的策略；中间不�
 
 ## 8. 风险与边界
 
-- **AGPL 分发义务**：非商用下可接受；若未来公开分发/部署给第三方，需整体评估（隔离服务路径下主项目不受传染，但 sidecar 本身的分发需随附源码）。
+- **AGPL 与网络交互义务**：不以商业用途为前提；主项目、sidecar、分发和网络部署必须按实际组合逐项审查，不能从进程边界推导许可结论。
 - **postflop-solver 已停更**（2024-07 作者转商业）：锁定版本、记录已知限制；出现环境冲突时启用 B 方案（TexasSolver，`PokerSolver` 生命周期 API 现成）。
 - **树规模内存爆炸**：`memory_usage()` 求解前预检，超配额直接拒绝并给出压缩/降尺度建议；sidecar 崩溃不影响主进程（进程隔离）。
 - **类型不泄漏**：postflop-solver 类型与 TexasSolver 类型都不得越过 `solver/` 适配层（新增约束，与 PokerKit 规则层约束同构）。

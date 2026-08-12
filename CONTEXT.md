@@ -1,10 +1,42 @@
-# 德州扑克策略教学领域上下文
+# 可观测德州扑克认知模拟器领域上下文
 
-本上下文定义牌局重放、分析证据和教学之间共享的语言。它约束产品如何描述事实、计算结果和不确定性。
+本上下文定义持续牌局、复盘、分析证据和教学之间共享的语言。它约束产品如何区分牌局事实、权限视图、估计、决策和解释。
+
+## 持续模拟
+
+**Game Session**：同一张牌桌上按按钮与筹码连续推进的多手牌集合。一手牌结束不会结束 Game Session。
+_Avoid_：Scenario、单手牌
+
+**Table Seat**：Game Session 中稳定编号的牌桌位置；即使暂离或筹码为零，该位置仍属于 session。
+_Avoid_：player index、临时参与者编号
+
+**Hand Participant**：某一手实际获得底牌并可按规则行动的 Table Seat；它是该手参与集合，不改变 Table Seat 的稳定编号。
+_Avoid_：player index、重编号 seat
+
+**Hand Event**：一手牌中已经发生且不可回写的有序事实。状态、统计和复盘可从 Hand Event 重建。
+_Avoid_：UI event、页面状态、快照
+
+**Hand Projection**：从 Hand Event 派生、可丢弃并重建的特定用途读模型，例如当前状态、统计或复盘摘要。
+_Avoid_：牌局事实副本
+
+**Observation**：某个正在行动的 seat 在一个决策点被允许知道的信息；它包含自己的底牌与公共事实，不包含其他玩家底牌或内部推断。
+_Avoid_：完整牌局状态、omniscient state
+
+**Legal Action**：规则权威在当前决策点允许的行动及其明确金额语义和边界。All-in 是 Bet 或 Raise 的边界情况，不是独立的第六种行动。
+_Avoid_：建议行动、按钮配置
+
+**Bot Decision**：Bot 针对一个 Observation 选择的行动，连同来源、耗时、置信度和降级来源。它不是策略真值或 Hero 建议。
+_Avoid_：Advisor result、Solver answer
+
+**Decision Advisor**：面向 Hero 分层提供数学、范围估计、候选行动比较和来源解释的能力。它不替 Hero/Bot 执行动作，也不裁决规则。
+_Avoid_：万能 Solver、Bot
+
+**Range Belief**：在一个时间点对某 seat 可能持有的具体两张牌组合所做的有来源估计。它不是该 seat 的真实底牌，也不是联合范围的精确真值。
+_Avoid_：Range truth、known range
 
 ## 场景与证据
 
-**ScenarioSpec**：一个待重放或分析的 HU NLHE 决策场景，包含牌局事实、行动历史、范围和分析假设。
+**ScenarioSpec**：Hand Lab 或复盘边界中的一个待重放/分析决策场景，包含牌局事实、行动历史、范围和分析假设。它不是持续 Game Session 或 Hand Event 日志。
 
 **Decision Point**：行动历史之后、某位玩家拥有行动权的分析节点；它不是用户问题本身，也不是策略推荐。
 

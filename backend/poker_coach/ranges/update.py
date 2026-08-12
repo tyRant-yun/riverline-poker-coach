@@ -6,8 +6,9 @@ The update is a pure function over combo-level reach:
     belief(h)     = newReach(h) / sum(newReach over legal combos)
 
 A zero total reach is an explicit error — never a silent uniform fallback.
-Dead cards (known hole cards, board) eliminate combos before updating and
-are re-applied on every transition (street deals renormalize the belief).
+Dead cards (other seats' known hole cards plus the board visible at the
+transition) eliminate combos before updating and are re-applied on every
+transition (street deals renormalize the belief).
 """
 
 from __future__ import annotations
@@ -205,7 +206,7 @@ def update_range_belief(
         street=observed.street,
         after_sequence=observed.sequence,
         source=policy.source,
-        confidence="grounded",
+        confidence=policy.confidence,
         prior_mass=surviving_prior_mass,
         retained_mass=retained,
         combos=renormalized,
@@ -218,5 +219,7 @@ def update_range_belief(
             off_tree=match.off_tree,
             policy_source=policy.source,
             node=policy.node,
+            policy_version=policy.version,
+            assumptions=policy.assumptions,
         ),
     )

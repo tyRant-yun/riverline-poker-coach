@@ -1,6 +1,8 @@
 # 德州扑克策略教学产品
 
-当前状态：已完成一个可本地运行的 HU NLHE MVP 核心切片。当前覆盖事件重放、合法动作、牌力与牌面分析、精确/模拟 Equity、证据汇总、策略目录匹配、FastAPI、SQLite 场景/修订/分析历史、验证练习和 Next.js 场景编辑器；教学层支持证据约束、三档解释深度和合法动作边界。自适应训练、真实外部模型 Agent、Redis 多进程任务和动态 Solver 仍在后续迭代。
+当前状态：已完成一个可本地运行的 HU NLHE MVP 核心切片，并已接入整手逐决策复盘工作台；同时已集成可观察 6-max 持续牌桌的 MVP 基础（权威 session、事件恢复、Bot、连续牌桌 API 与轮询 UI）。当前覆盖事件重放、合法动作、牌力与牌面分析、精确/模拟 Equity、证据汇总、策略目录匹配、FastAPI、SQLite 场景/修订/分析历史、验证练习和 Next.js 场景编辑器；教学层支持证据约束、三档解释深度和合法动作边界，外部模型 Agent、Redis 多进程任务、翻后 Solver，以及按行动更新范围、按节点求解和整手教学均已有实现。自适应训练仍在后续迭代。
+
+持续牌桌目前是基础切片：已支持创建、断线重连、合法操作和下一手；Advisor、Range Belief、Stats 的 UI 接线与自动复盘尚未完成。当前阶段和验证证据见 [`PROJECT_STATE.md`](PROJECT_STATE.md) 与 [`docs/orchestration/ledger.md`](docs/orchestration/ledger.md)。
 
 ## 本地验证
 
@@ -80,6 +82,10 @@ curl http://127.0.0.1:8000/health
 - [Solver 输出导入规范](docs/solver-import-spec.md)
 - [Solver Integration Design Review](docs/solver-integration-design.md)
 - [Solver spike 报告（阶段 1）](docs/spike-postflop-solver.md)
+- [Hand Review Workbench 产品与架构计划](docs/hand-review-workbench-plan.md)
+- [Hand Review Workbench 任务执行表](docs/hand-review-workbench-tasks.md)
+- [Hand Review Workbench 使用说明](docs/使用说明.md)
+- [Hand Review Workbench 执行台账](docs/hand-review-workbench-execution.md)
 - [BYO DeepSeek Key 端到端加密设计](docs/design-bring-your-own-key.md)
 - [依赖与许可证清单](docs/dependency-inventory.md)
 - [开发规范](AGENT.MD)

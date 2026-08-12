@@ -515,22 +515,22 @@ class ScenarioSpec(DomainModel):
         seat_ids = [seat.seat_id for seat in self.seats]
         if len(set(seat_ids)) != len(seat_ids):
             raise ValueError("seat IDs must be unique")
-        # The PokerKit adapter maps seats positionally onto 0..table_size-1;
-        # sparse seat IDs would silently misalign every derived position, so
-        # require contiguous seats in the current architecture.
-        if sorted(seat_ids) != list(range(self.table_size)):
-            raise ValueError("seat IDs must be contiguous 0..table_size-1")
         if self.hero_seat not in seat_ids or self.button_seat not in seat_ids:
             raise ValueError("hero_seat and button_seat must reference existing seats")
 
-        # Positions are DERIVED from tableSize + buttonSeat; any declared
-        # position must agree with the derivation (single source of truth).
+        # Scenario seats may retain sparse table-seat identities. Positions
+        # are derived from their stable clockwise order around the active ring.
+        ordered_seats = sorted(seat_ids)
+        button_index = ordered_seats.index(self.button_seat)
+        position_order = positions_for_table(self.table_size)
         for seat in self.seats:
-            derived = derive_position(self.table_size, self.button_seat, seat.seat_id)
+            derived = position_order[
+                (ordered_seats.index(seat.seat_id) - button_index) % self.table_size
+            ]
             if seat.position is not derived:
                 raise ValueError(
                     f"seat {seat.seat_id} position must be {derived.value} "
-                    f"(derived from table_size+button_seat); got {seat.position.value}"
+                    f"(derived from active seat order + button_seat); got {seat.position.value}"
                 )
 
         # Hole cards: canonical source is knownHoleCardsBySeat (v2); the
@@ -596,10 +596,40 @@ class ScenarioSpec(DomainModel):
         all_known_cards.extend(self.board)
         if len(all_known_cards) != len(set(all_known_cards)):
             raise ValueError("hole cards and board cards cannot overlap")
-        known_cards = set(all_known_cards)
+        # Range validity is evaluated at the selected decision node. Future
+        # board cards in an imported full-board scenario are not dead yet,
+        # and a seat's own known cards are not blockers for that seat's
+        # strategic range belief.
+        board_size_by_deal = {
+            ActionType.DEAL_FLOP.value: 3,
+            ActionType.DEAL_TURN.value: 4,
+            ActionType.DEAL_RIVER.value: 5,
+        }
+        deals = [
+            event
+            for event in self.action_history
+            if event.sequence <= self.decision_point.after_sequence
+            and event.action_type.value in board_size_by_deal
+        ]
+        if deals:
+            visible_board_size = max(
+                board_size_by_deal[event.action_type.value] for event in deals
+            )
+        else:
+            visible_board_size = {
+                Street.PREFLOP: 0,
+                Street.FLOP: 3,
+                Street.TURN: 4,
+                Street.RIVER: 5,
+                Street.COMPLETE: 5,
+            }[self.decision_point.street]
+        visible_board = set(self.board[:visible_board_size])
         for seat_id, range_spec in ranges_by_seat.items():
+            other_known_cards = set(all_known_cards) - set(self.board)
+            other_known_cards -= set(known_by_seat.get(seat_id, ()))
+            blockers = visible_board | other_known_cards
             for combo in range_spec.combos:
-                if known_cards.intersection(combo.cards):
+                if blockers.intersection(combo.cards):
                     raise ValueError(
                         f"seat {seat_id} range combo contains a known card: {combo.cards}"
                     )

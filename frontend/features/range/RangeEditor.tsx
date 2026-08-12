@@ -9,11 +9,14 @@
 
 import { useState } from "react";
 import { RANKS, matrixCell } from "../../lib/poker/matrix";
-import type { DefaultRanges, RangeCombo, RangeSide, RangeSummary } from "../../types/scenario";
+import type { DefaultRanges, RangeCombo, RangeSide, RangeSummary, SeatSpec } from "../../types/scenario";
 import type { BeliefMode, RangeBeliefView } from "../../types/rangeBelief";
 
 type Props = {
   rangeSide: RangeSide;
+  rangeSeatId?: number;
+  rangeSeats?: SeatSpec[];
+  isHeadsUp?: boolean;
   rangeText: string;
   defaultRanges: DefaultRanges;
   rangeMatrix: Record<string, string>;
@@ -21,13 +24,20 @@ type Props = {
   rangeCombos: RangeCombo[];
   belief: RangeBeliefView | null;
   beliefLoading: boolean;
+  beliefStale?: boolean;
   beliefMode: BeliefMode;
+  beliefSeatId?: number | null;
+  beliefSeats?: SeatSpec[];
+  beliefEventSequence?: number | null;
+  beliefDecisionSequence?: number | null;
   onRangeSideChange: (side: RangeSide) => void;
+  onRangeSeatChange?: (seatId: number) => void;
   onRangeTextChange: (value: string) => void;
   onApplyDefault: (key: string) => void;
   onParse: () => void;
   onCycleCell: (cell: string) => void;
   onBeliefModeChange: (mode: BeliefMode) => void;
+  onBeliefSeatChange?: (seatId: number) => void;
 };
 
 const DELTA_FLAT = 0.005;
@@ -40,6 +50,9 @@ function retainedPercent(belief: RangeBeliefView): string | null {
 
 export default function RangeEditor({
   rangeSide,
+  rangeSeatId = 0,
+  rangeSeats = [],
+  isHeadsUp = true,
   rangeText,
   defaultRanges,
   rangeMatrix,
@@ -47,20 +60,28 @@ export default function RangeEditor({
   rangeCombos,
   belief,
   beliefLoading,
+  beliefStale = false,
   beliefMode,
+  beliefSeatId = null,
+  beliefSeats = [],
+  beliefEventSequence = null,
+  beliefDecisionSequence = null,
   onRangeSideChange,
+  onRangeSeatChange = () => {},
   onRangeTextChange,
   onApplyDefault,
   onParse,
   onCycleCell,
   onBeliefModeChange,
+  onBeliefSeatChange,
 }: Props) {
   // The full 169 matrix is heavy; the workspace starts expanded but the
   // editor can collapse into a compact summary so it never permanently
   // occupies primary space.
   const [expanded, setExpanded] = useState(true);
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
-  const seatLabel = rangeSide === "heroRange" ? "Hero" : "Villain";
+  const seatLabel = isHeadsUp ? (rangeSide === "heroRange" ? "Hero" : "Villain") : `Seat ${rangeSeatId}`;
+  const beliefSeatLabel = beliefSeatId == null ? seatLabel : `Seat ${beliefSeatId}`;
 
   return (
     <section className="panel compact-panel">
@@ -113,6 +134,29 @@ export default function RangeEditor({
         </button>
       </div>
 
+      {beliefSeats.length > 0 && onBeliefSeatChange && (
+        <label className="range-belief-seat">
+          查看玩家
+          <select
+            aria-label="范围玩家 seat"
+            value={beliefSeatId ?? ""}
+            onChange={(event) => onBeliefSeatChange(Number(event.target.value))}
+          >
+            {beliefSeats.map((seat) => (
+              <option key={seat.seatId} value={seat.seatId}>
+                Seat {seat.seatId} · {seat.position}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {beliefEventSequence != null && beliefDecisionSequence != null && (
+        <p className="muted small belief-cursors" aria-label="行动游标">
+          行动后 #{beliefEventSequence} · 决策前 #{beliefDecisionSequence}
+        </p>
+      )}
+
       {!expanded ? (
         <div className="range-compact" aria-label="range summary compact">
           <span className="range-compact__name">{seatLabel} 起始范围</span>
@@ -131,14 +175,16 @@ export default function RangeEditor({
         <BeliefView
           belief={belief}
           loading={beliefLoading}
+          stale={beliefStale}
           mode={beliefMode}
-          seatLabel={seatLabel}
+          seatLabel={beliefSeatLabel}
           selectedCell={selectedCell}
           onSelectCell={setSelectedCell}
         />
       ) : (
         <>
           <div className="range-controls">
+        {isHeadsUp ? (
         <label>
           编辑对象
           <select
@@ -150,6 +196,22 @@ export default function RangeEditor({
             <option value="heroRange">Hero 范围</option>
           </select>
         </label>
+        ) : (
+          <label>
+            编辑对象
+            <select
+              aria-label="范围玩家"
+              value={rangeSeatId}
+              onChange={(event) => onRangeSeatChange(Number(event.target.value))}
+            >
+              {rangeSeats.map((seat) => (
+                <option key={seat.seatId} value={seat.seatId}>
+                  Seat {seat.seatId} · {seat.position}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label>
           默认范围
           <select
@@ -215,6 +277,7 @@ export default function RangeEditor({
 function BeliefView({
   belief,
   loading,
+  stale,
   mode,
   seatLabel,
   selectedCell,
@@ -222,11 +285,19 @@ function BeliefView({
 }: {
   belief: RangeBeliefView | null;
   loading: boolean;
+  stale: boolean;
   mode: "current" | "delta";
   seatLabel: string;
   selectedCell: string | null;
   onSelectCell: (cell: string | null) => void;
 }) {
+  if (stale) {
+    return (
+      <div className="belief-view belief-view--stale" aria-label="belief stale">
+        <p className="muted">范围结果已过期；正在等待与当前行动一致的更新。</p>
+      </div>
+    );
+  }
   if (loading) {
     return <p className="muted small">正在计算 {seatLabel} 的 range belief…</p>;
   }
@@ -335,6 +406,8 @@ function beliefSourceLabel(belief: RangeBeliefView): string | null {
       return "solver-backed";
     case "fixture":
       return "fixture / manual policy";
+    case "preflop_policy":
+      return "8-max curated preflop policy";
     case "manual":
       return "manual prior";
     default:

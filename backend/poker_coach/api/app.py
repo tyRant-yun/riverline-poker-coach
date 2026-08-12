@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import math
@@ -33,23 +32,33 @@ from poker_coach.jobs import InProcessJobBackend, RedisJobBackend
 from poker_coach.learning import LearningService, PracticeUnavailable
 from poker_coach.persistence import PostgresStore, SQLiteStore
 from poker_coach.persistence.sqlite_store import StoreNotFound
+from poker_coach.simulator.continuous_table import (
+    ContinuousTableError,
+    ContinuousTableService,
+)
 from poker_coach.ranges import (
     FixturePolicyProvider,
     InvalidPolicyError,
     NoPriorRangeError,
+    PreflopPolicyProvider,
     RangeBeliefError,
     SolverPolicyAdapter,
     build_belief_view,
     build_range_trace,
 )
+from poker_coach.review import SolverAssessmentError, build_hand_review
 from poker_coach.rules import PokerKitAdapter, ReplayError
 from poker_coach.solver import (
     SolverJobQueue,
+    SolverJobProvenance,
     SolverSpot,
     SolverUnsupportedError,
     build_spot,
     parse_result,
     postflop_seat_pair,
+    scenario_at_policy_sequence,
+    scenario_fingerprint,
+    solver_spot_fingerprint,
 )
 from poker_coach.strategy.catalog import StrategyCatalog
 from poker_coach.strategy.ranges import default_preflop_ranges
@@ -157,6 +166,7 @@ def create_app(
     store: SQLiteStore | PostgresStore | None = None,
     teacher: TeachingService | None = None,
     solver_queue=None,
+    table_service: ContinuousTableService | None = None,
 ) -> FastAPI:
     config = config or AppConfig.from_environment()
     adapter = PokerKitAdapter()
@@ -172,6 +182,9 @@ def create_app(
     rate_limit_lock = Lock()
     analysis_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="poker-analysis")
     job_backend = _create_job_backend(config, adapter, analysis_executor)
+    table_service = table_service or ContinuousTableService.from_sqlite_path(
+        getenv("POKER_COACH_TABLE_DB_PATH", ".data/poker_coach_tables.sqlite3")
+    )
     app = FastAPI(
         title="Poker Coach API",
         version=config.app_version,
@@ -315,6 +328,15 @@ def create_app(
             ),
         )
 
+    @app.exception_handler(ContinuousTableError)
+    async def continuous_table_error_handler(request: Request, exc: ContinuousTableError):
+        return JSONResponse(
+            status_code=(
+                404 if exc.code == "session_not_found" else (409 if exc.conflict else 422)
+            ),
+            content=_error_payload(request, exc.code, str(exc)),
+        )
+
     @app.get("/health")
     async def health(request: Request):
         return {
@@ -338,6 +360,55 @@ def create_app(
             "rulesEngine": adapter.engine_name,
             "rulesEngineVersion": adapter.engine_version,
             "requestId": request.state.request_id,
+        }
+
+    @app.post("/v1/tables")
+    async def create_continuous_table(request: Request):
+        """Create the fixed 6-max table and advance bots to the hero decision."""
+
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_payload", "table create payload must be an object")
+        table, idempotent = await table_service.create(payload)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "idempotent": idempotent,
+            "table": table,
+        }
+
+    @app.get("/v1/tables/{session_id}")
+    async def get_continuous_table(request: Request, session_id: str):
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "table": table_service.projection(session_id),
+        }
+
+    @app.post("/v1/tables/{session_id}/actions")
+    async def submit_continuous_table_action(request: Request, session_id: str):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_payload", "hero action payload must be an object")
+        table, idempotent = await table_service.submit_hero_action(session_id, payload)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "idempotent": idempotent,
+            "table": table,
+        }
+
+    @app.post("/v1/tables/{session_id}/hands")
+    async def start_continuous_table_hand(request: Request, session_id: str):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_payload", "next-hand payload must be an object")
+        table, idempotent = await table_service.start_next_hand(session_id, payload)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "idempotent": idempotent,
+            "table": table,
         }
 
     @app.post("/v1/scenarios/validate")
@@ -589,7 +660,7 @@ def create_app(
     async def analysis(request: Request):
         scenario = _scenario_from_request(await request.json())
         _set_scenario_context(request, scenario)
-        scenario_hash = hashlib.sha256(scenario.to_json().encode("utf-8")).hexdigest()
+        scenario_hash = scenario_fingerprint(scenario)
         idempotency_key = request.headers.get("Idempotency-Key")
         if idempotency_key:
             cached = idempotency_cache.get(idempotency_key)
@@ -623,6 +694,36 @@ def create_app(
         if idempotency_key:
             idempotency_cache[idempotency_key] = (scenario_hash, response_payload)
         return response_payload
+
+    @app.post("/v1/hand-reviews")
+    async def hand_review(request: Request):
+        """Return node-scoped analysis and teaching for every player action."""
+
+        payload = await request.json()
+        scenario, solver_job_ids = _hand_review_request(payload)
+        _set_scenario_context(request, scenario)
+        started = time.perf_counter()
+        try:
+            review = build_hand_review(
+                scenario,
+                adapter=adapter,
+                timeout_seconds=_timeout_query(request, config.max_timeout_seconds),
+                solver_job_ids=solver_job_ids,
+                solver_job_lookup=(
+                    (lambda job_id: _lookup_solver_job_for_review(_get_solver_queue(), job_id))
+                    if solver_job_ids is not None
+                    else None
+                ),
+                teacher=teacher,
+            )
+        except SolverAssessmentError as exc:
+            raise ApiError(exc.code, str(exc), details=exc.details) from exc
+        return {
+            "schemaVersion": scenario.schema_version,
+            "requestId": request.state.request_id,
+            "executionMs": round((time.perf_counter() - started) * 1000, 3),
+            "review": review.to_dict(),
+        }
 
     @app.post("/v1/analysis/equity")
     async def equity_analysis(request: Request):
@@ -742,13 +843,38 @@ def create_app(
             )
         except SolverUnsupportedError as exc:
             raise ApiError("invalid_spot", str(exc)) from exc
-        job_id = _get_solver_queue().submit(spot)
+        try:
+            replay = _REPLAY_ADAPTER.replay_to_decision(scenario)
+            active_seats = tuple(
+                seat
+                for seat in replay.final_state.stacks
+                if seat not in replay.final_state.folded_seats
+            )
+            oop_seat, ip_seat = postflop_seat_pair(scenario, replay=replay)
+        except (ReplayError, SolverUnsupportedError) as exc:
+            raise ApiError("invalid_spot", str(exc)) from exc
+        provenance = SolverJobProvenance(
+            scenario_fingerprint=scenario_fingerprint(scenario),
+            spot_fingerprint=solver_spot_fingerprint(spot),
+            decision_sequence=scenario.decision_point.after_sequence,
+            policy_sequence=scenario.decision_point.after_sequence + 1,
+            actor_seat=scenario.decision_point.actor_seat,
+            active_seats=(oop_seat, ip_seat),
+            street=spot.street,
+        )
+        job_id = _get_solver_queue().submit(spot, provenance=provenance)
         return {
             "schemaVersion": 1,
             "requestId": request.state.request_id,
             "jobId": job_id,
             "status": "queued",
             "spot": spot.to_dict(),
+            "provenance": provenance.to_dict(),
+            "scenarioFingerprint": provenance.scenario_fingerprint,
+            "spotFingerprint": provenance.spot_fingerprint,
+            "policySequence": provenance.policy_sequence,
+            "actorSeat": provenance.actor_seat,
+            "activeSeats": list(provenance.active_seats),
         }
 
     @app.get("/v1/solve/jobs/{job_id}")
@@ -761,6 +887,12 @@ def create_app(
             "status": job["status"],
             "executionMs": job.get("executionMs"),
             "error": job.get("error"),
+            "spot": job["spot"].to_dict() if job.get("spot") is not None else None,
+            "provenance": (
+                job["provenance"].to_dict()
+                if job.get("provenance") is not None
+                else None
+            ),
             "result": job["result"].to_dict() if job.get("result") is not None else None,
         }
 
@@ -981,14 +1113,17 @@ def create_app(
         """Combo-level action-conditioned belief for one seat.
 
         Payload: ``{scenario, seatId?, afterSequence?, policy?}``. ``policy``
-        may be ``{source: "fixture", frequencies}`` (deterministic override),
-        ``{source: "solver", result}`` (a SolveResult payload, e.g. from
-        ``GET /v1/solve/jobs/{id}``), or absent/null (prior only). When no
-        grounded policy covers the node the response reports
+          may be ``{source: "fixture", frequencies}`` (deterministic override),
+          ``{source: "preflop_policy"}`` (the built-in exact 8-max RFI and
+          narrow HU curated baselines),
+        ``{source: "solver", jobId}`` (the preferred persisted artifact
+        path). A raw ``result`` remains a compatibility path but is marked
+        ``confidence=unverified``. When no grounded policy covers the node the response reports
         ``available=false`` with a reason — numbers are never fabricated.
         """
+        payload = await request.json()
         scenario, seat_id, after_sequence, provider = _belief_request(
-            await request.json()
+            payload, solver_queue=_solver_queue_for_belief(payload, _get_solver_queue)
         )
         _set_scenario_context(request, scenario)
         prior_range = _prior_range_for(scenario, seat_id)
@@ -1020,8 +1155,9 @@ def create_app(
     @app.post("/v1/ranges/trace")
     async def range_trace(request: Request):
         """Full snapshot chain for one seat up to ``afterSequence``."""
+        payload = await request.json()
         scenario, seat_id, after_sequence, provider = _belief_request(
-            await request.json()
+            payload, solver_queue=_solver_queue_for_belief(payload, _get_solver_queue)
         )
         _set_scenario_context(request, scenario)
         prior_range = _prior_range_for(scenario, seat_id)
@@ -1069,10 +1205,49 @@ def _scenario_from_request(payload: Any) -> ScenarioSpec:
         ) from exc
 
 
+def _hand_review_request(payload: Any) -> tuple[ScenarioSpec, dict[str, str] | None]:
+    """Accept the original ScenarioSpec body or a solver-job wrapper.
+
+    ``solverJobs`` is intentionally optional so callers that adopted BE-02
+    retain its deterministic response.  ``solverJobsByActionId`` is accepted
+    as a descriptive wire alias while clients converge on the compact name.
+    """
+
+    if not isinstance(payload, dict):
+        raise ApiError("invalid_request", "request body must be a JSON object")
+    if "scenario" not in payload:
+        return _scenario_from_request(payload), None
+    allowed = {"scenario", "solverJobs", "solverJobsByActionId"}
+    extra = set(payload) - allowed
+    if extra:
+        raise ApiError("invalid_request", f"unsupported hand-review fields: {sorted(extra)}")
+    if "solverJobs" in payload and "solverJobsByActionId" in payload:
+        raise ApiError("invalid_request", "provide only one solver job mapping")
+    raw_jobs = payload.get("solverJobs", payload.get("solverJobsByActionId"))
+    if raw_jobs is None:
+        return _scenario_from_request(payload["scenario"]), None
+    if not isinstance(raw_jobs, dict) or not all(
+        isinstance(action_id, str)
+        and action_id.strip()
+        and isinstance(job_id, str)
+        and job_id.strip()
+        for action_id, job_id in raw_jobs.items()
+    ):
+        raise ApiError("invalid_request", "solver job mapping must be actionId -> non-empty jobId")
+    return _scenario_from_request(payload["scenario"]), dict(raw_jobs)
+
+
+def _lookup_solver_job_for_review(solver_queue, job_id: str):
+    try:
+        return solver_queue.get(job_id)
+    except StoreNotFound as exc:
+        raise SolverAssessmentError(
+            "solver_artifact_mismatch", f"solver job {job_id!r} was not found"
+        ) from exc
+
+
 def _set_scenario_context(request: Request, scenario: ScenarioSpec) -> None:
-    request.state.scenario_hash = hashlib.sha256(
-        scenario.to_json().encode("utf-8")
-    ).hexdigest()
+    request.state.scenario_hash = scenario_fingerprint(scenario)
 
 
 def _saved_scenario_from_request(
@@ -1114,7 +1289,11 @@ def _public_practice(question) -> dict[str, Any]:
     return result
 
 
-def _belief_request(payload: Any) -> tuple[ScenarioSpec, int, int | None, Any | None]:
+def _belief_request(
+    payload: Any,
+    *,
+    solver_queue=None,
+) -> tuple[ScenarioSpec, int, int | None, Any | None]:
     """Parse and validate a /v1/ranges/belief or /v1/ranges/trace payload.
 
     Returns ``(scenario, seat_id, after_sequence, policy_provider)``.
@@ -1141,14 +1320,20 @@ def _belief_request(payload: Any) -> tuple[ScenarioSpec, int, int | None, Any | 
     if policy_payload is not None:
         policy_payloads = policy_payload if isinstance(policy_payload, list) else [policy_payload]
         for item in policy_payloads:
-            provider = _belief_policy_provider(scenario, item, after_sequence)
+            provider = _belief_policy_provider(
+                scenario, item, after_sequence, solver_queue=solver_queue
+            )
             if provider is not None:
                 providers.append(provider)
     return scenario, seat_id, after_sequence, providers
 
 
 def _belief_policy_provider(
-    scenario: ScenarioSpec, policy_payload: Any, after_sequence: int | None
+    scenario: ScenarioSpec,
+    policy_payload: Any,
+    after_sequence: int | None,
+    *,
+    solver_queue=None,
 ):
     if not isinstance(policy_payload, dict) or not isinstance(policy_payload.get("source"), str):
         raise ApiError("invalid_policy", "policy.source must be a string")
@@ -1163,10 +1348,88 @@ def _belief_policy_provider(
             return FixturePolicyProvider(frequencies)
         except InvalidPolicyError as exc:
             raise ApiError("invalid_policy", str(exc)) from exc
+    if source == "preflop_policy":
+        if set(policy_payload) != {"source"}:
+            raise ApiError(
+                "invalid_policy",
+                "preflop_policy accepts no fields other than source",
+            )
+        return PreflopPolicyProvider()
     if source == "solver":
+        job_id = policy_payload.get("jobId")
         raw_result = policy_payload.get("result")
+        if job_id is not None:
+            if not isinstance(job_id, str) or not job_id.strip():
+                raise ApiError("invalid_policy", "solver policy jobId must be a non-empty string")
+            if solver_queue is None:
+                raise ApiError("solver_unavailable", "solver job lookup is unavailable", status_code=503)
+            try:
+                job = solver_queue.get(job_id)
+            except StoreNotFound as exc:
+                raise ApiError(
+                    "solver_artifact_mismatch",
+                    f"solver job {job_id!r} was not found",
+                ) from exc
+            if job.get("status") != "solved" or job.get("result") is None:
+                raise ApiError(
+                    "no_policy",
+                    f"solver job {job_id!r} is not solved and cannot ground a policy",
+                )
+            provenance = job.get("provenance")
+            if provenance is None:
+                raise ApiError(
+                    "solver_artifact_mismatch",
+                    "solver job has no exact-node provenance metadata",
+                )
+            try:
+                node_scenario = scenario_at_policy_sequence(
+                    scenario, provenance.policy_sequence
+                )
+                expected_spot = build_spot(node_scenario)
+            except (SolverUnsupportedError, ReplayError) as exc:
+                raise ApiError("solver_artifact_mismatch", str(exc)) from exc
+            requested_scenario_fingerprint = scenario_fingerprint(node_scenario)
+            requested_spot_fingerprint = solver_spot_fingerprint(expected_spot)
+            if (
+                requested_scenario_fingerprint != provenance.scenario_fingerprint
+                or requested_spot_fingerprint != provenance.spot_fingerprint
+            ):
+                raise ApiError(
+                    "solver_artifact_mismatch",
+                    "solver artifact does not match the requested scenario/node",
+                    details={
+                        "expectedScenarioFingerprint": provenance.scenario_fingerprint,
+                        "requestedScenarioFingerprint": requested_scenario_fingerprint,
+                        "expectedSpotFingerprint": provenance.spot_fingerprint,
+                        "requestedSpotFingerprint": requested_spot_fingerprint,
+                    },
+                )
+            try:
+                oop_seat, ip_seat = postflop_seat_pair(node_scenario)
+            except SolverUnsupportedError as exc:
+                raise ApiError("solver_artifact_mismatch", str(exc)) from exc
+            if tuple(sorted((oop_seat, ip_seat))) != tuple(sorted(provenance.active_seats)):
+                raise ApiError(
+                    "solver_artifact_mismatch",
+                    "solver artifact active seats do not match the requested node",
+                )
+            reference_pot = _pot_before_sequence(
+                node_scenario, provenance.policy_sequence, _REPLAY_ADAPTER
+            )
+            return SolverPolicyAdapter(
+                job["result"],
+                oop_seat=oop_seat,
+                ip_seat=ip_seat,
+                reference_pot=reference_pot,
+                policy_sequence=provenance.policy_sequence,
+                actor_seat=provenance.actor_seat,
+                confidence="grounded",
+            )
         if not isinstance(raw_result, dict):
-            raise ApiError("invalid_policy", "solver policy requires a result object")
+            raise ApiError(
+                "invalid_policy",
+                "solver policy requires jobId; raw result is accepted only as unverified compatibility input",
+            )
         try:
             result = parse_result(raw_result)
         except (SolverUnsupportedError, KeyError, TypeError, ValidationError) as exc:
@@ -1180,9 +1443,29 @@ def _belief_policy_provider(
         )
         reference_pot = _pot_before_sequence(scenario, max_sequence, _REPLAY_ADAPTER)
         return SolverPolicyAdapter(
-            result, oop_seat=oop_seat, ip_seat=ip_seat, reference_pot=reference_pot
+            result,
+            oop_seat=oop_seat,
+            ip_seat=ip_seat,
+            reference_pot=reference_pot,
+            confidence="unverified",
         )
     raise ApiError("invalid_policy", f"unsupported policy source: {source!r}")
+
+
+def _solver_queue_for_belief(payload: Any, get_queue):
+    """Resolve Redis only for a belief request that explicitly uses jobId."""
+    if not isinstance(payload, dict):
+        return None
+    policy = payload.get("policy")
+    items = policy if isinstance(policy, list) else [policy]
+    if any(
+        isinstance(item, dict)
+        and item.get("source") == "solver"
+        and "jobId" in item
+        for item in items
+    ):
+        return get_queue()
+    return None
 
 
 def _prior_range_for(scenario: ScenarioSpec, seat_id: int) -> RangeSpec:

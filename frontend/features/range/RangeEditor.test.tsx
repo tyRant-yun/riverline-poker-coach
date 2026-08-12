@@ -1,15 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import RangeEditor from "./RangeEditor";
-import type { DefaultRanges } from "../../types/scenario";
+import type { DefaultRanges, SeatSpec } from "../../types/scenario";
 import type { RangeBeliefView } from "../../types/rangeBelief";
 
-function renderEditor(overrides: { matrix?: Record<string, string>; belief?: RangeBeliefView | null; beliefLoading?: boolean; mode?: "prior" | "current" | "delta" } = {}) {
+function renderEditor(overrides: { matrix?: Record<string, string>; belief?: RangeBeliefView | null; beliefLoading?: boolean; beliefStale?: boolean; mode?: "prior" | "current" | "delta"; beliefSeatId?: number; beliefSeats?: SeatSpec[]; rangeSeatId?: number; rangeSeats?: SeatSpec[]; isHeadsUp?: boolean } = {}) {
   const onCycleCell = vi.fn();
   const onBeliefModeChange = vi.fn();
+  const onBeliefSeatChange = vi.fn();
+  const onRangeSeatChange = vi.fn();
   const utils = render(
     <RangeEditor
       rangeSide="villainRange"
+      rangeSeatId={overrides.rangeSeatId}
+      rangeSeats={overrides.rangeSeats}
+      isHeadsUp={overrides.isHeadsUp}
       rangeText=""
       defaultRanges={{} as DefaultRanges}
       rangeMatrix={overrides.matrix ?? {}}
@@ -17,16 +22,21 @@ function renderEditor(overrides: { matrix?: Record<string, string>; belief?: Ran
       rangeCombos={[]}
       belief={overrides.belief ?? null}
       beliefLoading={overrides.beliefLoading ?? false}
+      beliefStale={overrides.beliefStale ?? false}
       beliefMode={overrides.mode ?? "prior"}
+      beliefSeatId={overrides.beliefSeatId}
+      beliefSeats={overrides.beliefSeats}
       onRangeSideChange={vi.fn()}
+      onRangeSeatChange={onRangeSeatChange}
       onRangeTextChange={vi.fn()}
       onApplyDefault={vi.fn()}
       onParse={vi.fn()}
       onCycleCell={onCycleCell}
       onBeliefModeChange={onBeliefModeChange}
+      onBeliefSeatChange={onBeliefSeatChange}
     />,
   );
-  return { ...utils, onCycleCell, onBeliefModeChange };
+  return { ...utils, onCycleCell, onBeliefModeChange, onBeliefSeatChange, onRangeSeatChange };
 }
 
 const availableBelief: RangeBeliefView = {
@@ -109,9 +119,38 @@ describe("RangeEditor matrix", () => {
     renderEditor();
     expect(screen.getByRole("heading", { name: /起始范围（Prior）/ })).toBeInTheDocument();
   });
+
+  it("edits a multi-seat range by continuous seat id instead of HU aliases", () => {
+    const { onRangeSeatChange } = renderEditor({
+      isHeadsUp: false,
+      rangeSeatId: 5,
+      rangeSeats: [
+        { seatId: 0, startingStack: 10_000, position: "button" },
+        { seatId: 5, startingStack: 10_000, position: "utg" },
+      ],
+    });
+
+    expect(screen.getByRole("heading", { name: "Seat 5 起始范围（Prior）" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("范围玩家"), { target: { value: "0" } });
+    expect(onRangeSeatChange).toHaveBeenCalledWith(0);
+    expect(screen.queryByLabelText("范围侧")).not.toBeInTheDocument();
+  });
 });
 
 describe("RangeEditor belief view", () => {
+  it("selects a continuous seatId for the belief view", () => {
+    const { onBeliefSeatChange } = renderEditor({
+      beliefSeatId: 5,
+      beliefSeats: [
+        { seatId: 0, startingStack: 10_000, position: "button" },
+        { seatId: 5, startingStack: 10_000, position: "hj" },
+      ],
+    });
+
+    fireEvent.change(screen.getByLabelText("范围玩家 seat"), { target: { value: "0" } });
+    expect(onBeliefSeatChange).toHaveBeenCalledWith(0);
+  });
+
   it("renders Prior / Current / Delta tabs", () => {
     renderEditor();
     expect(screen.getByLabelText("belief mode prior")).toBeInTheDocument();
@@ -126,6 +165,13 @@ describe("RangeEditor belief view", () => {
     expect(screen.getByText(/No grounded action policy is available/)).toBeInTheDocument();
     expect(screen.getByText(/still edit the Prior range manually/)).toBeInTheDocument();
     // No fabricated numbers: the belief matrix is not rendered.
+    expect(screen.queryByLabelText("belief 范围矩阵")).not.toBeInTheDocument();
+  });
+
+  it("marks an invalidated result as stale instead of presenting it as current", () => {
+    renderEditor({ belief: availableBelief, beliefStale: true, mode: "current" });
+    expect(screen.getByLabelText("belief stale")).toBeInTheDocument();
+    expect(screen.getByText(/范围结果已过期/)).toBeInTheDocument();
     expect(screen.queryByLabelText("belief 范围矩阵")).not.toBeInTheDocument();
   });
 

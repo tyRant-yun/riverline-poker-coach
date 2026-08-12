@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from poker_coach.persistence.sqlite_store import StoreNotFound
 
-from .types import SolverSpot, SolveResult
+from .types import SolverJobProvenance, SolverSpot, SolveResult
 
 
 class SolverQueueUnavailable(RuntimeError):
@@ -48,7 +48,12 @@ class SolverJobQueue:
     def _result_key(self, job_id: str) -> str:
         return f"{self.prefix}:job:{job_id}:result"
 
-    def submit(self, spot: SolverSpot) -> str:
+    def submit(
+        self,
+        spot: SolverSpot,
+        *,
+        provenance: SolverJobProvenance | None = None,
+    ) -> str:
         job_id = uuid4().hex
         self._client.hset(
             self._job_key(job_id),
@@ -59,6 +64,7 @@ class SolverJobQueue:
                 "createdAt": str(time.time()),
                 "error": "",
                 "executionMs": "",
+                "provenanceJson": provenance.to_json() if provenance is not None else "",
             },
         )
         self._client.lpush(self._queue_key(), job_id)
@@ -71,6 +77,13 @@ class SolverJobQueue:
         status = job.get("status", "")
         result_raw = self._client.get(self._result_key(job_id))
         result = SolveResult.model_validate_json(result_raw) if result_raw else None
+        spot = SolverSpot.model_validate_json(job["spotJson"])
+        provenance_raw = job.get("provenanceJson", "")
+        provenance = (
+            SolverJobProvenance.model_validate_json(provenance_raw)
+            if provenance_raw
+            else None
+        )
         execution_ms = job.get("executionMs", "") or None
         error = job.get("error", "") or None
         return {
@@ -78,6 +91,8 @@ class SolverJobQueue:
             "executionMs": float(execution_ms) if execution_ms else None,
             "error": error,
             "result": result,
+            "spot": spot,
+            "provenance": provenance,
         }
 
     def cancel(self, job_id: str) -> str:

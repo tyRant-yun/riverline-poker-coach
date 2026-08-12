@@ -1,7 +1,8 @@
 import pytest
+from pydantic import ValidationError
 
-from poker_coach.domain.models import ActionType, ScenarioSpec
-from poker_coach.rules import PokerKitAdapter, ReplayError
+from poker_coach.domain.models import ActionType, ScenarioSpec, positions_for_table
+from poker_coach.rules import PokerKitAdapter, ReplayError, SeededDealV1
 
 
 def scenario_with_history(action_history=None, board=None, villain_hole_cards=None, **extra):
@@ -27,6 +28,44 @@ def scenario_with_history(action_history=None, board=None, villain_hole_cards=No
         }
     payload.update(extra)
     return ScenarioSpec.model_validate(payload)
+
+
+def test_seeded_deal_v1_is_a_frozen_versioned_project_contract():
+    deal = PokerKitAdapter().deal_seeded(scenario_with_history(), rng_seed=20260812)
+
+    assert isinstance(deal, SeededDealV1)
+    assert deal.schema_version == 1
+    assert SeededDealV1.model_validate_json(deal.to_json()) == deal
+
+    with pytest.raises(ValidationError, match="frozen"):
+        deal.schema_version = 2
+
+    with pytest.raises(ValidationError):
+        SeededDealV1.model_validate({**deal.to_dict(), "schemaVersion": 2})
+
+
+def test_seeded_deal_keeps_sparse_table_seat_ids_outside_pokerkit():
+    positions = positions_for_table(4)
+    seat_ids = (0, 3, 4, 5)
+    scenario = scenario_with_history(
+        tableSize=4,
+        buttonSeat=0,
+        heroSeat=0,
+        seats=[
+            {
+                "seatId": seat_id,
+                "startingStack": 10_000,
+                "position": positions[index].value,
+            }
+            for index, seat_id in enumerate(seat_ids)
+        ],
+        knownHoleCardsBySeat={},
+        decisionPoint={"street": "preflop", "actorSeat": 5, "afterSequence": 0},
+    )
+
+    deal = PokerKitAdapter().deal_seeded(scenario, rng_seed=20260812)
+
+    assert deal.hole_cards_by_seat.keys() == {0, 3, 4, 5}
 
 
 def checkdown_history(*, river_action=None):

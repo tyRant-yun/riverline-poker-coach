@@ -1,0 +1,192 @@
+[
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-001",
+    "handId": "hand-fixture-001",
+    "sequence": 1,
+    "timestamp": "2026-08-12T00:00:01Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001"},
+    "payload": {"kind": "hand_started", "ruleset": "nlhe", "tableSize": 6, "buttonSeat": 0, "smallBlind": 50, "bigBlind": 100, "ante": 0, "rakeBps": 0, "startingStacks": {"0": 10000, "1": 10000, "2": 10000, "3": 10000, "4": 10000, "5": 10000}, "rngSeed": 20260812}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-002",
+    "handId": "hand-fixture-001",
+    "sequence": 2,
+    "timestamp": "2026-08-12T00:00:02Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-001"},
+    "payload": {"kind": "hole_cards_recorded", "seatId": 0, "cards": ["As", "Kd"]}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-003",
+    "handId": "hand-fixture-001",
+    "sequence": 3,
+    "timestamp": "2026-08-12T00:00:03Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-002"},
+    "payload": {"kind": "hole_cards_recorded", "seatId": 2, "cards": ["Qh", "Qc"]}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-004",
+    "handId": "hand-fixture-001",
+    "sequence": 4,
+    "timestamp": "2026-08-12T00:00:04Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-003"},
+    "payload": {"kind": "action_taken", "street": "preflop", "actorSeat": 3, "action": "fold", "amountSemantics": "none"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-005",
+    "handId": "hand-fixture-001",
+    "sequence": 5,
+    "timestamp": "2026-08-12T00:00:05Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-004"},
+    "payload": {"kind": "action_taken", "street": "preflop", "actorSeat": 4, "action": "fold", "amountSemantics": "none"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-006",
+    "handId": "hand-fixture-001",
+    "sequence": 6,
+    "timestamp": "2026-08-12T00:00:06Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-005"},
+    "payload": {"kind": "action_taken", "street": "preflop", "actorSeat": 5, "action": "fold", "amountSemantics": "none"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-007",
+    "handId": "hand-fixture-001",
+    "sequence": 7,
+    "timestamp": "2026-08-12T00:00:07Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-006"},
+    "payload": {"kind": "action_taken", "street": "preflop", "actorSeat": 0, "action": "raise", "amount": 250, "amountSemantics": "to"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-008",
+    "handId": "hand-fixture-001",
+    "sequence": 8,
+    "timestamp": "2026-08-12T00:00:08Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-007"},
+    "payload": {"kind": "action_taken", "street": "preflop", "actorSeat": 1, "action": "fold", "amountSemantics": "none"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-009",
+    "handId": "hand-fixture-001",
+    "sequence": 9,
+    "timestamp": "2026-08-12T00:00:09Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-008"},
+    "payload": {"kind": "action_taken", "street": "preflop", "actorSeat": 2, "action": "call", "amount": 150, "amountSemantics": "cost"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-010",
+    "handId": "hand-fixture-001",
+    "sequence": 10,
+    "timestamp": "2026-08-12T00:00:10Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-009"},
+    "payload": {"kind": "board_dealt", "street": "flop", "cards": ["2c", "7d", "Jh"]}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-011",
+    "handId": "hand-fixture-001",
+    "sequence": 11,
+    "timestamp": "2026-08-12T00:00:11Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-010"},
+    "payload": {"kind": "action_taken", "street": "flop", "actorSeat": 2, "action": "check", "amountSemantics": "none"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-012",
+    "handId": "hand-fixture-001",
+    "sequence": 12,
+    "timestamp": "2026-08-12T00:00:12Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-011"},
+    "payload": {"kind": "action_taken", "street": "flop", "actorSeat": 0, "action": "check", "amountSemantics": "none"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-013",
+    "handId": "hand-fixture-001",
+    "sequence": 13,
+    "timestamp": "2026-08-12T00:00:13Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-012"},
+    "payload": {"kind": "board_dealt", "street": "turn", "cards": ["9s"]}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-014",
+    "handId": "hand-fixture-001",
+    "sequence": 14,
+    "timestamp": "2026-08-12T00:00:14Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-013"},
+    "payload": {"kind": "action_taken", "street": "turn", "actorSeat": 2, "action": "check", "amountSemantics": "none"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-015",
+    "handId": "hand-fixture-001",
+    "sequence": 15,
+    "timestamp": "2026-08-12T00:00:15Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-014"},
+    "payload": {"kind": "action_taken", "street": "turn", "actorSeat": 0, "action": "check", "amountSemantics": "none"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-016",
+    "handId": "hand-fixture-001",
+    "sequence": 16,
+    "timestamp": "2026-08-12T00:00:16Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-015"},
+    "payload": {"kind": "board_dealt", "street": "river", "cards": ["3h"]}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-017",
+    "handId": "hand-fixture-001",
+    "sequence": 17,
+    "timestamp": "2026-08-12T00:00:17Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-016"},
+    "payload": {"kind": "action_taken", "street": "river", "actorSeat": 2, "action": "check", "amountSemantics": "none"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-018",
+    "handId": "hand-fixture-001",
+    "sequence": 18,
+    "timestamp": "2026-08-12T00:00:18Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-017"},
+    "payload": {"kind": "action_taken", "street": "river", "actorSeat": 0, "action": "check", "amountSemantics": "none"}
+  },
+  {
+    "schemaVersion": 1,
+    "eventId": "evt-019",
+    "handId": "hand-fixture-001",
+    "sequence": 19,
+    "timestamp": "2026-08-12T00:00:19Z",
+    "source": "fixture",
+    "provenance": {"producer": "riverline-tests", "producerVersion": "1.0.0", "correlationId": "session-fixture-001", "causationId": "evt-018"},
+    "payload": {"kind": "hand_completed", "winnerSeats": [2], "payouts": {"2": 550}}
+  }
+]

@@ -62,29 +62,24 @@ def build_belief_view(trace: RangeBeliefTrace) -> RangeBeliefView:
             unavailable_reason="no_prior_range: no prior range is available for this seat",
         )
     matrix = aggregate_belief_to_matrix169(current, prior=prior)
-    combos = {
-        combo_key: RangeBeliefComboView(
-            reach=combo.reach,
-            probability=combo.probability,
-            prior_probability=(
-                prior.combos[combo_key].probability
-                if combo_key in prior.combos
-                else Decimal("0")
-            ),
-            delta=combo.probability
-            - (
-                prior.combos[combo_key].probability
-                if combo_key in prior.combos
-                else Decimal("0")
-            ),
+    combo_keys = set(current.combos) | set(prior.combos)
+    combos = {}
+    for combo_key in sorted(combo_keys):
+        combo = current.combos.get(combo_key)
+        prior_combo = prior.combos.get(combo_key)
+        probability = combo.probability if combo is not None else Decimal("0")
+        prior_probability = (
+            prior_combo.probability if prior_combo is not None else Decimal("0")
+        )
+        combos[combo_key] = RangeBeliefComboView(
+            reach=combo.reach if combo is not None else Decimal("0"),
+            probability=probability,
+            prior_probability=prior_probability,
+            delta=probability - prior_probability,
             multiplier=(
-                combo.probability / prior.combos[combo_key].probability
-                if combo_key in prior.combos and prior.combos[combo_key].probability > 0
-                else None
+                probability / prior_probability if prior_probability > 0 else None
             ),
         )
-        for combo_key, combo in current.combos.items()
-    }
     return RangeBeliefView(
         seat_id=trace.seat_id,
         street=current.street,

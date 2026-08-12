@@ -3,10 +3,26 @@
 from .pooled_postgres_store import PooledPostgresStore
 from .postgres_store import PostgresStore, PostgresUnavailable
 from .sqlite_store import SQLiteStore
+from .hand_event_store import PostgresHandEventStore, SQLiteHandEventStore
+from .projection_store import PostgresProjectionStore, SQLiteProjectionStore
+from .session_store import (
+    GameSessionStoreError,
+    SessionRevisionConflict,
+    SQLiteGameSessionStore,
+    StoredGameSession,
+)
 
 __all__ = [
     "PooledPostgresStore",
     "PostgresStore",
     "PostgresUnavailable",
     "SQLiteStore",
+    "SQLiteHandEventStore",
+    "PostgresHandEventStore",
+    "SQLiteProjectionStore",
+    "PostgresProjectionStore",
+    "GameSessionStoreError",
+    "SessionRevisionConflict",
+    "SQLiteGameSessionStore",
+    "StoredGameSession",
 ]
