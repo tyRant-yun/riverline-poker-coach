@@ -58,6 +58,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：为尽快获得可体验 MVP，F1-06 先于 F1-05 启动；任务 `019ff498-63cb-7bf2-aedb-969e973b6926` 从集成提交 `e70e85e` 创建，使用 Terra/high，仅做现有 Hand Lab/API/E2E 兼容桥，F1-05 继续后置。
 - 2026-08-12：F1-06 handoff 校正后与 Git 事实一致；独立窄审查仅检查规则真相、stable/sparse seats、信息隔离、authoritative all-in 与既有 API hooks，结论 PASS。Worker 实测 focused 51 passed、backend 470 passed/10 skipped；主控未重复测试。交付及 handoff 以 `cb8f68d`、`6cb9953`、`6dcd26b` 进入 `codex/simulator-rebuild`。
 - 2026-08-12：F1-05 从集成提交 `0780d2d` 派发至任务 `019ff4c4-26dd-7020-b60c-84f097bae0ba`，使用 Terra/medium 单任务实现最小 PHH exchange/round-trip；不并行启动其他任务。
+- 2026-08-12：F1-05 首轮 delivery/handoff 与 Git 事实及 Worker 质量证据一致（focused 5 passed；backend 475 passed/10 skipped），但独立 MVP P0/P1 审查发现普通 PHH 导出会泄漏未公开私牌，以及 import 未核对标准 `finishing_stacks`/`winnings`、可静默吞掉不一致结算或潜在 rake。交付未集成，已仅退回这两个 P1 做测试先行修复；F1-07 保持暂停。
 
 ## 主控更新规则
 
