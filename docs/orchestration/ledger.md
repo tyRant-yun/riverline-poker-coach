@@ -26,7 +26,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F1-01 Authoritative Session | `019ff3b0-f805-7ff3-b510-ff5e778bcaf0` | `completed` | `merged` | `codex/f1-01-authoritative-session` | `8dde576a0818be554a38e0420b025d4cd3bb51a7` | `141b1c57872353a8498f3aedba021e3726318315` | [F1-01 handoff](handoffs/F1-01.md) | Worker: backend 381 passed/8 skipped、27 focused passed、compileall/pip check；Controller: 18 session/contract/replay passed | F1-02 | F1-02 durable event append |
 | F1-02 Durable Event Append | `019ff3c7-554f-7c60-8b96-5e521dd617c9` | `completed` | `merged` | `codex/f1-02-durable-hand-event-append` | `6840ed5a5488b6af6681e1a9f565c49cfb7b8cbe` | `00c1fd6d019eb4a3ed285701eb560fdcc0416c59` | [F1-02 handoff](handoffs/F1-02.md) | Worker: backend 395 passed/9 skipped、14 focused passed、offline PG SQL/compileall/pip check；Controller: 14 passed/9 live-PG skipped | F1-03、F1-04 | F1-03 PokerKit orchestrator first |
 | F1-03 PokerKit GameOrchestrator | `019ff3e3-bda6-7e21-903e-d4fe0611a5a9` | `completed` | `merged` | `codex/f1-03-pokerkit-game-orchestrator` | `91fb7f08d760753259f611284318b512c5f30ed4` | `e46f4df666e2513750147862674e6d9ce64634fd` | [F1-03 handoff](handoffs/F1-03.md) | Worker: backend 433 passed/9 skipped、146 relevant passed、compileall/pip check；Controller: 146 relevant passed before and after integration | F1-04、F1-05、F1-06 | F1-04 projection/checkpoint/outbox recovery |
-| F1-04 Projection/Outbox Recovery | `019ff446-caf8-78a2-85cd-c582310780ad` | `in_progress` | `in_progress` | `codex/f1-04-projection-outbox-recovery` | `9353fcd735adf9205877b7d8070c54c99089dc30` | — | — | — | — | 完成 projection cursor/checkpoint、可重建 snapshot 与 transactional outbox |
+| F1-04 Projection/Outbox Recovery | `019ff446-caf8-78a2-85cd-c582310780ad` | `completed`（首轮） | `in_progress`（审查修订） | `codex/f1-04-projection-outbox-recovery` | `9353fcd735adf9205877b7d8070c54c99089dc30` | `34828ca13056ea7defc67d7db4a1381130fc291b`（待续） | [F1-04 handoff](handoffs/F1-04.md)（待修订） | Worker: backend 447 passed/10 skipped；Controller: focused 55 passed/10 live-PG skipped；双轴审查发现 3 P1/1 P2 | — | 修复 event-intent 绑定、claim token、schemaVersion 读取与深度不可变 payload |
 
 ## 下一入口
 
@@ -42,6 +42,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F1-03 修订已修复 bust-out、seed provenance、open conflict 和版本化 rules contract，确认剩余阻塞是 HandStarted 缺少参与者集合。主控授权向 V1 增加带旧流默认语义的 `activeSeatIds`，稳定 table seat ID 仅在 PokerKit adapter 内映射为 dense player index，并要求 ADR-0009 与 glossary 记录。
 - 2026-08-12：F1-03 最终 handoff、三项交付提交及 20 个 changed files 已核对；`activeSeatIds` 保持旧 JSON 默认语义，sparse Hand Participant 的 stable seat ID 覆盖 adapter、replay、observation、stats、settlement 与 bust-out successor。主控在 Worker 分支及集成分支各复跑 146 项相关测试通过；完整 backend 的 Worker 实测为 433 passed/9 skipped。六项线性提交以 `acc1e88` 至 `f8b469d` 进入 `codex/simulator-rebuild`；live PostgreSQL 与 crash-safe 跨手 session repository 仍未声称完成。
 - 2026-08-12：F1-04 从已验收集成基线 `9353fcd` 派发至独立任务 `019ff446-caf8-78a2-85cd-c582310780ad`，使用 Sol/high 处理事务原子性、并发 claim 与失败恢复；F1-05/F1-06 暂不并行，以控制额度和集成风险。
+- 2026-08-12：F1-04 首轮 Git/handoff/16 个 changed files 与质量证据一致，主控聚焦门 55 passed/10 live-PG skipped；双轴审查发现 outbox intent 未强制绑定本批 event、过期/ABA claim 可 ack/retry、未知持久化 schemaVersion 被静默按 V1 读取，以及 public payload 仅浅冻结。交付未集成，已退回原 Worker 以测试先行做兼容范围内修订；后续任务继续暂停。
 
 ## 主控更新规则
 
