@@ -7,6 +7,12 @@
 **Game Session**：同一张牌桌上按按钮与筹码连续推进的多手牌集合。一手牌结束不会结束 Game Session。
 _Avoid_：Scenario、单手牌
 
+**Table Seat**：Game Session 中稳定编号的牌桌位置；即使暂离或筹码为零，该位置仍属于 session。
+_Avoid_：player index、临时参与者编号
+
+**Hand Participant**：某一手实际获得底牌并可按规则行动的 Table Seat；它是该手参与集合，不改变 Table Seat 的稳定编号。
+_Avoid_：player index、重编号 seat
+
 **Hand Event**：一手牌中已经发生且不可回写的有序事实。状态、统计和复盘可从 Hand Event 重建。
 _Avoid_：UI event、页面状态、快照
 

@@ -16,7 +16,9 @@ type crosses the adapter boundary.
 - `OpenHandCommandV1` carries `sessionId`, `handId`, `commandId`,
   `expectedSequence`, the system actor, and an explicit non-negative `rngSeed`.
   It materializes the F1-01 active-hand facts as one `hand_started` plus one
-  `hole_cards_recorded` fact per seat.
+  `hole_cards_recorded` fact per Hand Participant. `tableSize` and
+  `startingStacks` retain all session Table Seats while `activeSeatIds` records
+  the funded, non-sitting-out participants in stable seat-ID order.
 - `PlayerActionCommandV1` carries `sessionId`, `handId`, `commandId`,
   `expectedSequence`, `actorSeat`, action, amount, and amount semantics.  The
   action set and `none`/`cost`/`by`/`to` meanings are exactly the frozen
@@ -53,9 +55,9 @@ the durable `HandEventV1` stream to continue a hand.  Completed streams reject
 new actions, and the final PokerKit stacks cross the explicit immutable session
 settlement seam documented in `simulator-session-ownership-v1.md`.
 
-F1-03 supports the released contiguous six-seat active topology.  A session
-with sparse active seat IDs (for example, sitting-out gaps) cannot be represented
-without changing the frozen V1 `table_size`/seat contract and is rejected as
-`unsupported_active_topology`.  Durable session ownership, cross-hand crash
-recovery, projection/outbox/cursor/snapshot work, API/frontend, bots/advisor,
-PHH, and F1-04+ remain outside this seam.
+F1-03 supports sparse Hand Participants within the released six-seat session
+topology, including sitting-out and zero-stack gaps. Event seat IDs remain
+stable session Table Seat IDs; only the PokerKit adapter maps them internally
+to dense player indexes. Durable session ownership, cross-hand crash recovery,
+projection/outbox/cursor/snapshot work, API/frontend, bots/advisor, PHH, and
+F1-04+ remain outside this seam.

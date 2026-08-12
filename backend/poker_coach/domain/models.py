@@ -515,22 +515,22 @@ class ScenarioSpec(DomainModel):
         seat_ids = [seat.seat_id for seat in self.seats]
         if len(set(seat_ids)) != len(seat_ids):
             raise ValueError("seat IDs must be unique")
-        # The PokerKit adapter maps seats positionally onto 0..table_size-1;
-        # sparse seat IDs would silently misalign every derived position, so
-        # require contiguous seats in the current architecture.
-        if sorted(seat_ids) != list(range(self.table_size)):
-            raise ValueError("seat IDs must be contiguous 0..table_size-1")
         if self.hero_seat not in seat_ids or self.button_seat not in seat_ids:
             raise ValueError("hero_seat and button_seat must reference existing seats")
 
-        # Positions are DERIVED from tableSize + buttonSeat; any declared
-        # position must agree with the derivation (single source of truth).
+        # Scenario seats may retain sparse table-seat identities. Positions
+        # are derived from their stable clockwise order around the active ring.
+        ordered_seats = sorted(seat_ids)
+        button_index = ordered_seats.index(self.button_seat)
+        position_order = positions_for_table(self.table_size)
         for seat in self.seats:
-            derived = derive_position(self.table_size, self.button_seat, seat.seat_id)
+            derived = position_order[
+                (ordered_seats.index(seat.seat_id) - button_index) % self.table_size
+            ]
             if seat.position is not derived:
                 raise ValueError(
                     f"seat {seat.seat_id} position must be {derived.value} "
-                    f"(derived from table_size+button_seat); got {seat.position.value}"
+                    f"(derived from active seat order + button_seat); got {seat.position.value}"
                 )
 
         # Hole cards: canonical source is knownHoleCardsBySeat (v2); the

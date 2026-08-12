@@ -107,6 +107,10 @@ def validate_hand_event_stream(events: Sequence[HandEventV1]) -> tuple[HandEvent
             raise EventStreamError(
                 "invalid_seat", f"seat {seat_id} is not occupied", event.sequence
             )
+        if seat_id is not None and seat_id not in started.active_seat_ids:
+            raise EventStreamError(
+                "inactive_seat", f"seat {seat_id} is not a hand participant", event.sequence
+            )
         if isinstance(payload, HoleCardsRecordedPayloadV1):
             if payload.seat_id in recorded_seats:
                 raise EventStreamError(
@@ -135,9 +139,9 @@ def validate_hand_event_stream(events: Sequence[HandEventV1]) -> tuple[HandEvent
             known_cards.update(payload.cards)
             next_board_street = next(expected_board_streets, None)
         elif isinstance(payload, HandCompletedPayloadV1):
-            if any(seat >= started.table_size for seat in payload.winner_seats):
+            if any(seat not in started.active_seat_ids for seat in payload.winner_seats):
                 raise EventStreamError(
-                    "invalid_winner", "winner seat is not occupied", event.sequence
+                    "invalid_winner", "winner seat is not a hand participant", event.sequence
                 )
     return validated
 
@@ -156,16 +160,19 @@ def scenario_from_events(events: Sequence[HandEventV1]) -> ScenarioSpec:
     stream = validate_hand_event_stream(events)
     started = stream[0].payload
     assert isinstance(started, HandStartedPayloadV1)
-    position_order = positions_for_table(started.table_size)
+    active_seats = started.active_seat_ids
+    participant_count = len(active_seats)
+    position_order = positions_for_table(participant_count)
+    button_index = active_seats.index(started.button_seat)
     seats = [
         {
             "seatId": seat_id,
             "startingStack": started.starting_stacks[seat_id],
             "position": position_order[
-                (seat_id - started.button_seat) % started.table_size
+                (active_seats.index(seat_id) - button_index) % participant_count
             ].value,
         }
-        for seat_id in range(started.table_size)
+        for seat_id in active_seats
     ]
     known_hole_cards: dict[int, tuple[str, str]] = {}
     board: list[str] = []
@@ -220,7 +227,7 @@ def scenario_from_events(events: Sequence[HandEventV1]) -> ScenarioSpec:
         {
             "schemaVersion": 2,
             "gameVariant": "nlhe",
-            "tableSize": started.table_size,
+            "tableSize": participant_count,
             "smallBlind": started.small_blind,
             "bigBlind": started.big_blind,
             "ante": started.ante,
@@ -302,7 +309,7 @@ def _project_statistics(events: Sequence[HandEventV1]) -> HandStatisticsProjecti
     assert isinstance(started, HandStartedPayloadV1)
     mutable = {
         seat: {"vpip": False, "pfr": False, "three_bet": False, "action_count": 0}
-        for seat in range(started.table_size)
+        for seat in started.active_seat_ids
     }
     preflop_raise_count = 0
     for event in events:

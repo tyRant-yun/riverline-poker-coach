@@ -157,19 +157,22 @@ class ObservationV1(SimulatorContractV1):
         seats = set(range(self.table_size))
         if self.observer_seat not in seats or self.button_seat not in seats:
             raise ValueError("observer_seat and button_seat must reference occupied seats")
-        if set(self.stacks) != seats or set(self.street_commitments) != seats:
-            raise ValueError("stack and commitment maps must contain every occupied seat")
         active = set(self.active_seats)
         folded = set(self.folded_seats)
-        if active & folded or active | folded != seats:
-            raise ValueError("active_seats and folded_seats must partition occupied seats")
+        participants = active | folded
+        if active & folded or not participants.issubset(seats):
+            raise ValueError("active_seats and folded_seats must be disjoint table seats")
+        if set(self.stacks) != participants or set(self.street_commitments) != participants:
+            raise ValueError("stack and commitment maps must contain every hand participant")
+        if self.button_seat not in participants:
+            raise ValueError("button_seat must reference a hand participant")
         if self.observer_seat not in active:
             raise ValueError("an acting observer must be active")
         visible_cards = (*self.own_hole_cards, *self.board)
         if len(visible_cards) != len(set(visible_cards)):
             raise ValueError("own hole cards and board cannot overlap")
-        if any(action.actor_seat not in seats for action in self.public_actions):
-            raise ValueError("public action references an unoccupied seat")
+        if any(action.actor_seat not in participants for action in self.public_actions):
+            raise ValueError("public action references a non-participant seat")
         sequences = [action.sequence for action in self.public_actions]
         if sequences != sorted(sequences) or len(sequences) != len(set(sequences)):
             raise ValueError("public actions must be uniquely ordered by sequence")
@@ -270,8 +273,21 @@ class HandStartedPayloadV1(DomainModel):
     big_blind: PositiveInt
     ante: NonNegativeInt = 0
     rake_bps: NonNegativeInt = 0
-    starting_stacks: dict[int, PositiveInt]
+    starting_stacks: dict[int, NonNegativeInt]
+    active_seat_ids: tuple[SeatId, ...] = ()
     rng_seed: NonNegativeInt
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_active_seats(cls, values: object) -> object:
+        if not isinstance(values, dict):
+            return values
+        if "activeSeatIds" in values or "active_seat_ids" in values:
+            return values
+        stacks = values.get("startingStacks", values.get("starting_stacks"))
+        if not isinstance(stacks, dict):
+            return values
+        return {**values, "activeSeatIds": tuple(sorted(int(seat) for seat in stacks))}
 
     @model_validator(mode="after")
     def validate_table(self) -> HandStartedPayloadV1:
@@ -281,6 +297,16 @@ class HandStartedPayloadV1(DomainModel):
             raise ValueError("big_blind must be greater than small_blind")
         if sorted(self.starting_stacks) != list(range(self.table_size)):
             raise ValueError("starting_stacks must contain contiguous seats 0..table_size-1")
+        if len(self.active_seat_ids) < 2:
+            raise ValueError("active_seat_ids must contain at least two seats")
+        if tuple(sorted(set(self.active_seat_ids))) != self.active_seat_ids:
+            raise ValueError("active_seat_ids must be unique and strictly increasing")
+        if not set(self.active_seat_ids).issubset(self.starting_stacks):
+            raise ValueError("active_seat_ids must reference table seats")
+        if self.button_seat not in self.active_seat_ids:
+            raise ValueError("button_seat must reference an active seat")
+        if any(self.starting_stacks[seat] <= 0 for seat in self.active_seat_ids):
+            raise ValueError("active seats must have positive starting stacks")
         return self
 
 

@@ -48,6 +48,8 @@ def test_hand_event_v1_is_versioned_immutable_and_deterministically_serialized()
 
     assert event.schema_version == 1
     assert event.payload.table_size == 6
+    assert event.payload.active_seat_ids == (0, 1, 2, 3, 4, 5)
+    assert '"activeSeatIds":[0,1,2,3,4,5]' in event.to_json()
     assert HandEventV1.model_validate_json(event.to_json()).to_json() == event.to_json()
 
     with pytest.raises(ValidationError, match="frozen"):
@@ -67,6 +69,46 @@ def test_hand_event_v1_requires_timezone_aware_timestamp_and_provenance():
     missing_provenance.pop("provenance")
     with pytest.raises(ValidationError):
         HandEventV1.model_validate(missing_provenance)
+
+
+def test_hand_started_v1_accepts_sparse_active_seats_and_zero_inactive_stack():
+    payload = _hand_started_event()
+    payload["payload"] = {
+        **payload["payload"],
+        "startingStacks": {"0": 10_000, "1": 0, "2": 10_000, "3": 10_000, "4": 10_000, "5": 10_000},
+        "activeSeatIds": [0, 2, 3, 4, 5],
+    }
+
+    event = HandEventV1.model_validate(payload)
+
+    assert event.payload.active_seat_ids == (0, 2, 3, 4, 5)
+    assert event.payload.starting_stacks[1] == 0
+
+
+@pytest.mark.parametrize(
+    ("active_seats", "stack_updates", "message"),
+    [
+        ([0], {}, "at least two"),
+        ([0, 2, 2], {}, "strictly increasing"),
+        ([0, 6], {}, "reference table seats"),
+        ([2, 3], {}, "button_seat must reference an active seat"),
+        ([0, 2], {2: 0}, "positive starting stacks"),
+    ],
+)
+def test_hand_started_v1_rejects_invalid_active_seat_sets(
+    active_seats, stack_updates, message
+):
+    payload = _hand_started_event()
+    stacks = {seat: 10_000 for seat in range(6)}
+    stacks.update(stack_updates)
+    payload["payload"] = {
+        **payload["payload"],
+        "startingStacks": stacks,
+        "activeSeatIds": active_seats,
+    }
+
+    with pytest.raises(ValidationError, match=message):
+        HandEventV1.model_validate(payload)
 
 
 def test_legal_action_v1_has_explicit_amount_semantics_and_bounds():

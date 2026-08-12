@@ -221,11 +221,17 @@ class PokerKitAdapter:
 
         n = scenario.table_size
         button_seat = scenario.button_seat
+        table_seats = sorted(seat.seat_id for seat in scenario.seats)
+        button_index = table_seats.index(button_seat)
         # PokerKit orders players from the small blind around to the button:
-        # player 0 = seat left of the button, ..., player n-1 = button seat.
+        # player 0 = next active table seat left of the button, ...,
+        # player n-1 = button seat. Stable table-seat IDs may be sparse.
         # Heads-up is the same formula (player 0 = the non-button seat), and
         # PokerKit internally reverses the blind amounts for two players.
-        player_to_seat = {index: (button_seat + index + 1) % n for index in range(n)}
+        player_to_seat = {
+            index: table_seats[(button_index + index + 1) % n]
+            for index in range(n)
+        }
         seat_to_player = {seat: index for index, seat in player_to_seat.items()}
         seat_map = _SeatMap(
             seat_to_player=seat_to_player,

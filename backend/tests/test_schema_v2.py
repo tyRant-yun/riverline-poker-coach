@@ -323,16 +323,15 @@ class TestHonestBoundaries:
 
 
 class TestSeatAndCardValidation:
-    def test_non_contiguous_seat_ids_rejected(self):
-        # The adapter maps seats positionally onto 0..table_size-1; sparse
-        # ids would silently misalign positions.
+    def test_sparse_stable_seat_ids_are_accepted_in_active_ring_order(self):
         positions = [p.value for p in positions_for_table(6)]
         seats = [
             {"seatId": seat_id, "startingStack": 10_000, "position": positions[index]}
             for index, seat_id in enumerate([0, 1, 2, 3, 4, 7])
         ]
-        with pytest.raises(ValidationError, match="contiguous"):
-            v2_scenario(6, seats=seats, knownHoleCardsBySeat={})
+        scenario = v2_scenario(6, seats=seats, knownHoleCardsBySeat={})
+
+        assert tuple(seat.seat_id for seat in scenario.seats) == (0, 1, 2, 3, 4, 7)
 
     def test_out_of_range_seat_id_rejected(self):
         positions = [p.value for p in positions_for_table(6)]

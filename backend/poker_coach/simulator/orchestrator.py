@@ -170,15 +170,16 @@ class GameOrchestrator:
         payloads = [
             HandStartedPayloadV1(
                 ruleset=session.configuration.ruleset,
-                table_size=len(active.seats),
+                table_size=session.configuration.table_size,
                 button_seat=active.button_seat,
                 small_blind=session.configuration.small_blind,
                 big_blind=session.configuration.big_blind,
                 ante=session.configuration.ante,
                 rake_bps=session.configuration.rake_bps,
                 starting_stacks={
-                    seat.seat_id: seat.starting_stack for seat in active.seats
+                    seat.seat_id: seat.stack for seat in session.topology.seats
                 },
+                active_seat_ids=tuple(seat.seat_id for seat in active.seats),
                 rng_seed=command.rng_seed,
             ),
             *(
@@ -502,13 +503,14 @@ class GameOrchestrator:
         started = durable[0].payload
         expected = (
             session.configuration.ruleset,
-            len(active.seats),
+            session.configuration.table_size,
             active.button_seat,
             session.configuration.small_blind,
             session.configuration.big_blind,
             session.configuration.ante,
             session.configuration.rake_bps,
-            {seat.seat_id: seat.starting_stack for seat in active.seats},
+            {seat.seat_id: seat.stack for seat in session.topology.seats},
+            tuple(seat.seat_id for seat in active.seats),
             session.session_id,
         )
         actual = (
@@ -523,6 +525,7 @@ class GameOrchestrator:
                 started.ante,
                 started.rake_bps,
                 started.starting_stacks,
+                started.active_seat_ids,
                 durable[0].provenance.correlation_id,
             )
         )
@@ -607,12 +610,8 @@ def _opening_scenario(session: GameSession) -> ScenarioSpec:
     active = session.active_hand
     assert active is not None
     seat_ids = tuple(seat.seat_id for seat in active.seats)
-    if seat_ids != tuple(range(len(seat_ids))):
-        raise SessionLifecycleError(
-            "unsupported_active_topology",
-            "HandEventV1 requires contiguous active seats in F1-03",
-        )
     positions = positions_for_table(len(active.seats))
+    button_index = seat_ids.index(active.button_seat)
     return ScenarioSpec.model_validate(
         {
             "schemaVersion": 2,
@@ -628,7 +627,7 @@ def _opening_scenario(session: GameSession) -> ScenarioSpec:
                     "seatId": seat.seat_id,
                     "startingStack": seat.starting_stack,
                     "position": positions[
-                        (seat.seat_id - active.button_seat) % len(active.seats)
+                        (seat_ids.index(seat.seat_id) - button_index) % len(active.seats)
                     ].value,
                 }
                 for seat in active.seats

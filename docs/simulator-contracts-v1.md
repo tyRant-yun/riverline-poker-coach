@@ -21,7 +21,7 @@ Every envelope requires `eventId`, `handId`, contiguous per-hand `sequence`, `sc
 
 | Kind | Fact recorded | Visibility note |
 |---|---|---|
-| `hand_started` | Ruleset, 2–8 seat topology, button, blinds/ante/rake, stacks and deterministic seed | Public configuration |
+| `hand_started` | Ruleset, 2–8 Table Seat topology, button, blinds/ante/rake, all opening stacks, Hand Participant IDs and deterministic seed | Public configuration |
 | `hole_cards_recorded` | One seat's two cards | Authoritative/private event; filtered from other observations |
 | `action_taken` | Street, actor, action and amount semantics | Public action |
 | `board_dealt` | Flop/turn/river cards | Public cards |
@@ -29,13 +29,22 @@ Every envelope requires `eventId`, `handId`, contiguous per-hand `sequence`, `sc
 
 The stream validator rejects a missing/duplicate start, mixed `handId`, gaps or reordering, duplicate `eventId`, timestamp regression, repeated/overlapping known cards, invalid seat references, board street disorder, duplicate completion, events after completion, and a completion projection that disagrees with PokerKit.
 
+`tableSize` and `startingStacks` describe the stable session Table Seats. The
+optional `activeSeatIds` field identifies the Hand Participants and must be a
+strictly increasing subset of those seats with at least two positive opening
+stacks; the button is one of them. Every later event continues to use the
+stable Table Seat ID. Missing `activeSeatIds` in legacy V1 JSON deterministically
+normalizes to all contiguous `startingStacks` keys, preserving the original
+all-seats-participate meaning.
+
 ## `ObservationV1`
 
 An observation contains only information available to `observerSeat` at one event sequence:
 
 - that seat's own hole cards;
 - public board and ordered public player actions;
-- public pot, stacks, street commitments, active/folded seats and button/street;
+- public pot, Hand Participant stacks/commitments, active/folded participant
+  seats, and the stable table button/street;
 - current `LegalActionV1` values.
 
 There is deliberately no field for another player's hole cards, deck order, RNG state, solver internals, advisor result, or Range Belief. Because extras are forbidden, an adapter cannot silently attach those fields. A Range Belief is an advisor/read-model estimate, not an agent observation fact.
@@ -65,7 +74,12 @@ V1 is an exact schema, not an open-ended dictionary. Consumers:
 2. accept only versions they explicitly implement;
 3. reject unknown future versions and enum values instead of guessing;
 4. retain the original append-only event bytes/envelope;
-5. when V2 is needed, add a pure, deterministic `V1 -> V2` upcaster at an ingress/replay boundary and test it with frozen fixtures; never rewrite stored V1 history in place;
-6. keep projections disposable and rebuildable, so projection schema migrations do not mutate event facts.
+5. compatible V1 additions must have deterministic defaults and frozen legacy-fixture tests; `HandStartedPayloadV1.activeSeatIds` defaults to all `startingStacks` seats as recorded in ADR-0009;
+6. when V2 is needed for a change that cannot be represented by such a default, add a pure, deterministic `V1 -> V2` upcaster at an ingress/replay boundary and never rewrite stored V1 history in place;
+7. keep projections disposable and rebuildable, so projection schema migrations do not mutate event facts.
 
-Fields cannot be removed, renamed, or have their meaning changed inside V1. A new optional display concern belongs in a projection/view model; a new domain fact or changed semantic requires a new contract version. PHH import/export adapters preserve their own format version and provenance outside these internal contracts.
+Fields cannot be removed, renamed, or have their meaning changed inside V1.
+An additive field is compatible only when its default exactly preserves every
+legacy payload's meaning; otherwise the change requires a new contract version.
+PHH import/export adapters preserve their own format version and provenance
+outside these internal contracts.

@@ -40,9 +40,11 @@ def build_observation(
     prefix = validate_hand_event_stream(stream[:after_sequence])
     started = prefix[0].payload
     assert isinstance(started, HandStartedPayloadV1)
-    if observer_seat < 0 or observer_seat >= started.table_size:
+    if observer_seat not in started.active_seat_ids:
         raise EventStreamError(
-            "invalid_observer", f"seat {observer_seat} is not occupied", after_sequence
+            "invalid_observer",
+            f"seat {observer_seat} is not a hand participant",
+            after_sequence,
         )
     own_cards = next(
         (
@@ -81,7 +83,7 @@ def build_observation(
         if isinstance(event.payload, ActionTakenPayloadV1)
     )
     legal_actions = _project_legal_actions(state, observer_seat)
-    occupied = set(range(started.table_size))
+    participants = set(started.active_seat_ids)
     folded = set(state.folded_seats)
     return ObservationV1(
         hand_id=prefix[0].hand_id,
@@ -95,7 +97,7 @@ def build_observation(
         pot=state.pot,
         stacks=state.stacks,
         street_commitments=state.bets,
-        active_seats=tuple(sorted(occupied - folded)),
+        active_seats=tuple(sorted(participants - folded)),
         folded_seats=tuple(sorted(folded)),
         public_actions=public_actions,
         legal_actions=legal_actions,

@@ -18,7 +18,8 @@ A zero-stack seat likewise remains in the session but is not eligible for the
 next hand and is skipped by the button.  Starting another hand requires at least
 two funded, non-sitting-out seats and otherwise fails with
 `insufficient_funded_seats`.  An `ActiveHandV1` captures only the eligible
-seats and immutable opening-stack snapshots.  Its deterministic `HandId` is
+Hand Participants and immutable opening-stack snapshots without renumbering
+their stable Table Seat IDs.  Its deterministic `HandId` is
 `{SessionId}:hand:{sequence}`, so a hand can belong to exactly one session and a
 completed session cannot reuse a hand sequence or ID.
 
@@ -35,6 +36,10 @@ rejects missing/extra seats, negative stacks, or any change to the active hand's
 total chips, then immutably replaces those session seat stacks while retaining
 sitting-out seats unchanged.  Omitting `ending_stacks` preserves the F1-01
 ownership-only behavior for backward compatibility.
+
+When F1-03 opens that successor hand, `HandStartedPayloadV1.startingStacks`
+retains all session Table Seats, including sitting-out or zero-stack seats, and
+`activeSeatIds` carries only the `ActiveHandV1` participants.
 
 This is an in-memory aggregate transition, not a durable session repository.
 F1-03 therefore proves single-hand event recovery and an explicit post-settlement

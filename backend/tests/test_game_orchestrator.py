@@ -19,6 +19,7 @@ from poker_coach.simulator import (
     SessionLifecycleError,
     SessionSeatV1,
     SimulatorActionV1,
+    build_observation,
     replay_hand,
 )
 
@@ -106,28 +107,131 @@ def test_open_hand_persists_seeded_pokerkit_validated_opening_facts(tmp_path):
     store.close()
 
 
-def test_sparse_active_seats_are_rejected_at_the_frozen_hand_event_v1_boundary(
+def test_sparse_active_seats_keep_session_seat_ids_through_open_action_and_observation(
     tmp_path,
 ):
     session = _opened_session_with_sitting_out(1, 2)
     assert session.active_hand is not None
     assert tuple(seat.seat_id for seat in session.active_hand.seats) == (0, 3, 4, 5)
     store = SQLiteHandEventStore(tmp_path / "sparse-active.sqlite3")
+    orchestrator = GameOrchestrator(store)
 
-    with pytest.raises(SessionLifecycleError) as caught:
-        GameOrchestrator(store).open_hand(
+    opened = orchestrator.open_hand(
+        session,
+        OpenHandCommandV1(
+            session_id=session.session_id,
+            hand_id=session.active_hand.hand_id,
+            command_id="sparse-open",
+            expected_sequence=0,
+            rng_seed=20260812,
+        ),
+    )
+    started = opened.appended_events[0].payload
+    assert started.table_size == 6
+    assert started.active_seat_ids == (0, 3, 4, 5)
+    assert started.starting_stacks == {seat: 10_000 for seat in range(6)}
+    assert [event.payload.seat_id for event in opened.appended_events[1:]] == [
+        0,
+        3,
+        4,
+        5,
+    ]
+    assert opened.replayed_hand.state.stacks == {
+        0: 10_000,
+        3: 9_950,
+        4: 9_900,
+        5: 10_000,
+    }
+
+    acted = orchestrator.execute(
+        session,
+        PlayerActionCommandV1(
+            session_id=session.session_id,
+            hand_id=session.active_hand.hand_id,
+            command_id="sparse-fold",
+            expected_sequence=opened.replayed_hand.state.applied_sequence,
+            actor_seat=5,
+            action="fold",
+            amount_semantics="none",
+        ),
+    )
+    observation = build_observation(
+        tuple(item.event for item in store.read(session.active_hand.hand_id)),
+        observer_seat=0,
+        after_sequence=acted.replayed_hand.state.applied_sequence,
+    )
+    assert observation.observer_seat == 0
+    assert observation.stacks == {0: 10_000, 3: 9_950, 4: 9_900, 5: 10_000}
+    assert observation.active_seats == (0, 3, 4)
+    assert observation.folded_seats == (5,)
+    assert acted.replayed_hand.statistics.by_seat.keys() == {0, 3, 4, 5}
+
+    result = acted
+    for index, actor in enumerate((0, 3), start=1):
+        result = orchestrator.execute(
             session,
-            OpenHandCommandV1(
+            PlayerActionCommandV1(
                 session_id=session.session_id,
                 hand_id=session.active_hand.hand_id,
-                command_id="sparse-open",
-                expected_sequence=0,
-                rng_seed=20260812,
+                command_id=f"sparse-terminal-fold-{index}",
+                expected_sequence=result.replayed_hand.state.applied_sequence,
+                actor_seat=actor,
+                action="fold",
+                amount_semantics="none",
             ),
         )
 
-    assert caught.value.code == "unsupported_active_topology"
-    assert store.read(session.active_hand.hand_id) == ()
+    assert result.replayed_hand.state.hand_in_progress is False
+    assert result.replayed_hand.state.winner_seats == (4,)
+    assert result.replayed_hand.state.stacks.keys() == {0, 3, 4, 5}
+    assert result.session.topology.seats[1].stack == 10_000
+    assert result.session.topology.seats[2].stack == 10_000
+    assert sum(seat.stack for seat in result.session.topology.seats) == 60_000
+    stored = tuple(item.event for item in store.read(session.active_hand.hand_id))
+    assert replay_hand(stored).state.fingerprint == result.replayed_hand.state.fingerprint
+    store.close()
+
+
+def test_bust_out_next_hand_opens_with_a_sparse_active_set(tmp_path):
+    opened = _opened_session()
+    assert opened.active_hand is not None
+    settled = opened.complete_active_hand(
+        hand_id=opened.active_hand.hand_id,
+        ending_stacks={0: 0, 1: 20_000, 2: 10_000, 3: 10_000, 4: 10_000, 5: 10_000},
+    )
+    next_hand = settled.start_next_hand()
+    assert next_hand.active_hand is not None
+    store = SQLiteHandEventStore(tmp_path / "bust-out-next-hand.sqlite3")
+
+    result = GameOrchestrator(store).open_hand(
+        next_hand,
+        OpenHandCommandV1(
+            session_id=next_hand.session_id,
+            hand_id=next_hand.active_hand.hand_id,
+            command_id="post-bust-open",
+            expected_sequence=0,
+            rng_seed=20260812,
+        ),
+    )
+
+    started = result.appended_events[0].payload
+    assert started.active_seat_ids == (1, 2, 3, 4, 5)
+    assert started.starting_stacks == {
+        0: 0,
+        1: 20_000,
+        2: 10_000,
+        3: 10_000,
+        4: 10_000,
+        5: 10_000,
+    }
+    assert [event.payload.seat_id for event in result.appended_events[1:]] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ]
+    assert result.replayed_hand.state.stacks.keys() == {1, 2, 3, 4, 5}
     store.close()
 
 
