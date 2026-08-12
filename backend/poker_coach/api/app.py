@@ -32,6 +32,10 @@ from poker_coach.jobs import InProcessJobBackend, RedisJobBackend
 from poker_coach.learning import LearningService, PracticeUnavailable
 from poker_coach.persistence import PostgresStore, SQLiteStore
 from poker_coach.persistence.sqlite_store import StoreNotFound
+from poker_coach.simulator.continuous_table import (
+    ContinuousTableError,
+    ContinuousTableService,
+)
 from poker_coach.ranges import (
     FixturePolicyProvider,
     InvalidPolicyError,
@@ -162,6 +166,7 @@ def create_app(
     store: SQLiteStore | PostgresStore | None = None,
     teacher: TeachingService | None = None,
     solver_queue=None,
+    table_service: ContinuousTableService | None = None,
 ) -> FastAPI:
     config = config or AppConfig.from_environment()
     adapter = PokerKitAdapter()
@@ -177,6 +182,9 @@ def create_app(
     rate_limit_lock = Lock()
     analysis_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="poker-analysis")
     job_backend = _create_job_backend(config, adapter, analysis_executor)
+    table_service = table_service or ContinuousTableService.from_sqlite_path(
+        getenv("POKER_COACH_TABLE_DB_PATH", ".data/poker_coach_tables.sqlite3")
+    )
     app = FastAPI(
         title="Poker Coach API",
         version=config.app_version,
@@ -320,6 +328,15 @@ def create_app(
             ),
         )
 
+    @app.exception_handler(ContinuousTableError)
+    async def continuous_table_error_handler(request: Request, exc: ContinuousTableError):
+        return JSONResponse(
+            status_code=(
+                404 if exc.code == "session_not_found" else (409 if exc.conflict else 422)
+            ),
+            content=_error_payload(request, exc.code, str(exc)),
+        )
+
     @app.get("/health")
     async def health(request: Request):
         return {
@@ -343,6 +360,55 @@ def create_app(
             "rulesEngine": adapter.engine_name,
             "rulesEngineVersion": adapter.engine_version,
             "requestId": request.state.request_id,
+        }
+
+    @app.post("/v1/tables")
+    async def create_continuous_table(request: Request):
+        """Create the fixed 6-max table and advance bots to the hero decision."""
+
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_payload", "table create payload must be an object")
+        table, idempotent = await table_service.create(payload)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "idempotent": idempotent,
+            "table": table,
+        }
+
+    @app.get("/v1/tables/{session_id}")
+    async def get_continuous_table(request: Request, session_id: str):
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "table": table_service.projection(session_id),
+        }
+
+    @app.post("/v1/tables/{session_id}/actions")
+    async def submit_continuous_table_action(request: Request, session_id: str):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_payload", "hero action payload must be an object")
+        table, idempotent = await table_service.submit_hero_action(session_id, payload)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "idempotent": idempotent,
+            "table": table,
+        }
+
+    @app.post("/v1/tables/{session_id}/hands")
+    async def start_continuous_table_hand(request: Request, session_id: str):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_payload", "next-hand payload must be an object")
+        table, idempotent = await table_service.start_next_hand(session_id, payload)
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "idempotent": idempotent,
+            "table": table,
         }
 
     @app.post("/v1/scenarios/validate")
