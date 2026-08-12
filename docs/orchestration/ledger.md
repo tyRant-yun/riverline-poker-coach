@@ -38,6 +38,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F2-06 Minimal Polling Table UI | `019ff505-db5d-7323-b396-a75ade283897` | `completed` | `merged` | `codex/f2-04-continuous-table-api` | `1391405` | `6d34e7a0b17edb564e423f43fcd1c29827803aa5` | [F2-06 handoff](handoffs/F2-06.md) | Worker: 11 focused tests；tsc；Next production build | Table browser smoke | Reuse Worker for one Playwright smoke only |
 | F3-02 Public-event Belief Consumer | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-01-seat-priors` | `0f5b1e4` | `b0fefbfe5091a78f9f28f8012535328ebf1ff6ae` | [F3-02 handoff](handoffs/F3-02.md) | Worker: 72 focused passed；compileall/diff check；private events rejected | F3-06 | Defer API/UI insight wiring to next budget |
 | F2-06S Browser Smoke | `019ff505-db5d-7323-b396-a75ade283897` | `in_progress` | `in_progress` | `codex/f2-04-continuous-table-api` | `a4acea3` | — | — | — | — | Single mocked Playwright create/action/next/reconnect/privacy smoke; final budget task |
+| Release Cleanup/GitHub Draft PR | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `in_progress` | `in_progress` | release worktree from `codex/simulator-rebuild` | `1a5c576` | — | — | — | — | Safe worktree audit, final smoke intake if ready, push integration branch, open Draft PR |
 
 ## 下一入口
 
@@ -88,6 +89,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F2-04 stack authority 修复经原 Reviewer 极窄复审 PASS，focused regression 4 passed；交付以 `075dfe0` 至 `370b46b` 集成。F3-01 Git/handoff 与 68 focused tests/compileall 证据一致，仅修正 thread ID 后以 `5e0d1bf` 至 `d486638` 集成。下一步复用两名原 Worker 分别推进 F2-06 与 F3-02，避免新上下文。
 - 2026-08-12：不创建新进程，F2-04 Worker 在同分支从 `1391405` 续接 F2-06 最小轮询牌桌 UI；F3-01 Worker 在同分支从 `0f5b1e4` 续接 F3-02 公共事件 Belief consumer。两者通过 `git show codex/simulator-rebuild:AGENTS.md` 读取新规则，避免为旧 worktree 缺少治理文件重启或复制无关提交。
 - 2026-08-12：F2-06 handoff/Git 与 11 focused tests、tsc、production build 证据一致，以 `00b9a9c`、`99ddb08` 集成。F3-02 handoff/Git 与 72 focused tests、compileall、private-event rejection 证据一致，以 `f422430`、`05c125f` 集成。剩余额度仅安排复用 F2 Worker 的单一 Playwright smoke，不再开功能链或新进程。
+- 2026-08-12：按产品负责人要求创建最终发布任务 `019ff53a-fe87-7353-b7cc-ac3288f0553e`，使用 GitHub yeet 流程安全整理 clean/merged/idle worktree、接收已完成的 F2-06S（若可验收）、推送 `codex/simulator-rebuild` 并创建 Draft PR；不强制删除、不合并 main、不发布 release。
 
 ## 主控更新规则
 
