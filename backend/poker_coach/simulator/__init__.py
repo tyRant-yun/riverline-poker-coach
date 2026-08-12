@@ -54,6 +54,7 @@ from .event_store import (
     HandEventStoreFailure,
     RawHandEventV1,
     OutboxIdentityConflict,
+    OutboxBindingError,
 )
 from .orchestrator import (
     GameCommandError,
@@ -64,6 +65,7 @@ from .orchestrator import (
 )
 from .recovery import (
     OutboxIntentV1,
+    OutboxClaimError,
     OutboxDispatcher,
     OutboxDispatchResultV1,
     OutboxMessageV1,
@@ -78,6 +80,7 @@ from .recovery import (
     ProjectionSnapshotV1,
     ProjectionStore,
     ProjectionStoreFailure,
+    UnsupportedRecoverySchemaVersion,
 )
 
 __all__ = [
@@ -126,6 +129,7 @@ __all__ = [
     "HandEventStoreFailure",
     "RawHandEventV1",
     "OutboxIdentityConflict",
+    "OutboxBindingError",
     "GameCommandResultV1",
     "GameCommandError",
     "GameOrchestrator",
@@ -141,9 +145,11 @@ __all__ = [
     "ProjectionStore",
     "ProjectionStoreFailure",
     "OutboxIntentV1",
+    "OutboxClaimError",
     "OutboxDispatcher",
     "OutboxDispatchResultV1",
     "OutboxMessageV1",
     "OutboxStatusV1",
     "OutboxStore",
+    "UnsupportedRecoverySchemaVersion",
 ]

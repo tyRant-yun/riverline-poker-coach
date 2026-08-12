@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from threading import Barrier
@@ -12,11 +13,14 @@ import pytest
 from poker_coach.persistence import SQLiteHandEventStore
 from poker_coach.simulator import (
     HandEventIdentityConflict,
+    OutboxBindingError,
+    OutboxClaimError,
     OutboxDispatcher,
     OutboxIdentityConflict,
     OutboxIntentV1,
     OutboxStatusV1,
     RawHandEventV1,
+    UnsupportedRecoverySchemaVersion,
 )
 
 
@@ -66,11 +70,13 @@ def test_outbox_intent_has_deterministic_identity_and_versioned_camel_case_json(
 
     assert retry == first
     assert first.idempotency_key == "evt-001:review_requested"
+    assert first.source_event_id == "evt-001"
     assert json.loads(first.to_json()) == {
         "idempotencyKey": "evt-001:review_requested",
         "messageId": first.message_id,
         "payload": {"handId": "session-alpha:hand:1"},
         "schemaVersion": 1,
+        "sourceEventId": "evt-001",
         "topic": "hand.review.requested",
     }
 
@@ -257,7 +263,7 @@ def test_outbox_identity_conflict_rolls_back_event_rows_from_the_same_append(tmp
     store = SQLiteHandEventStore(path)
     first_event = _event(event_id="evt-first", hand_id="hand-first")
     durable_intent = OutboxIntentV1.for_event(
-        event_id="evt-shared-intent",
+        event_id=first_event.event.event_id,
         purpose="review_requested",
         topic="hand.review.requested",
         payload={"handId": "hand-first"},
@@ -269,15 +275,161 @@ def test_outbox_identity_conflict_rolls_back_event_rows_from_the_same_append(tmp
         outbox_intents=(durable_intent,),
     )
     second_event = _event(event_id="evt-second", hand_id="hand-second")
+    conflicting_intent = OutboxIntentV1(
+        message_id=durable_intent.message_id,
+        source_event_id=second_event.event.event_id,
+        idempotency_key=durable_intent.idempotency_key,
+        topic=durable_intent.topic,
+        payload={"handId": second_event.event.hand_id},
+    )
 
     with pytest.raises(OutboxIdentityConflict):
         store.append(
             hand_id=second_event.event.hand_id,
             expected_sequence=0,
             events=(second_event,),
-            outbox_intents=(durable_intent,),
+            outbox_intents=(conflicting_intent,),
         )
 
     assert store.read(second_event.event.hand_id) == ()
     assert store.read(first_event.event.hand_id) == (first_event,)
+    store.close()
+
+
+@pytest.mark.parametrize(
+    "source_event_id",
+    ("evt-missing", "evt-other-hand", "evt-prior-append"),
+    ids=("missing", "other-hand", "prior-append"),
+)
+def test_outbox_intent_must_bind_to_an_event_in_the_same_append_batch(
+    tmp_path, source_event_id
+):
+    store = SQLiteHandEventStore(tmp_path / f"binding-{source_event_id}.sqlite3")
+    target_hand = "hand-binding-target"
+    prior = _event(event_id="evt-prior-append", hand_id=target_hand)
+    other = _event(event_id="evt-other-hand", hand_id="hand-binding-other")
+    store.append(hand_id=target_hand, expected_sequence=0, events=(prior,))
+    store.append(hand_id=other.event.hand_id, expected_sequence=0, events=(other,))
+    current = _event(event_id="evt-current", hand_id=target_hand, sequence=2)
+    orphan = OutboxIntentV1.for_event(
+        event_id=source_event_id,
+        purpose="review_requested",
+        topic="hand.review.requested",
+        payload={"handId": target_hand},
+    )
+
+    with pytest.raises(OutboxBindingError) as caught:
+        store.append(
+            hand_id=target_hand,
+            expected_sequence=1,
+            events=(current,),
+            outbox_intents=(orphan,),
+        )
+
+    assert caught.value.code == "outbox_source_not_in_batch"
+    assert store.read(target_hand) == (prior,)
+    assert store.read(other.event.hand_id) == (other,)
+    store.close()
+
+
+def test_expired_claim_token_cannot_ack_or_retry_a_new_claim_with_same_worker_id(
+    tmp_path,
+):
+    path = tmp_path / "outbox-claim-token.sqlite3"
+    event = _event(event_id="evt-claim-token", hand_id="hand-claim-token")
+    intent = OutboxIntentV1.for_event(
+        event_id=event.event.event_id,
+        purpose="review_requested",
+        topic="hand.review.requested",
+        payload={"handId": event.event.hand_id},
+    )
+    store = SQLiteHandEventStore(path)
+    store.append(
+        hand_id=event.event.hand_id,
+        expected_sequence=0,
+        events=(event,),
+        outbox_intents=(intent,),
+    )
+    old_claim = store.claim_outbox(
+        worker_id="reused-worker",
+        now=datetime(2026, 8, 12, tzinfo=timezone.utc),
+        lease_seconds=1,
+    )[0]
+    expired_at = datetime(2026, 8, 12, 0, 0, 2, tzinfo=timezone.utc)
+    with pytest.raises(OutboxClaimError) as expired_error:
+        store.mark_outbox_dispatched(
+            message_id=intent.message_id,
+            worker_id="reused-worker",
+            claim_token=old_claim.claim_token,
+            now=expired_at,
+        )
+    assert expired_error.value.code == "outbox_claim_lost"
+    new_claim = store.claim_outbox(
+        worker_id="reused-worker",
+        now=expired_at,
+        lease_seconds=30,
+    )[0]
+
+    assert old_claim.claim_token
+    assert new_claim.claim_token
+    assert old_claim.claim_token != new_claim.claim_token
+    with pytest.raises(OutboxClaimError) as ack_error:
+        store.mark_outbox_dispatched(
+            message_id=intent.message_id,
+            worker_id="reused-worker",
+            claim_token=old_claim.claim_token,
+            now=expired_at,
+        )
+    with pytest.raises(OutboxClaimError) as retry_error:
+        store.retry_outbox(
+            message_id=intent.message_id,
+            worker_id="reused-worker",
+            claim_token=old_claim.claim_token,
+            now=datetime(2026, 8, 12, 0, 0, 3, tzinfo=timezone.utc),
+            available_at=datetime(2026, 8, 12, 0, 0, 3, tzinfo=timezone.utc),
+            error="stale retry",
+        )
+
+    assert ack_error.value.code == "outbox_claim_lost"
+    assert retry_error.value.code == "outbox_claim_lost"
+    still_owned = store.load_outbox(intent.message_id)
+    assert still_owned.status is OutboxStatusV1.PROCESSING
+    assert still_owned.claim_token == new_claim.claim_token
+    store.mark_outbox_dispatched(
+        message_id=intent.message_id,
+        worker_id="reused-worker",
+        claim_token=new_claim.claim_token,
+        now=datetime(2026, 8, 12, 0, 0, 3, tzinfo=timezone.utc),
+    )
+    assert store.load_outbox(intent.message_id).status is OutboxStatusV1.DISPATCHED
+    store.close()
+
+
+def test_sqlite_outbox_reader_rejects_unknown_persisted_schema_version(tmp_path):
+    path = tmp_path / "outbox-unknown-schema.sqlite3"
+    event = _event(event_id="evt-unknown-schema", hand_id="hand-unknown-schema")
+    intent = OutboxIntentV1.for_event(
+        event_id=event.event.event_id,
+        purpose="review_requested",
+        topic="hand.review.requested",
+        payload={"handId": event.event.hand_id},
+    )
+    store = SQLiteHandEventStore(path)
+    store.append(
+        hand_id=event.event.hand_id,
+        expected_sequence=0,
+        events=(event,),
+        outbox_intents=(intent,),
+    )
+    with sqlite3.connect(path) as future_writer:
+        future_writer.execute(
+            "UPDATE outbox_messages SET schema_version = 2 WHERE message_id = ?",
+            (intent.message_id,),
+        )
+
+    with pytest.raises(UnsupportedRecoverySchemaVersion) as caught:
+        store.load_outbox(intent.message_id)
+
+    assert caught.value.code == "unsupported_recovery_schema_version"
+    assert "driver" not in str(caught.value).lower()
     store.close()

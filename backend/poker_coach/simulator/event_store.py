@@ -80,6 +80,10 @@ class OutboxIdentityConflict(HandEventStoreError):
     pass
 
 
+class OutboxBindingError(HandEventStoreError):
+    pass
+
+
 @runtime_checkable
 class HandEventStore(Protocol):
     """Atomic optimistic append and ordered read boundary.
@@ -149,5 +153,6 @@ __all__ = [
     "HandEventStoreError",
     "HandEventStoreFailure",
     "OutboxIdentityConflict",
+    "OutboxBindingError",
     "RawHandEventV1",
 ]

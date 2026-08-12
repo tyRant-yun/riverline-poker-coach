@@ -29,6 +29,7 @@ class OutboxIntentV1(SimulatorContractV1):
     """Durable intent whose key must also identify the external side effect."""
 
     message_id: str = Field(min_length=1, max_length=128)
+    source_event_id: str = Field(min_length=1, max_length=128)
     idempotency_key: str = Field(min_length=1, max_length=256)
     topic: str = Field(min_length=1, max_length=128)
     payload: dict[str, JsonValue]
@@ -52,6 +53,7 @@ class OutboxIntentV1(SimulatorContractV1):
         digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
         return cls(
             message_id=f"outbox-{digest}",
+            source_event_id=event_id,
             idempotency_key=idempotency_key,
             topic=topic,
             payload=payload,
@@ -72,14 +74,23 @@ class OutboxMessageV1(OutboxIntentV1):
     available_at: AwareDatetime
     claimed_by: str | None = Field(default=None, min_length=1, max_length=128)
     lease_expires_at: AwareDatetime | None = None
+    claim_token: str | None = Field(default=None, min_length=1, max_length=128)
     last_error: str | None = Field(default=None, min_length=1, max_length=512)
 
     @model_validator(mode="after")
     def validate_claim_state(self) -> OutboxMessageV1:
-        claimed = self.claimed_by is not None or self.lease_expires_at is not None
+        claimed = (
+            self.claimed_by is not None
+            or self.lease_expires_at is not None
+            or self.claim_token is not None
+        )
         if self.status is OutboxStatusV1.PROCESSING:
-            if self.claimed_by is None or self.lease_expires_at is None:
-                raise ValueError("processing messages require a worker and lease")
+            if (
+                self.claimed_by is None
+                or self.lease_expires_at is None
+                or self.claim_token is None
+            ):
+                raise ValueError("processing messages require a worker, lease and token")
         elif claimed:
             raise ValueError("only processing messages may carry claim state")
         return self
@@ -129,6 +140,22 @@ class ProjectionStoreFailure(ProjectionError):
     pass
 
 
+class OutboxClaimError(RuntimeError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+class UnsupportedRecoverySchemaVersion(RuntimeError):
+    def __init__(self, *, resource: str, schema_version: int):
+        super().__init__(
+            f"{resource} schema version {schema_version} is not supported by the V1 reader"
+        )
+        self.code = "unsupported_recovery_schema_version"
+        self.resource = resource
+        self.schema_version = schema_version
+
+
 @runtime_checkable
 class ProjectionStore(Protocol):
     def load_checkpoint(
@@ -165,13 +192,17 @@ class OutboxStore(Protocol):
 
     def load_outbox(self, message_id: str) -> OutboxMessageV1 | None: ...
 
-    def mark_outbox_dispatched(self, *, message_id: str, worker_id: str) -> None: ...
+    def mark_outbox_dispatched(
+        self, *, message_id: str, worker_id: str, claim_token: str, now: datetime
+    ) -> None: ...
 
     def retry_outbox(
         self,
         *,
         message_id: str,
         worker_id: str,
+        claim_token: str,
+        now: datetime,
         available_at: datetime,
         error: str,
     ) -> None: ...
@@ -219,6 +250,8 @@ class OutboxDispatcher:
                 self._store.retry_outbox(
                     message_id=message.message_id,
                     worker_id=worker_id,
+                    claim_token=message.claim_token,
+                    now=now,
                     available_at=now + timedelta(seconds=retry_delay_seconds),
                     error=detail[:512],
                 )
@@ -227,6 +260,8 @@ class OutboxDispatcher:
                 self._store.mark_outbox_dispatched(
                     message_id=message.message_id,
                     worker_id=worker_id,
+                    claim_token=message.claim_token,
+                    now=now,
                 )
                 dispatched_count += 1
         return OutboxDispatchResultV1(
@@ -311,6 +346,7 @@ class ProjectionRunner:
 
 __all__ = [
     "OutboxIntentV1",
+    "OutboxClaimError",
     "OutboxDispatcher",
     "OutboxDispatchResultV1",
     "OutboxMessageV1",
@@ -325,4 +361,5 @@ __all__ = [
     "ProjectionSnapshotV1",
     "ProjectionStoreFailure",
     "ProjectionStore",
+    "UnsupportedRecoverySchemaVersion",
 ]

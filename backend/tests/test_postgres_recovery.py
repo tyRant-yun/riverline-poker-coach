@@ -11,9 +11,12 @@ import pytest
 from poker_coach.persistence import PostgresHandEventStore, PostgresProjectionStore
 from poker_coach.simulator import (
     OutboxIdentityConflict,
+    OutboxBindingError,
+    OutboxClaimError,
     OutboxIntentV1,
     ProjectionIdentityV1,
     RawHandEventV1,
+    UnsupportedRecoverySchemaVersion,
 )
 
 
@@ -103,6 +106,7 @@ class ClaimCursor(FakeCursor):
         if "RETURNING message_id" in self.last_query:
             return (
                 "msg-pg-claim",
+                "evt-pg-outbox",
                 "evt-pg-outbox:review_requested",
                 1,
                 "hand.review.requested",
@@ -112,6 +116,7 @@ class ClaimCursor(FakeCursor):
                 "1970-01-01T00:00:00+00:00",
                 "worker-pg",
                 "2026-08-12T00:00:30+00:00",
+                "claim-token-pg",
                 None,
             )
         return (0,)
@@ -143,6 +148,76 @@ class OutboxFailingConnection(FakeConnection):
         return OutboxFailingCursor(self)
 
 
+class TokenCursor(FakeCursor):
+    def __init__(self, connection):
+        super().__init__(connection)
+        self.rowcount = 0
+
+    def execute(self, query, params=()):
+        super().execute(query, params)
+        if "claim_token = %s" in query:
+            self.rowcount = 1 if params[-2] == "new-token" else 0
+
+
+class TokenConnection(FakeConnection):
+    def cursor(self):
+        return TokenCursor(self)
+
+
+class FutureOutboxCursor(FakeCursor):
+    def __init__(self, connection):
+        super().__init__(connection)
+        self.last_query = ""
+
+    def execute(self, query, params=()):
+        self.last_query = query
+        super().execute(query, params)
+
+    def fetchone(self):
+        if "FROM outbox_messages" in self.last_query:
+            return (
+                "msg-future",
+                "evt-future",
+                "evt-future:review_requested",
+                2,
+                "hand.review.requested",
+                '{"handId":"hand-future"}',
+                "pending",
+                0,
+                "1970-01-01T00:00:00+00:00",
+                None,
+                None,
+                None,
+                None,
+            )
+        return (0,)
+
+
+class FutureOutboxConnection(FakeConnection):
+    def cursor(self):
+        return FutureOutboxCursor(self)
+
+
+class FutureSnapshotCursor(FakeCursor):
+    def __init__(self, connection):
+        super().__init__(connection)
+        self.last_query = ""
+
+    def execute(self, query, params=()):
+        self.last_query = query
+        super().execute(query, params)
+
+    def fetchone(self):
+        if "FROM projection_snapshots" in self.last_query:
+            return (1, "evt-future", 2, '{"eventIds":["evt-future"]}', "0" * 64)
+        return (0,)
+
+
+class FutureSnapshotConnection(FakeConnection):
+    def cursor(self):
+        return FutureSnapshotCursor(self)
+
+
 def test_alembic_0003_adds_projection_checkpoint_snapshot_and_outbox_tables():
     backend = Path(__file__).resolve().parents[1]
     migration = (backend / "migrations" / "versions" / "0003_recovery.py").read_text(
@@ -161,6 +236,9 @@ def test_alembic_0003_adds_projection_checkpoint_snapshot_and_outbox_tables():
     assert "pk_projection_snapshots" in projection_schema
     assert "pk_outbox_messages" in outbox_schema
     assert "uq_outbox_messages_idempotency_key" in outbox_schema
+    assert "source_event_id TEXT NOT NULL" in outbox_schema
+    assert "fk_outbox_messages_source_event" in outbox_schema
+    assert "claim_token TEXT" in outbox_schema
 
 
 def test_postgres_event_and_outbox_intent_share_one_append_transaction():
@@ -253,6 +331,8 @@ def test_postgres_claim_recovers_expired_leases_and_locks_rows_without_blocking(
     assert len(claimed) == 1
     assert claimed[0].claimed_by == "worker-pg"
     assert claimed[0].attempt_count == 2
+    assert claimed[0].source_event_id == "evt-pg-outbox"
+    assert claimed[0].claim_token == "claim-token-pg"
     assert connection.commits == 2  # schema initialization plus one claim transaction
     assert connection.rollbacks == 0
 
@@ -280,3 +360,94 @@ def test_postgres_outbox_conflict_rolls_back_the_event_append_transaction():
     assert "driver detail" not in str(caught.value)
     assert connection.commits == 1  # initialization only
     assert connection.rollbacks == 1
+
+
+def test_postgres_append_rejects_outbox_source_outside_the_same_batch():
+    connection = FakeConnection()
+    store = PostgresHandEventStore("postgresql://test", connection=connection)
+    event = _event()
+    orphan = OutboxIntentV1.for_event(
+        event_id="evt-not-in-batch",
+        purpose="review_requested",
+        topic="hand.review.requested",
+        payload={"handId": event.event.hand_id},
+    )
+
+    with pytest.raises(OutboxBindingError) as caught:
+        store.append(
+            hand_id=event.event.hand_id,
+            expected_sequence=0,
+            events=(event,),
+            outbox_intents=(orphan,),
+        )
+
+    assert caught.value.code == "outbox_source_not_in_batch"
+    assert connection.commits == 1  # initialization only; append transaction never opens
+    assert connection.rollbacks == 0
+
+
+def test_postgres_ack_and_retry_require_the_current_claim_token():
+    connection = TokenConnection()
+    store = PostgresHandEventStore("postgresql://test", connection=connection)
+
+    with pytest.raises(OutboxClaimError):
+        store.mark_outbox_dispatched(
+            message_id="msg-token",
+            worker_id="reused-worker",
+            claim_token="old-token",
+            now=datetime(2026, 8, 12, tzinfo=timezone.utc),
+        )
+    with pytest.raises(OutboxClaimError):
+        store.retry_outbox(
+            message_id="msg-token",
+            worker_id="reused-worker",
+            claim_token="old-token",
+            now=datetime(2026, 8, 12, tzinfo=timezone.utc),
+            available_at=datetime(2026, 8, 12, tzinfo=timezone.utc),
+            error="stale retry",
+        )
+    store.mark_outbox_dispatched(
+        message_id="msg-token",
+        worker_id="reused-worker",
+        claim_token="new-token",
+        now=datetime(2026, 8, 12, tzinfo=timezone.utc),
+    )
+
+    token_updates = [
+        (query, params)
+        for query, params in connection.statements
+        if "claim_token = %s" in query
+    ]
+    assert [params[-2] for _, params in token_updates] == [
+        "old-token",
+        "old-token",
+        "new-token",
+    ]
+
+
+def test_postgres_outbox_reader_rejects_unknown_persisted_schema_version():
+    store = PostgresHandEventStore(
+        "postgresql://test", connection=FutureOutboxConnection()
+    )
+
+    with pytest.raises(UnsupportedRecoverySchemaVersion) as caught:
+        store.load_outbox("msg-future")
+
+    assert caught.value.code == "unsupported_recovery_schema_version"
+    assert "driver" not in str(caught.value).lower()
+
+
+def test_postgres_snapshot_reader_rejects_unknown_persisted_schema_version():
+    store = PostgresProjectionStore(
+        "postgresql://test", connection=FutureSnapshotConnection()
+    )
+    identity = ProjectionIdentityV1(
+        projection_name="future_snapshot",
+        projection_version=1,
+    )
+
+    with pytest.raises(UnsupportedRecoverySchemaVersion) as caught:
+        store.load_snapshot(identity, "hand-future")
+
+    assert caught.value.code == "unsupported_recovery_schema_version"
+    assert "driver" not in str(caught.value).lower()

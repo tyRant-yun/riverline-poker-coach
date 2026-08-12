@@ -18,6 +18,7 @@ from poker_coach.simulator.recovery import (
     ProjectionSequenceError,
     ProjectionSnapshotV1,
     ProjectionStoreFailure,
+    UnsupportedRecoverySchemaVersion,
 )
 
 
@@ -83,13 +84,14 @@ class SQLiteProjectionStore:
     ) -> ProjectionSnapshotV1 | None:
         with self._lock:
             row = self._connection.execute(
-                "SELECT sequence, event_id, payload_json, fingerprint "
+                "SELECT sequence, event_id, schema_version, payload_json, fingerprint "
                 "FROM projection_snapshots WHERE projection_name = ? "
                 "AND projection_version = ? AND stream_id = ?",
                 (identity.projection_name, identity.projection_version, stream_id),
             ).fetchone()
         if row is None:
             return None
+        _require_v1_schema("projection_snapshot", int(row["schema_version"]))
         return ProjectionSnapshotV1(
             projection_identity=identity,
             stream_id=stream_id,
@@ -287,7 +289,7 @@ class PostgresProjectionStore:
         try:
             with self._transaction() as cursor:
                 cursor.execute(
-                    "SELECT sequence, event_id, payload_json, fingerprint "
+                    "SELECT sequence, event_id, schema_version, payload_json, fingerprint "
                     "FROM projection_snapshots WHERE projection_name = %s "
                     "AND projection_version = %s AND stream_id = %s",
                     (identity.projection_name, identity.projection_version, stream_id),
@@ -299,13 +301,16 @@ class PostgresProjectionStore:
             ) from exc
         if row is None:
             return None
+        _require_v1_schema(
+            "projection_snapshot", int(_value(row, "schema_version", 2))
+        )
         return ProjectionSnapshotV1(
             projection_identity=identity,
             stream_id=stream_id,
             sequence=int(_value(row, "sequence", 0)),
             event_id=str(_value(row, "event_id", 1)),
-            payload=json.loads(str(_value(row, "payload_json", 2))),
-            fingerprint=str(_value(row, "fingerprint", 3)),
+            payload=json.loads(str(_value(row, "payload_json", 3))),
+            fingerprint=str(_value(row, "fingerprint", 4)),
         )
 
     def apply(
@@ -453,6 +458,13 @@ def _projection_lock_key(identity: ProjectionIdentityV1, stream_id: str) -> str:
             "streamId": stream_id,
         }
     )
+
+
+def _require_v1_schema(resource: str, schema_version: int) -> None:
+    if schema_version != 1:
+        raise UnsupportedRecoverySchemaVersion(
+            resource=resource, schema_version=schema_version
+        )
 
 
 __all__ = ["PostgresProjectionStore", "SQLiteProjectionStore"]

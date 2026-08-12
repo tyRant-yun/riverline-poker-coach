@@ -13,6 +13,7 @@ from poker_coach.simulator import (
     ProjectionRunner,
     ProjectionStoreFailure,
     RawHandEventV1,
+    UnsupportedRecoverySchemaVersion,
 )
 
 
@@ -215,4 +216,34 @@ def test_snapshot_database_failure_rolls_back_without_advancing_checkpoint(tmp_p
     checkpoint = store.load_checkpoint(identity, first.hand_id)
     assert checkpoint.last_sequence == 1
     assert checkpoint.last_event_id == first.event_id
+    store.close()
+
+
+def test_sqlite_snapshot_reader_rejects_unknown_persisted_schema_version(tmp_path):
+    path = tmp_path / "snapshot-unknown-schema.sqlite3"
+    identity = ProjectionIdentityV1(
+        projection_name="unknown_schema",
+        projection_version=1,
+    )
+    event = _raw_event(event_id="evt-snapshot-schema", sequence=1).event
+    store = SQLiteProjectionStore(path)
+    store.apply(
+        identity,
+        event.hand_id,
+        expected_sequence=0,
+        event=event,
+        payload={"eventIds": [event.event_id]},
+    )
+    with sqlite3.connect(path) as future_writer:
+        future_writer.execute(
+            "UPDATE projection_snapshots SET schema_version = 2 "
+            "WHERE projection_name = ? AND projection_version = ? AND stream_id = ?",
+            (identity.projection_name, identity.projection_version, event.hand_id),
+        )
+
+    with pytest.raises(UnsupportedRecoverySchemaVersion) as caught:
+        store.load_snapshot(identity, event.hand_id)
+
+    assert caught.value.code == "unsupported_recovery_schema_version"
+    assert "driver" not in str(caught.value).lower()
     store.close()
