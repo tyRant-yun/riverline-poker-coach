@@ -28,11 +28,11 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F1-03 PokerKit GameOrchestrator | `019ff3e3-bda6-7e21-903e-d4fe0611a5a9` | `completed` | `merged` | `codex/f1-03-pokerkit-game-orchestrator` | `91fb7f08d760753259f611284318b512c5f30ed4` | `e46f4df666e2513750147862674e6d9ce64634fd` | [F1-03 handoff](handoffs/F1-03.md) | Worker: backend 433 passed/9 skipped、146 relevant passed、compileall/pip check；Controller: 146 relevant passed before and after integration | F1-04、F1-05、F1-06 | F1-04 projection/checkpoint/outbox recovery |
 | F1-04 Projection/Outbox Recovery | `019ff446-caf8-78a2-85cd-c582310780ad` | `completed` | `merged` | `codex/f1-04-projection-outbox-recovery` | `9353fcd735adf9205877b7d8070c54c99089dc30` | `efb1a5ae83b63fd52ee28845c32c56e009362ff2` | [F1-04 handoff](handoffs/F1-04.md) | Worker: backend 457 passed/10 skipped at ddbe65c；final focused 21 passed/10 skipped；independent P1 re-review PASS | F4-01 | F1-05 PHH adapter for MVP interchange |
 | F1-06 Hand Lab Compatibility | `019ff498-63cb-7bf2-aedb-969e973b6926` | `completed` | `merged` | `codex/f1-06-hand-lab-compatibility` | `e70e85e80724846ec0da968010cd6f9dcc0daa4d` | `6e2e5d55098e3d1369f78e3782006d095269b80e` | [F1-06 handoff](handoffs/F1-06.md) | Worker: focused 51 passed；backend 470 passed/10 skipped；compileall/pip check；independent MVP P0/P1 review PASS | F4-03（仍依赖 F3） | F1-05 PHH adapter |
-| F1-05 PHH Adapter | `019ff4c4-26dd-7020-b60c-84f097bae0ba` | `in_progress` | `in_progress` | `codex/f1-05-phh-adapter` | `0780d2d960dc2dea87220d2f9cd92205cd048e6e` | — | — | — | — | 最小 PHH 交换适配与权威事实 round-trip golden fixtures |
+| F1-05 PHH Adapter | `019ff4c4-26dd-7020-b60c-84f097bae0ba` | `completed` | `merged` | `codex/f1-05-phh-adapter` | `0780d2d960dc2dea87220d2f9cd92205cd048e6e` | `b3bd7dc5e13a74337408af8775e715f8dcda1197` | [F1-05 handoff](handoffs/F1-05.md) | Worker: focused 7 passed；backend 477 passed/10 skipped；compileall/pip check；极窄 P1 re-review PASS | F1-07 | F1-07 recovery/seeded soak exit gate |
 
 ## 下一入口
 
-`F1-05`：用最小 PHH 交换适配与 golden fixtures 补齐 F1 依赖；不扩建 API/UI。完成后进入 F1-07 的 MVP 恢复/soak 收口。
+`F1-07`：只做 F1 恢复/重放/筹码守恒/1,000-hand seeded soak 与 rollback 出口门；通过后立即切入可体验的 F2 连续桌纵向切片。
 
 ## MVP 执行策略
 
@@ -63,6 +63,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F1-05 从集成提交 `0780d2d` 派发至任务 `019ff4c4-26dd-7020-b60c-84f097bae0ba`，使用 Terra/medium 单任务实现最小 PHH exchange/round-trip；不并行启动其他任务。
 - 2026-08-12：F1-05 首轮 delivery/handoff 与 Git 事实及 Worker 质量证据一致（focused 5 passed；backend 475 passed/10 skipped），但独立 MVP P0/P1 审查发现普通 PHH 导出会泄漏未公开私牌，以及 import 未核对标准 `finishing_stacks`/`winnings`、可静默吞掉不一致结算或潜在 rake。交付未集成，已仅退回这两个 P1 做测试先行修复；F1-07 保持暂停。
 - 2026-08-12：控制面审计确认主要吞吐损耗来自严格单任务串行、F1-03/F1-04 三轮审查返工、每任务约 5.8 万字符固定上下文和每 15 分钟心跳重复读取，而非 WSL 本身。治理切换为最多两个独立实现槽、风险型一次审查、focused-per-task/批次全量门和增量心跳；WSL 启动损耗只通过批处理命令规避。
+- 2026-08-12：F1-05 两个 P1 由原 Worker 在约 4 分钟内测试先行修复，复用原审查上下文做极窄 re-review，结论 PASS；Worker 实测 focused 7 passed、backend 477 passed/10 skipped、compileall/pip check。四项交付/handoff 提交以 `76eaed9` 至 `71c8ea0` 集成，未重复运行全仓审查或主控测试。
 
 ## 主控更新规则
 
