@@ -193,7 +193,7 @@ class OutboxStore(Protocol):
     def load_outbox(self, message_id: str) -> OutboxMessageV1 | None: ...
 
     def mark_outbox_dispatched(
-        self, *, message_id: str, worker_id: str, claim_token: str, now: datetime
+        self, *, message_id: str, worker_id: str, claim_token: str
     ) -> None: ...
 
     def retry_outbox(
@@ -202,8 +202,7 @@ class OutboxStore(Protocol):
         message_id: str,
         worker_id: str,
         claim_token: str,
-        now: datetime,
-        available_at: datetime,
+        retry_delay_seconds: int,
         error: str,
     ) -> None: ...
 
@@ -244,15 +243,12 @@ class OutboxDispatcher:
             try:
                 dispatch(message)
             except Exception as exc:
-                from datetime import timedelta
-
                 detail = str(exc).strip() or type(exc).__name__
                 self._store.retry_outbox(
                     message_id=message.message_id,
                     worker_id=worker_id,
                     claim_token=message.claim_token,
-                    now=now,
-                    available_at=now + timedelta(seconds=retry_delay_seconds),
+                    retry_delay_seconds=retry_delay_seconds,
                     error=detail[:512],
                 )
                 failed_count += 1
@@ -261,7 +257,6 @@ class OutboxDispatcher:
                     message_id=message.message_id,
                     worker_id=worker_id,
                     claim_token=message.claim_token,
-                    now=now,
                 )
                 dispatched_count += 1
         return OutboxDispatchResultV1(

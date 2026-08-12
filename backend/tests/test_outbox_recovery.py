@@ -154,7 +154,8 @@ def test_outbox_failure_retries_after_restart_without_duplicate_external_side_ef
         topic="hand.review.requested",
         payload={"handId": event.event.hand_id},
     )
-    store = SQLiteHandEventStore(path)
+    current_time = [datetime(2026, 8, 12, tzinfo=timezone.utc)]
+    store = SQLiteHandEventStore(path, clock=lambda: current_time[0])
     store.append(
         hand_id=event.event.hand_id,
         expected_sequence=0,
@@ -183,14 +184,16 @@ def test_outbox_failure_retries_after_restart_without_duplicate_external_side_ef
     assert store.load_outbox(intent.message_id).status is OutboxStatusV1.PENDING
     store.close()
 
-    restarted = SQLiteHandEventStore(path)
+    restarted = SQLiteHandEventStore(path, clock=lambda: current_time[0])
     dispatcher = OutboxDispatcher(restarted)
+    current_time[0] = datetime(2026, 8, 12, 0, 0, 1, tzinfo=timezone.utc)
     second = dispatcher.dispatch_once(
         worker_id="worker-b",
         dispatch=idempotent_sink,
         now=datetime(2026, 8, 12, 0, 0, 1, tzinfo=timezone.utc),
         retry_delay_seconds=0,
     )
+    current_time[0] = datetime(2026, 8, 12, 0, 0, 2, tzinfo=timezone.utc)
     empty = dispatcher.dispatch_once(
         worker_id="worker-b",
         dispatch=idempotent_sink,
@@ -343,7 +346,8 @@ def test_expired_claim_token_cannot_ack_or_retry_a_new_claim_with_same_worker_id
         topic="hand.review.requested",
         payload={"handId": event.event.hand_id},
     )
-    store = SQLiteHandEventStore(path)
+    current_time = [datetime(2026, 8, 12, tzinfo=timezone.utc)]
+    store = SQLiteHandEventStore(path, clock=lambda: current_time[0])
     store.append(
         hand_id=event.event.hand_id,
         expected_sequence=0,
@@ -356,12 +360,12 @@ def test_expired_claim_token_cannot_ack_or_retry_a_new_claim_with_same_worker_id
         lease_seconds=1,
     )[0]
     expired_at = datetime(2026, 8, 12, 0, 0, 2, tzinfo=timezone.utc)
+    current_time[0] = expired_at
     with pytest.raises(OutboxClaimError) as expired_error:
         store.mark_outbox_dispatched(
             message_id=intent.message_id,
             worker_id="reused-worker",
             claim_token=old_claim.claim_token,
-            now=expired_at,
         )
     assert expired_error.value.code == "outbox_claim_lost"
     new_claim = store.claim_outbox(
@@ -378,15 +382,14 @@ def test_expired_claim_token_cannot_ack_or_retry_a_new_claim_with_same_worker_id
             message_id=intent.message_id,
             worker_id="reused-worker",
             claim_token=old_claim.claim_token,
-            now=expired_at,
         )
+    current_time[0] = datetime(2026, 8, 12, 0, 0, 3, tzinfo=timezone.utc)
     with pytest.raises(OutboxClaimError) as retry_error:
         store.retry_outbox(
             message_id=intent.message_id,
             worker_id="reused-worker",
             claim_token=old_claim.claim_token,
-            now=datetime(2026, 8, 12, 0, 0, 3, tzinfo=timezone.utc),
-            available_at=datetime(2026, 8, 12, 0, 0, 3, tzinfo=timezone.utc),
+            retry_delay_seconds=0,
             error="stale retry",
         )
 
@@ -399,7 +402,6 @@ def test_expired_claim_token_cannot_ack_or_retry_a_new_claim_with_same_worker_id
         message_id=intent.message_id,
         worker_id="reused-worker",
         claim_token=new_claim.claim_token,
-        now=datetime(2026, 8, 12, 0, 0, 3, tzinfo=timezone.utc),
     )
     assert store.load_outbox(intent.message_id).status is OutboxStatusV1.DISPATCHED
     store.close()
@@ -432,4 +434,47 @@ def test_sqlite_outbox_reader_rejects_unknown_persisted_schema_version(tmp_path)
 
     assert caught.value.code == "unsupported_recovery_schema_version"
     assert "driver" not in str(caught.value).lower()
+    store.close()
+
+
+@pytest.mark.parametrize("dispatch_fails", (False, True), ids=("ack", "retry"))
+def test_dispatcher_cannot_ack_or_retry_after_claim_lease_expires(
+    tmp_path, dispatch_fails
+):
+    path = tmp_path / f"dispatcher-expired-{dispatch_fails}.sqlite3"
+    claimed_at = datetime(2026, 8, 12, tzinfo=timezone.utc)
+    current_time = [claimed_at]
+    event = _event(event_id=f"evt-expired-{dispatch_fails}", hand_id="hand-expired")
+    intent = OutboxIntentV1.for_event(
+        event_id=event.event.event_id,
+        purpose="review_requested",
+        topic="hand.review.requested",
+        payload={"handId": event.event.hand_id},
+    )
+    store = SQLiteHandEventStore(path, clock=lambda: current_time[0])
+    store.append(
+        hand_id=event.event.hand_id,
+        expected_sequence=0,
+        events=(event,),
+        outbox_intents=(intent,),
+    )
+
+    def slow_dispatch(_message):
+        current_time[0] = datetime(2026, 8, 12, 0, 0, 31, tzinfo=timezone.utc)
+        if dispatch_fails:
+            raise RuntimeError("dispatch failed after lease expiry")
+
+    with pytest.raises(OutboxClaimError) as caught:
+        OutboxDispatcher(store).dispatch_once(
+            worker_id="slow-worker",
+            dispatch=slow_dispatch,
+            now=claimed_at,
+            lease_seconds=30,
+            retry_delay_seconds=1,
+        )
+
+    assert caught.value.code == "outbox_claim_lost"
+    message = store.load_outbox(intent.message_id)
+    assert message.status is OutboxStatusV1.PROCESSING
+    assert message.claim_token is not None
     store.close()

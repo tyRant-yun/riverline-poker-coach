@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import RLock
-from typing import Sequence
+from typing import Callable, Sequence
 
 from poker_coach.simulator.event_store import (
     ExpectedSequenceConflict,
@@ -45,8 +45,15 @@ def _json(value: object) -> str:
 class SQLiteHandEventStore:
     """SQLite adapter using ``BEGIN IMMEDIATE`` to serialize hand appends."""
 
-    def __init__(self, path: str | Path, *, timeout_seconds: float = 5.0):
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        timeout_seconds: float = 5.0,
+        clock: Callable[[], datetime] | None = None,
+    ):
         self.path = str(path)
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
@@ -267,17 +274,17 @@ class SQLiteHandEventStore:
         message_id: str,
         worker_id: str,
         claim_token: str,
-        now: datetime,
     ) -> None:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
+                current_time = _utc_iso(self._clock())
                 cursor = self._connection.execute(
                     "UPDATE outbox_messages SET status = 'dispatched', "
                     "claimed_by = NULL, lease_expires_at = NULL, claim_token = NULL, "
                     "last_error = NULL WHERE message_id = ? AND status = 'processing' "
                     "AND claimed_by = ? AND claim_token = ? AND lease_expires_at > ?",
-                    (message_id, worker_id, claim_token, _utc_iso(now)),
+                    (message_id, worker_id, claim_token, current_time),
                 )
                 if cursor.rowcount != 1:
                     raise OutboxClaimError(
@@ -296,27 +303,31 @@ class SQLiteHandEventStore:
         message_id: str,
         worker_id: str,
         claim_token: str,
-        now: datetime,
-        available_at: datetime,
+        retry_delay_seconds: int,
         error: str,
     ) -> None:
         if not error:
             raise ValueError("outbox retry requires an error")
+        if retry_delay_seconds < 0:
+            raise ValueError("retry_delay_seconds must be non-negative")
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
+                current_time = self._clock()
                 cursor = self._connection.execute(
                     "UPDATE outbox_messages SET status = 'pending', available_at = ?, "
                     "claimed_by = NULL, lease_expires_at = NULL, claim_token = NULL, "
                     "last_error = ? WHERE message_id = ? AND status = 'processing' "
                     "AND claimed_by = ? AND claim_token = ? AND lease_expires_at > ?",
                     (
-                        _utc_iso(available_at),
+                        _utc_iso(
+                            current_time + timedelta(seconds=retry_delay_seconds)
+                        ),
                         error[:512],
                         message_id,
                         worker_id,
                         claim_token,
-                        _utc_iso(now),
+                        _utc_iso(current_time),
                     ),
                 )
                 if cursor.rowcount != 1:
@@ -339,8 +350,15 @@ class PostgresHandEventStore:
     the final authority for global event IDs and per-hand sequences.
     """
 
-    def __init__(self, dsn: str, *, connection=None):
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        connection=None,
+        clock: Callable[[], datetime] | None = None,
+    ):
         self.dsn = dsn
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._owns_connection = connection is None
         if connection is None:
             try:
@@ -524,16 +542,16 @@ class PostgresHandEventStore:
         message_id: str,
         worker_id: str,
         claim_token: str,
-        now: datetime,
     ) -> None:
         try:
             with self._transaction() as cursor:
+                current_time = _utc_iso(self._clock())
                 cursor.execute(
                     "UPDATE outbox_messages SET status = 'dispatched', "
                     "claimed_by = NULL, lease_expires_at = NULL, claim_token = NULL, "
                     "last_error = NULL WHERE message_id = %s AND status = 'processing' "
                     "AND claimed_by = %s AND claim_token = %s AND lease_expires_at > %s",
-                    (message_id, worker_id, claim_token, _utc_iso(now)),
+                    (message_id, worker_id, claim_token, current_time),
                 )
                 if cursor.rowcount != 1:
                     raise OutboxClaimError(
@@ -551,26 +569,30 @@ class PostgresHandEventStore:
         message_id: str,
         worker_id: str,
         claim_token: str,
-        now: datetime,
-        available_at: datetime,
+        retry_delay_seconds: int,
         error: str,
     ) -> None:
         if not error:
             raise ValueError("outbox retry requires an error")
+        if retry_delay_seconds < 0:
+            raise ValueError("retry_delay_seconds must be non-negative")
         try:
             with self._transaction() as cursor:
+                current_time = self._clock()
                 cursor.execute(
                     "UPDATE outbox_messages SET status = 'pending', available_at = %s, "
                     "claimed_by = NULL, lease_expires_at = NULL, claim_token = NULL, "
                     "last_error = %s WHERE message_id = %s AND status = 'processing' "
                     "AND claimed_by = %s AND claim_token = %s AND lease_expires_at > %s",
                     (
-                        _utc_iso(available_at),
+                        _utc_iso(
+                            current_time + timedelta(seconds=retry_delay_seconds)
+                        ),
                         error[:512],
                         message_id,
                         worker_id,
                         claim_token,
-                        _utc_iso(now),
+                        _utc_iso(current_time),
                     ),
                 )
                 if cursor.rowcount != 1:

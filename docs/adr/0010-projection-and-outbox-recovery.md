@@ -12,7 +12,7 @@
 - Projection identity 固定为 `(projection_name, projection_version)`；每个 event stream 维护独立 durable checkpoint。
 - 一次 projection apply 在同一数据库事务中先写可丢弃 snapshot/read model，再推进 checkpoint。失败不推进 cursor；坏版本使用新 identity 或清空旧版本后仅从 `HandEventV1` 重建。
 - `HandEventStore.append(..., outbox_intents=())` 是 F1-02 port 的兼容扩展。每个 V1 intent 必须用 `source_event_id` 绑定本次 append batch 内的事实事件；outbox row 以外键保留该关联。非空 intent 与整批 events 在 SQLite/PostgreSQL 的同一 append 事务提交，原有调用默认不写 outbox。
-- Outbox 使用 deterministic `message_id` 与 `idempotency_key`、`pending -> processing -> dispatched` 状态、租约、不可复用 `claim_token`、attempt count 和失败后 `available_at` 重试。ack/retry 必须同时匹配 processing 状态、owner、token 和未过期 lease；PostgreSQL claim 使用 `FOR UPDATE SKIP LOCKED`，SQLite 使用 `BEGIN IMMEDIATE`。
+- Outbox 使用 deterministic `message_id` 与 `idempotency_key`、`pending -> processing -> dispatched` 状态、租约、不可复用 `claim_token`、attempt count 和失败后 `available_at` 重试。ack/retry 必须同时匹配 processing 状态、owner、token 和未过期 lease；lease 是否仍有效以及 retry 的下一次可用时间都以 persistence adapter 的当前 UTC 时钟为准，不能复用 dispatcher 在 claim 时传入的旧时间。PostgreSQL claim 使用 `FOR UPDATE SKIP LOCKED`，SQLite 使用 `BEGIN IMMEDIATE`。
 - 持久化 outbox message 与 projection snapshot 的 V1 reader 必须先校验 `schema_version`；未知版本以项目领域错误拒绝，不能默认为 V1。
 - Dispatch 是 at-least-once。外部 consumer 必须以同一个 `idempotency_key` 去重；数据库不能在外部副作用已发生但确认未写回时单独承诺 exactly-once。
 

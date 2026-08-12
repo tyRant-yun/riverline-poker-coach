@@ -386,31 +386,31 @@ def test_postgres_append_rejects_outbox_source_outside_the_same_batch():
     assert connection.rollbacks == 0
 
 
-def test_postgres_ack_and_retry_require_the_current_claim_token():
+def test_postgres_ack_and_retry_require_current_claim_token_and_store_time():
     connection = TokenConnection()
-    store = PostgresHandEventStore("postgresql://test", connection=connection)
+    current_time = datetime(2026, 8, 12, 0, 0, 5, tzinfo=timezone.utc)
+    store = PostgresHandEventStore(
+        "postgresql://test", connection=connection, clock=lambda: current_time
+    )
 
     with pytest.raises(OutboxClaimError):
         store.mark_outbox_dispatched(
             message_id="msg-token",
             worker_id="reused-worker",
             claim_token="old-token",
-            now=datetime(2026, 8, 12, tzinfo=timezone.utc),
         )
     with pytest.raises(OutboxClaimError):
         store.retry_outbox(
             message_id="msg-token",
             worker_id="reused-worker",
             claim_token="old-token",
-            now=datetime(2026, 8, 12, tzinfo=timezone.utc),
-            available_at=datetime(2026, 8, 12, tzinfo=timezone.utc),
+            retry_delay_seconds=0,
             error="stale retry",
         )
     store.mark_outbox_dispatched(
         message_id="msg-token",
         worker_id="reused-worker",
         claim_token="new-token",
-        now=datetime(2026, 8, 12, tzinfo=timezone.utc),
     )
 
     token_updates = [
@@ -423,6 +423,12 @@ def test_postgres_ack_and_retry_require_the_current_claim_token():
         "old-token",
         "new-token",
     ]
+    expected_time = current_time.isoformat()
+    assert all(params[-1] == expected_time for _, params in token_updates)
+    retry_params = next(
+        params for query, params in token_updates if "available_at = %s" in query
+    )
+    assert retry_params[0] == expected_time
 
 
 def test_postgres_outbox_reader_rejects_unknown_persisted_schema_version():
