@@ -33,6 +33,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F2-01 Fixed/Blueprint Bot Providers | `019ff4e4-9f9c-7730-b987-80d498144ebc` | `completed` | `merged` | `codex/f2-01-bot-providers` | `3803ae6` | `a7e26def5fc5c05dd7bed13fadeb1d6fa834c017` | [F2-01 handoff](handoffs/F2-01.md) | Worker: bot/runtime focused 26 passed；simulator compileall；no full backend by fast-path policy | F2-02、F2-04、F2-05 | F2-04 continuous table after F1-07 |
 | F3-03 Formula/L0 Advisor | `019ff500-f1ba-7af2-9663-5c4aa1826bf6` | `completed` | `merged` | `codex/f3-03-formula-advisor` | `6d94bb4` | `903024a5e288810591ac0207fd747d770c166950` | [F3-03 handoff](handoffs/F3-03.md) | Worker: 38 focused passed；compileall；1,000 samples p95 0.0137ms | F3-06 | Wire L0 result into table API/advisor UI |
 | F2-04 Continuous Table API | `019ff505-db5d-7323-b396-a75ade283897` | `in_progress` | `in_progress` | `codex/f2-04-continuous-table-api` | `dd7757e80e1038e38e91c4b6ea8090fb4d00242c` | — | — | — | — | Hero + 5 bots, durable consecutive hands, reconnect, safe projection |
+| F4-01 Session Stats Projection | `019ff508-1e0f-7ec2-a536-ff90eab7836a` | `in_progress` | `in_progress` | `codex/f4-01-session-stats` | `a5c2e2bf1fde44172253f367a91b3e87b5cae46b` | — | — | — | — | VPIP/PFR/3Bet per stable seat; idempotent rebuildable projection |
 
 ## 下一入口
 
@@ -76,6 +77,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F1-07 唯一 P1 修复经原审查上下文极窄 re-review PASS；完整出口证据沿用 backend 480 passed/10 skipped、1,000-hand soak 24.25s，修复 focused 2 passed。四项交付/handoff 提交以 `66a53ac` 至 `5002f3d` 集成；F1 authoritative session 出口门完成，解锁 F2 连续桌。
 - 2026-08-12：F2-04 可体验连续桌 API 从已验收基线 `dd7757e` 派发至任务 `019ff505-db5d-7323-b396-a75ade283897`；与 F3-03 并行且文件所有权分离，使用 Terra/high、真实 SQLite focused tests，不重复完整 backend 门。
 - 2026-08-12：F3-03 Git/handoff 事实核验后仅修正错误 thread ID；38 focused tests、compileall 和本机 1,000 样本 p95 0.0137ms 证据接受，无独立审查或全量测试。交付以 `21a7574`、`742ab7a`、`fa06693` 集成，解锁 L0 Advisor API/UI 接线。
+- 2026-08-12：第二实现槽继续派发 F4-01 会话统计投影至任务 `019ff508-1e0f-7ec2-a536-ff90eab7836a`；与 F2-04 API 文件所有权分离，使用 Terra/medium、真实 SQLite focused tests，目标是连续桌上线即有 VPIP/PFR/3Bet 数据池。
 
 ## 主控更新规则
 
