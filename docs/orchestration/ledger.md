@@ -24,17 +24,18 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 |---|---|---|---|---|---|---|---|---|---|---|
 | F0 Simulator Foundation | `019ff359-28b9-7630-992f-b22c82ab1686` | `completed` | `merged` | `codex/f0-simulator-foundation` | `71acce7` | `b0f13e34c3947dd790ada996554bc7216774411e` | [F0 handoff](handoffs/F0.md) | Backend 371 passed/8 skipped；compileall/pip check；17 F0 tests；3,000 evaluator samples/0 mismatch；frontend not measured | F1-01 | F1-01 Authoritative Session ownership/config |
 | F1-01 Authoritative Session | `019ff3b0-f805-7ff3-b510-ff5e778bcaf0` | `completed` | `merged` | `codex/f1-01-authoritative-session` | `8dde576a0818be554a38e0420b025d4cd3bb51a7` | `141b1c57872353a8498f3aedba021e3726318315` | [F1-01 handoff](handoffs/F1-01.md) | Worker: backend 381 passed/8 skipped、27 focused passed、compileall/pip check；Controller: 18 session/contract/replay passed | F1-02 | F1-02 durable event append |
-| F1-02 Durable Event Append | `019ff3c7-554f-7c60-8b96-5e521dd617c9` | `in_progress` | `in_progress` | 首次提交时由 Worker 建立 | `6840ed5a5488b6af6681e1a9f565c49cfb7b8cbe` | — | `handoffs/F1-02.md`（待回传） | 待 Worker 实测 | — | F1-03/F1-04 only after acceptance |
+| F1-02 Durable Event Append | `019ff3c7-554f-7c60-8b96-5e521dd617c9` | `completed` | `merged` | `codex/f1-02-durable-hand-event-append` | `6840ed5a5488b6af6681e1a9f565c49cfb7b8cbe` | `00c1fd6d019eb4a3ed285701eb560fdcc0416c59` | [F1-02 handoff](handoffs/F1-02.md) | Worker: backend 395 passed/9 skipped、14 focused passed、offline PG SQL/compileall/pip check；Controller: 14 passed/9 live-PG skipped | F1-03、F1-04 | F1-03 PokerKit orchestrator first |
 
 ## 下一入口
 
-`F1-02`：实现 durable hand-event append/read port、SQLite/PostgreSQL adapters、唯一约束与 expected-sequence 原子追加。F1-01 已验收并进入 `codex/simulator-rebuild`；F1-03/F1-04 必须等待 F1-02 主控验收。
+`F1-03`：实现 command → PokerKit-backed reducer → atomic append，保证每个已接受动作重新经规则权威校验、筹码守恒与固定 seed fingerprint。F1-04 同样已解锁，但为控制额度与集成复杂度，等待 F1-03 进入稳定实现后再启动。
 
 ## 主控验收记录
 
 - 2026-08-12：F0 交付提交 `b0f13e3` 与治理提交 `53d99c3` 构成从基线 `71acce7` 开始的严格线性提交链；handoff 的 31 个交付文件与 Git diff 一致。
 - 2026-08-12：F0 已快进进入 `codex/simulator-rebuild`。主控接受任务实测的后端、compileall、pip check 与 evaluator 证据；前端仍明确为继承基线、非 F0 实测。
 - 2026-08-12：F1-01 handoff 与 4 个交付文件一致；Worker 完整后端门为 381 passed/8 skipped，主控复跑 18 个 session/contract/replay 测试通过。因中央台账提交使分支分叉，交付与 handoff 分别以 `3492a68`、`aa2afc2` 线性 cherry-pick 进入集成分支，来源交付 head 保留为 `141b1c5`。
+- 2026-08-12：F1-02 handoff 与 10 个交付文件一致；Worker 完整后端门为 395 passed/9 skipped，主控复跑 SQLite/PostgreSQL 专项为 14 passed/9 live-PG skipped。交付与 handoff 以 `bd8de22`、`f94a320` 进入集成分支；live PostgreSQL 仍明确为未实测风险。
 
 ## 主控更新规则
 
