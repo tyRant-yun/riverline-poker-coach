@@ -23,6 +23,15 @@ from .replay import (
     validate_hand_event_stream,
 )
 from .observation import build_observation
+from .formula_advisor import (
+    FormulaAdvisor,
+    FormulaAdvisorFactory,
+    FormulaAdvisorInputsV1,
+    FormulaAdvisorResultV1,
+    FormulaLatencyV1,
+    FormulaRecommendationV1,
+    LegalActionBoundV1,
+)
 from .bot_runtime import (
     BotDecisionProvider,
     BotRuntime,
@@ -116,6 +125,13 @@ __all__ = [
     "scenario_from_events",
     "validate_hand_event_stream",
     "build_observation",
+    "FormulaAdvisor",
+    "FormulaAdvisorFactory",
+    "FormulaAdvisorInputsV1",
+    "FormulaAdvisorResultV1",
+    "FormulaLatencyV1",
+    "FormulaRecommendationV1",
+    "LegalActionBoundV1",
     "BotDecisionProvider",
     "BotRuntime",
     "FixedPolicyProvider",
