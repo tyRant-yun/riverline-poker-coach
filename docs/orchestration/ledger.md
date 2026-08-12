@@ -10,6 +10,7 @@
 
 | Controller state | 含义 |
 |---|---|
+| `in_progress` | Worker 已派发并正在独立 worktree 执行 |
 | `pending_acceptance` | Worker 已回传，主控尚未验收/合并 |
 | `accepted` | 主控已复核并接受交付事实 |
 | `merged` | 已进入指定集成目标，依赖可按台账解锁 |
@@ -19,9 +20,10 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 
 ## 执行台账
 
-| Task | Worker status | Controller state | Branch | Base | Delivery head | Handoff | Quality evidence | Dependencies unlocked | Recommended next |
-|---|---|---|---|---|---|---|---|---|---|
-| F0 Simulator Foundation | `completed` | `merged` | `codex/f0-simulator-foundation` | `71acce7` | `b0f13e34c3947dd790ada996554bc7216774411e` | [F0 handoff](handoffs/F0.md) | Backend 371 passed/8 skipped；compileall/pip check；17 F0 tests；3,000 evaluator samples/0 mismatch；frontend not measured | F1-01 | F1-01 Authoritative Session ownership/config |
+| Task | Thread | Worker status | Controller state | Branch | Base | Delivery head | Handoff | Quality evidence | Dependencies unlocked | Recommended next |
+|---|---|---|---|---|---|---|---|---|---|---|
+| F0 Simulator Foundation | `019ff359-28b9-7630-992f-b22c82ab1686` | `completed` | `merged` | `codex/f0-simulator-foundation` | `71acce7` | `b0f13e34c3947dd790ada996554bc7216774411e` | [F0 handoff](handoffs/F0.md) | Backend 371 passed/8 skipped；compileall/pip check；17 F0 tests；3,000 evaluator samples/0 mismatch；frontend not measured | F1-01 | F1-01 Authoritative Session ownership/config |
+| F1-01 Authoritative Session | `019ff3b0-f805-7ff3-b510-ff5e778bcaf0` | `in_progress` | `in_progress` | 首次提交时由 Worker 建立 | `8dde576a0818be554a38e0420b025d4cd3bb51a7` | — | `handoffs/F1-01.md`（待回传） | 待 Worker 实测 | — | F1-02 only after acceptance |
 
 ## 下一入口
 
