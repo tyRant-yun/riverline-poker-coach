@@ -74,7 +74,7 @@ def _events(tmp_path, *, stacks=(10_000,) * 6, sitting_out=(), actions=()):
 def test_authoritative_events_phh_round_trip_preserves_public_replay_facts(tmp_path, stacks, sitting_out, actions):
     events, expected = _events(tmp_path, stacks=stacks, sitting_out=sitting_out, actions=actions)
     codec = HandHistoryCodec()
-    text = codec.export(events)
+    text = codec.export(events, visibility="authoritative_archive")
     imported = codec.import_phh(text, imported_at=datetime(2026, 8, 12, tzinfo=timezone.utc))
     from poker_coach.simulator import replay_hand
     actual = replay_hand(imported.events).state
@@ -85,6 +85,43 @@ def test_authoritative_events_phh_round_trip_preserves_public_replay_facts(tmp_p
     assert actual.payouts == expected.payouts
     assert actual.fingerprint == expected.fingerprint
     assert [event.source for event in imported.events] == [event.source for event in events]
+
+
+def test_default_export_redacts_private_hole_cards_but_archive_is_explicit(tmp_path):
+    events, _ = _events(
+        tmp_path,
+        actions=((3, "fold", None, "none"), (4, "fold", None, "none"), (5, "fold", None, "none"), (0, "fold", None, "none"), (1, "fold", None, "none")),
+    )
+    codec = HandHistoryCodec()
+
+    public = codec.export(events)
+    archive = codec.export(events, visibility="authoritative_archive")
+
+    assert "d dh" not in public
+    assert "d dh" in archive
+
+
+def test_import_rejects_settlement_mismatch_or_potential_rake(tmp_path):
+    events, _ = _events(
+        tmp_path,
+        actions=((3, "fold", None, "none"), (4, "fold", None, "none"), (5, "fold", None, "none"), (0, "fold", None, "none"), (1, "fold", None, "none")),
+    )
+    archive = HandHistoryCodec().export(events, visibility="authoritative_archive")
+
+    with pytest.raises(PhhCodecError) as reduced:
+        HandHistoryCodec().import_phh(archive.replace("finishing_stacks = [10000, 9950, 10050, 10000, 10000, 10000]", "finishing_stacks = [9950, 9950, 10050, 10000, 10000, 10000]"))
+    assert reduced.value.code == "potential_rake"
+
+    with pytest.raises(PhhCodecError) as winnings:
+        HandHistoryCodec().import_phh(archive.replace("winnings = [0, 0, 50, 0, 0, 0]", "winnings = [0, 0, 0, 0, 0, 0]"))
+    assert winnings.value.code == "settlement_mismatch"
+
+    missing = "\n".join(
+        line for line in archive.splitlines() if not line.startswith("finishing_stacks =")
+    )
+    with pytest.raises(PhhCodecError) as absent:
+        HandHistoryCodec().import_phh(missing)
+    assert absent.value.code == "settlement_facts_missing"
 
 
 def test_import_rejects_invalid_or_information_insufficient_phh():

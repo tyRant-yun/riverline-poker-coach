@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import NAMESPACE_URL, uuid5
 
 from pydantic import Field
@@ -54,8 +55,16 @@ class HandHistoryCodec:
     producer = "riverline-phh-codec"
     producer_version = "1.0.0"
 
-    def export(self, events: Sequence[HandEventV1]) -> str:
-        """Project completed authoritative facts to PokerKit's PHH serializer."""
+    def export(
+        self,
+        events: Sequence[HandEventV1],
+        *,
+        visibility: Literal["public", "authoritative_archive"] = "public",
+    ) -> str:
+        """Project completed facts without private cards unless archival is explicit."""
+
+        if visibility not in {"public", "authoritative_archive"}:
+            raise PhhCodecError("invalid_export_visibility", "unknown PHH export visibility")
 
         stream = validate_hand_event_stream(events)
         replayed = replay_hand(stream)
@@ -68,7 +77,10 @@ class HandHistoryCodec:
         actions: list[str] = []
         for event in stream[1:]:
             payload = event.payload
-            if isinstance(payload, HoleCardsRecordedPayloadV1):
+            if (
+                isinstance(payload, HoleCardsRecordedPayloadV1)
+                and visibility == "authoritative_archive"
+            ):
                 actions.append(
                     f"d dh p{seat_to_player[payload.seat_id] + 1} {''.join(payload.cards)}"
                 )
@@ -119,6 +131,7 @@ class HandHistoryCodec:
             seats=list(active),
             seat_count=started.table_size,
             finishing_stacks=[replayed.state.stacks[seat] for seat in active],
+            winnings=[replayed.state.payouts.get(seat, 0) for seat in active],
             user_defined_fields=metadata,
         )
         # Exercise PokerKit's own PHH serializer/parser before returning a
@@ -221,6 +234,7 @@ class HandHistoryCodec:
             raise PhhCodecError("authoritative_replay_rejected", str(exc)) from exc
         if replayed.state.hand_in_progress:
             raise PhhCodecError("incomplete_hand", "PHH import requires a completed hand")
+        _validate_standard_settlement(history, replayed, active)
         live = set(active) - {
             payload.actor_seat
             for payload in payloads
@@ -323,6 +337,39 @@ def _uniform_ante(antes: list[int]) -> int:
     if len(set(antes)) != 1 or antes[0] < 0:
         raise PhhCodecError("unsupported_ante", "only uniform antes are supported")
     return int(antes[0])
+
+
+def _validate_standard_settlement(
+    history: object,
+    replayed: object,
+    active: tuple[int, ...],
+) -> None:
+    """Reject a PHH that reports a settlement other than no-rake PokerKit facts."""
+
+    finishing = getattr(history, "finishing_stacks", None)
+    winnings = getattr(history, "winnings", None)
+    if finishing is None or winnings is None:
+        raise PhhCodecError(
+            "settlement_facts_missing",
+            "completed PHH import requires finishing_stacks and winnings",
+        )
+    if len(finishing) != len(active) or len(winnings) != len(active):
+        raise PhhCodecError(
+            "settlement_facts_missing",
+            "PHH settlement arrays must align with active seats",
+        )
+    if sum(finishing) != sum(history.starting_stacks):
+        raise PhhCodecError(
+            "potential_rake",
+            "PHH final chips differ from starting chips; rake is unsupported",
+        )
+    expected_stacks = [replayed.state.stacks[seat] for seat in active]
+    expected_winnings = [replayed.state.payouts.get(seat, 0) for seat in active]
+    if list(finishing) != expected_stacks or list(winnings) != expected_winnings:
+        raise PhhCodecError(
+            "settlement_mismatch",
+            "PHH finishing_stacks or winnings disagree with no-rake authoritative replay",
+        )
 
 
 def _payload_from_phh_action(
