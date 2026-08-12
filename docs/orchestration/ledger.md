@@ -31,6 +31,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F1-05 PHH Adapter | `019ff4c4-26dd-7020-b60c-84f097bae0ba` | `completed` | `merged` | `codex/f1-05-phh-adapter` | `0780d2d960dc2dea87220d2f9cd92205cd048e6e` | `b3bd7dc5e13a74337408af8775e715f8dcda1197` | [F1-05 handoff](handoffs/F1-05.md) | Worker: focused 7 passed；backend 477 passed/10 skipped；compileall/pip check；极窄 P1 re-review PASS | F1-07 | F1-07 recovery/seeded soak exit gate |
 | F1-07 Recovery/Soak Exit Gate | `019ff4e1-9866-7f93-837e-0dfc797034a8` | `in_progress` | `in_progress` | `codex/f1-07-recovery-soak` | `8f3501c2c5ac8b35d7a45a716e6784bcdf5e8d67` | — | — | — | — | F1 exit only: restart/rebuild/fingerprint/1,000-hand soak/rollback |
 | F2-01 Fixed/Blueprint Bot Providers | `019ff4e4-9f9c-7730-b987-80d498144ebc` | `completed` | `merged` | `codex/f2-01-bot-providers` | `3803ae6` | `a7e26def5fc5c05dd7bed13fadeb1d6fa834c017` | [F2-01 handoff](handoffs/F2-01.md) | Worker: bot/runtime focused 26 passed；simulator compileall；no full backend by fast-path policy | F2-02、F2-04、F2-05 | F2-04 continuous table after F1-07 |
+| F3-03 Formula/L0 Advisor | `019ff500-f1ba-7af2-9663-5c4aa1826bf6` | `in_progress` | `in_progress` | `codex/f3-03-formula-advisor` | `6d94bb4` | — | — | — | — | Pot/call cost/pot odds/SPR/legal sizes; no API/UI/equity/range |
 
 ## 下一入口
 
@@ -69,6 +70,8 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F1-07 从已验收基线 `8f3501c` 派发至任务 `019ff4e1-9866-7f93-837e-0dfc797034a8`；使用 Sol/high 处理窄范围恢复与规则出口门。任务采用精确文件清单与批处理命令，不加载全部规划/ADR/handoff；F2 尚不与同一规则链并发。
 - 2026-08-12：启用第二实现槽，将已由 F1 Observation/BotRuntime 解锁且不触碰 F1-07 文件所有权的 F2-01 派发至任务 `019ff4e4-9f9c-7730-b987-80d498144ebc`，使用 Terra/medium、focused-only 门；这是受控并发，不提前启动 F2 session API。
 - 2026-08-12：F2-01 Git/handoff 事实核对后仅修正一次错误 thread ID，未做独立代码审查或重复全量测试；Worker focused 26 passed、simulator compileall 通过。交付以 `4eb47c5`、`6c0f057`、`83a6331` 集成，解锁 F2-02/F2-04/F2-05；F2-04 等待 F1-07 出口门后启动。
+- 2026-08-12：F1-07 首轮完整出口门为 backend 480 passed/10 skipped、1,000-hand soak 24.25s；独立极窄恢复审查仅发现一个 P1：`recover()` 在 terminal `hand_completed` 缺失时可能仅凭规则状态结束而提前结算/旋转按钮。交付未集成，已退回原 Worker 只补该负向测试与修复，不重跑 soak/完整门。
+- 2026-08-12：为避免 F1-07 单点修复阻塞产品体验路径，第二实现槽从已稳定 Observation/LegalAction seam 派发 F3-03 至任务 `019ff500-f1ba-7af2-9663-5c4aa1826bf6`；Terra/medium、focused-only，且不触碰 session/persistence/orchestrator。
 
 ## 主控更新规则
 
