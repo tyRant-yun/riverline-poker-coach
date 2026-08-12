@@ -63,6 +63,12 @@ from .orchestrator import (
     OpenHandCommandV1,
     PlayerActionCommandV1,
 )
+from .hand_lab_compat import (
+    HandLabCompatibilityError,
+    HandLabScenarioV1,
+    player_action_command_from_hand_lab,
+    scenario_from_authoritative_events,
+)
 from .recovery import (
     OutboxIntentV1,
     OutboxClaimError,
@@ -135,6 +141,10 @@ __all__ = [
     "GameOrchestrator",
     "OpenHandCommandV1",
     "PlayerActionCommandV1",
+    "HandLabCompatibilityError",
+    "HandLabScenarioV1",
+    "player_action_command_from_hand_lab",
+    "scenario_from_authoritative_events",
     "ProjectionIdentityV1",
     "ProjectionCheckpointV1",
     "ProjectionError",
