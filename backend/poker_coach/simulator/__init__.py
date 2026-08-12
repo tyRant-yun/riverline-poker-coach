@@ -54,6 +54,13 @@ from .event_store import (
     HandEventStoreFailure,
     RawHandEventV1,
 )
+from .orchestrator import (
+    GameCommandError,
+    GameCommandResultV1,
+    GameOrchestrator,
+    OpenHandCommandV1,
+    PlayerActionCommandV1,
+)
 
 __all__ = [
     "AmountSemanticsV1",
@@ -100,4 +107,9 @@ __all__ = [
     "HandEventStoreError",
     "HandEventStoreFailure",
     "RawHandEventV1",
+    "GameCommandResultV1",
+    "GameCommandError",
+    "GameOrchestrator",
+    "OpenHandCommandV1",
+    "PlayerActionCommandV1",
 ]

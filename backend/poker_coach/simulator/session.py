@@ -12,7 +12,7 @@ from typing import Annotated, Literal
 
 from pydantic import ConfigDict, Field, StrictInt, StrictStr, model_validator
 
-from poker_coach.domain.models import DomainModel, PositiveChipAmount, SeatNumber
+from poker_coach.domain.models import ChipAmount, DomainModel, PositiveChipAmount, SeatNumber
 
 
 SessionId = Annotated[
@@ -44,7 +44,7 @@ class SessionSeatV1(DomainModel):
     model_config = ConfigDict(frozen=True)
 
     seat_id: SeatNumber
-    stack: PositiveChipAmount
+    stack: ChipAmount
     sitting_out: bool = False
 
 
@@ -205,7 +205,12 @@ class GameSession(DomainModel):
         )
         return self._replace(hand_sequence=sequence, active_hand=active_hand)
 
-    def complete_active_hand(self, *, hand_id: str) -> GameSession:
+    def complete_active_hand(
+        self,
+        *,
+        hand_id: str,
+        ending_stacks: dict[int, int] | None = None,
+    ) -> GameSession:
         """Close the active hand and rotate the button for the following hand.
 
         This is an ownership transition only.  F1-03 must invoke it only after
@@ -218,10 +223,41 @@ class GameSession(DomainModel):
             raise SessionLifecycleError(
                 "hand_ownership_mismatch", "hand ID is not the session's active hand"
             )
+        topology = self.topology
+        if ending_stacks is not None:
+            active_seats = {seat.seat_id for seat in self.active_hand.seats}
+            if set(ending_stacks) != active_seats:
+                raise SessionLifecycleError(
+                    "settlement_seat_mismatch",
+                    "ending stacks must contain exactly the active hand seats",
+                )
+            if any(amount < 0 for amount in ending_stacks.values()):
+                raise SessionLifecycleError(
+                    "invalid_ending_stack", "ending stacks must be non-negative"
+                )
+            opening_total = sum(
+                seat.starting_stack for seat in self.active_hand.seats
+            )
+            if sum(ending_stacks.values()) != opening_total:
+                raise SessionLifecycleError(
+                    "chip_conservation",
+                    "ending stacks must conserve the active hand's opening chips",
+                )
+            topology = SeatTopologyV1(
+                seats=tuple(
+                    SessionSeatV1(
+                        seat_id=seat.seat_id,
+                        stack=ending_stacks.get(seat.seat_id, seat.stack),
+                        sitting_out=seat.sitting_out,
+                    )
+                    for seat in self.topology.seats
+                )
+            )
         return self._replace(
             button_seat=self._next_participating_button(),
             completed_hand_ids=(*self.completed_hand_ids, self.active_hand.hand_id),
             active_hand=None,
+            topology=topology,
         )
 
     def _hand_id_for(self, sequence: int) -> str:

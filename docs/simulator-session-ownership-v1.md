@@ -23,3 +23,16 @@ F1-01 does not deal cards, post blinds, validate actions, calculate settlement,
 write events, or update stacks.  F1-03's PokerKit-backed orchestrator must perform
 those rule transitions and may only close this seam after it has accepted a hand
 completion.
+
+## F1-03 settlement stack seam
+
+`GameSession.complete_active_hand(..., ending_stacks=...)` accepts only the
+PokerKit-replayed final stacks for exactly the active hand seats.  The transition
+rejects missing/extra seats, negative stacks, or any change to the active hand's
+total chips, then immutably replaces those session seat stacks while retaining
+sitting-out seats unchanged.  Omitting `ending_stacks` preserves the F1-01
+ownership-only behavior for backward compatibility.
+
+This is an in-memory aggregate transition, not a durable session repository.
+F1-03 therefore proves single-hand event recovery and an explicit post-settlement
+handoff, but it does not claim crash-safe cross-hand session progression.
