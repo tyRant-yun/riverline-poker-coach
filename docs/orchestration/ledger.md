@@ -21,11 +21,16 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 
 | Task | Worker status | Controller state | Branch | Base | Delivery head | Handoff | Quality evidence | Dependencies unlocked | Recommended next |
 |---|---|---|---|---|---|---|---|---|---|
-| F0 Simulator Foundation | `completed` | `pending_acceptance` | `codex/f0-simulator-foundation` | `71acce7` | `b0f13e34c3947dd790ada996554bc7216774411e` | [F0 handoff](handoffs/F0.md) | Backend 371 passed/8 skipped；compileall/pip check；17 F0 tests；3,000 evaluator samples/0 mismatch；frontend not measured | F1-01 after controller acceptance | F1-01 Authoritative Session ownership/config |
+| F0 Simulator Foundation | `completed` | `merged` | `codex/f0-simulator-foundation` | `71acce7` | `b0f13e34c3947dd790ada996554bc7216774411e` | [F0 handoff](handoffs/F0.md) | Backend 371 passed/8 skipped；compileall/pip check；17 F0 tests；3,000 evaluator samples/0 mismatch；frontend not measured | F1-01 | F1-01 Authoritative Session ownership/config |
 
 ## 下一入口
 
-`F1-01`：定义 `GameSession`、`HandId`、`SessionId` 所有权，冻结 6-max 100BB no-ante/no-rake table configuration，并验证底层 2–8 seat topology。依赖：主控验收 F0 contracts/ADRs/handoff；它不授权提前启动 F1-02 或其他并行阶段。
+`F1-01`：定义 `GameSession`、`HandId`、`SessionId` 所有权，冻结 6-max 100BB no-ante/no-rake table configuration，并验证底层 2–8 seat topology。F0 contracts/ADRs/handoff 已由主控验收并快进至 `codex/simulator-rebuild@53d99c3`；它不授权提前启动 F1-02 或其他并行阶段。
+
+## 主控验收记录
+
+- 2026-08-12：F0 交付提交 `b0f13e3` 与治理提交 `53d99c3` 构成从基线 `71acce7` 开始的严格线性提交链；handoff 的 31 个交付文件与 Git diff 一致。
+- 2026-08-12：F0 已快进进入 `codex/simulator-rebuild`。主控接受任务实测的后端、compileall、pip check 与 evaluator 证据；前端仍明确为继承基线、非 F0 实测。
 
 ## 主控更新规则
 
