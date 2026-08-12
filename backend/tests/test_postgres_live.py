@@ -15,7 +15,9 @@ FastAPI flow over PostgreSQL.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import os
+from threading import Barrier
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,8 +26,9 @@ from poker_coach.analysis import analyze_scenario
 from poker_coach.api import AppConfig, create_app
 from poker_coach.domain.models import ScenarioSpec
 from poker_coach.learning import LearningService
-from poker_coach.persistence import PostgresStore, SQLiteStore
+from poker_coach.persistence import PostgresHandEventStore, PostgresStore, SQLiteStore
 from poker_coach.rules import PokerKitAdapter
+from poker_coach.simulator import ExpectedSequenceConflict, HandEventV1, RawHandEventV1
 
 PG_URL = os.getenv("POKER_COACH_TEST_PG_URL")
 
@@ -143,6 +146,66 @@ def test_live_schema_initialization_and_migrations(pg_store):
         "strategy_artifacts",
     } <= tables
     assert migrations == [1, 2, 3, 4]
+
+
+def test_live_hand_event_append_round_trip_and_same_expected_sequence_race(pg_store):
+    first = PostgresHandEventStore(PG_URL)
+    second = PostgresHandEventStore(PG_URL)
+    barrier = Barrier(2)
+
+    def event(event_id: str) -> RawHandEventV1:
+        return RawHandEventV1.from_event(
+            HandEventV1.model_validate(
+                {
+                    "schemaVersion": 1,
+                    "eventId": event_id,
+                    "handId": "live-session:hand:1",
+                    "sequence": 1,
+                    "timestamp": "2026-08-12T00:00:01Z",
+                    "source": "fixture",
+                    "provenance": {
+                        "producer": "riverline-live-tests",
+                        "producerVersion": "1.0.0",
+                        "correlationId": "live-session",
+                    },
+                    "payload": {
+                        "kind": "hand_started",
+                        "ruleset": "nlhe",
+                        "tableSize": 2,
+                        "buttonSeat": 0,
+                        "smallBlind": 50,
+                        "bigBlind": 100,
+                        "startingStacks": {"0": 10_000, "1": 10_000},
+                        "rngSeed": 20260812,
+                    },
+                }
+            )
+        )
+
+    def append(store, event_id):
+        barrier.wait()
+        try:
+            return store.append(
+                hand_id="live-session:hand:1",
+                expected_sequence=0,
+                events=(event(event_id),),
+            )
+        except ExpectedSequenceConflict as exc:
+            return exc
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = tuple(
+                executor.map(append, (first, second), ("evt-live-1", "evt-live-2"))
+            )
+
+        assert sum(isinstance(item, ExpectedSequenceConflict) for item in outcomes) == 1
+        stored = first.read("live-session:hand:1")
+        assert len(stored) == 1
+        assert stored[0].event.provenance.correlation_id == "live-session"
+    finally:
+        first.close()
+        second.close()
 
 
 def test_live_scenario_crud_parity_with_sqlite(pg_store, tmp_path):
@@ -337,7 +400,7 @@ def test_live_alembic_migration_upgrade_and_downgrade(pg_store):
             cursor.execute("SELECT version_num FROM alembic_version")
             version = cursor.fetchone()[0]
     assert {"scenarios", "analysis_runs", "learning_profiles"} <= tables
-    assert version == "0001"
+    assert version == "0002"
 
     # The migrated schema must satisfy the store contract.
     store = PostgresStore(PG_URL)

@@ -43,6 +43,17 @@ from .session import (
     SessionLifecycleError,
     SessionSeatV1,
 )
+from .event_store import (
+    ExpectedSequenceConflict,
+    HandEventAppendResult,
+    HandEventAppendRetryable,
+    HandEventBatchError,
+    HandEventIdentityConflict,
+    HandEventStore,
+    HandEventStoreError,
+    HandEventStoreFailure,
+    RawHandEventV1,
+)
 
 __all__ = [
     "AmountSemanticsV1",
@@ -80,4 +91,13 @@ __all__ = [
     "SessionId",
     "SessionLifecycleError",
     "SessionSeatV1",
+    "ExpectedSequenceConflict",
+    "HandEventAppendResult",
+    "HandEventAppendRetryable",
+    "HandEventBatchError",
+    "HandEventIdentityConflict",
+    "HandEventStore",
+    "HandEventStoreError",
+    "HandEventStoreFailure",
+    "RawHandEventV1",
 ]
