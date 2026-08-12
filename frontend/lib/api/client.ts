@@ -19,6 +19,7 @@ import type {
   SolveJob,
   SolverSpotPayload,
   StateResponse,
+  ContinuousTableResponse,
   TeachingResponse,
 } from "../../types/api";
 import type { RangeBeliefTraceResponse, RangeBeliefView } from "../../types/rangeBelief";
@@ -149,4 +150,14 @@ export const practiceApi = {
 export const handReviewApi = {
   review: (payload: { scenario: Scenario; solverJobs?: Record<string, string> }) =>
     request<HandReviewApiResponse>("/v1/hand-reviews", payload),
+};
+
+export const continuousTableApi = {
+  create: (payload: { commandId: string; seed?: number; botProfile: string; sessionId?: string }) =>
+    request<ContinuousTableResponse>("/v1/tables", { schemaVersion: 1, ...payload }),
+  get: (sessionId: string) => requestGet<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}`),
+  action: (sessionId: string, payload: Record<string, unknown>) =>
+    request<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/actions`, { schemaVersion: 1, ...payload }),
+  nextHand: (sessionId: string, payload: { commandId: string; expectedRevision: number }) =>
+    request<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/hands`, { schemaVersion: 1, ...payload }),
 };

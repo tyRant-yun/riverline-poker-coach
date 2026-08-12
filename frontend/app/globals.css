@@ -852,6 +852,17 @@ select { width: 100%; }
 
 footer { color: var(--color-text-muted); font-size: 11px; padding: 20px 3px 0; }
 
+/* ---- Continuous polling table (F2-06) ---- */
+.continuous-table { display: grid; gap: 14px; }
+.continuous-table .panel-heading { display: flex; justify-content: space-between; align-items: center; }
+.continuous-table .panel-heading h2 { margin: 0; }
+.continuous-table .panel-heading p { margin: 4px 0 0; color: var(--color-text-muted); font-size: 12px; }
+.continuous-table__details { display: grid; grid-template-columns: 1fr 1fr 0.9fr; gap: 12px; }
+.continuous-table__details section, .continuous-table__details aside { margin: 0; }
+.continuous-table__details h3 { font-size: 12px; margin: 0 0 8px; }
+.continuous-table__details ol, .continuous-table__details ul { margin: 0; padding-left: 18px; color: var(--color-text-muted); font-size: 12px; line-height: 1.6; }
+@media (max-width: 900px) { .continuous-table__details { grid-template-columns: 1fr; } }
+
 /* ---- Responsive ---- */
 @media (max-width: 1299px) {
   .workspace { grid-template-columns: 290px minmax(0, 1fr) 290px; gap: 16px; }

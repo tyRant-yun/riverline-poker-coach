@@ -76,6 +76,7 @@ import TeachingPanel from "../features/coach/TeachingPanel";
 import PracticePanel from "../features/practice/PracticePanel";
 import SolverWorkspace from "../features/solver/SolverWorkspace";
 import WholeHandReviewPanel from "../features/review/WholeHandReviewPanel";
+import ContinuousTablePage from "../features/table/ContinuousTablePage";
 
 const initialScenario: Scenario = {
   schemaVersion: 1,
@@ -1318,6 +1319,7 @@ export default function Home() {
   return (
     <AppShell activeView={activeView} onViewChange={setActiveView}>
       {activeView === "handlab" && handLab}
+      {activeView === "table" && <ContinuousTablePage />}
       {activeView === "solver" && solverView}
       {activeView === "train" && trainView}
       {activeView === "library" && libraryView}
