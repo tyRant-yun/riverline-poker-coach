@@ -25,7 +25,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F0 Simulator Foundation | `019ff359-28b9-7630-992f-b22c82ab1686` | `completed` | `merged` | `codex/f0-simulator-foundation` | `71acce7` | `b0f13e34c3947dd790ada996554bc7216774411e` | [F0 handoff](handoffs/F0.md) | Backend 371 passed/8 skipped；compileall/pip check；17 F0 tests；3,000 evaluator samples/0 mismatch；frontend not measured | F1-01 | F1-01 Authoritative Session ownership/config |
 | F1-01 Authoritative Session | `019ff3b0-f805-7ff3-b510-ff5e778bcaf0` | `completed` | `merged` | `codex/f1-01-authoritative-session` | `8dde576a0818be554a38e0420b025d4cd3bb51a7` | `141b1c57872353a8498f3aedba021e3726318315` | [F1-01 handoff](handoffs/F1-01.md) | Worker: backend 381 passed/8 skipped、27 focused passed、compileall/pip check；Controller: 18 session/contract/replay passed | F1-02 | F1-02 durable event append |
 | F1-02 Durable Event Append | `019ff3c7-554f-7c60-8b96-5e521dd617c9` | `completed` | `merged` | `codex/f1-02-durable-hand-event-append` | `6840ed5a5488b6af6681e1a9f565c49cfb7b8cbe` | `00c1fd6d019eb4a3ed285701eb560fdcc0416c59` | [F1-02 handoff](handoffs/F1-02.md) | Worker: backend 395 passed/9 skipped、14 focused passed、offline PG SQL/compileall/pip check；Controller: 14 passed/9 live-PG skipped | F1-03、F1-04 | F1-03 PokerKit orchestrator first |
-| F1-03 PokerKit GameOrchestrator | `019ff3e3-bda6-7e21-903e-d4fe0611a5a9` | `in_progress` | `in_progress` | 首次提交时由 Worker 建立 | `91fb7f08d760753259f611284318b512c5f30ed4` | — | `handoffs/F1-03.md`（待回传） | 待 Worker 实测 | — | F1-04 after stable implementation; F1-05/F1-06 after acceptance |
+| F1-03 PokerKit GameOrchestrator | `019ff3e3-bda6-7e21-903e-d4fe0611a5a9` | `completed`（首轮） | `in_progress`（review fixes） | `codex/f1-03-pokerkit-game-orchestrator` | `91fb7f08d760753259f611284318b512c5f30ed4` | `edb3f69e4801a477100c517eef05e24a04610bfd`（待修订） | [F1-03 handoff](handoffs/F1-03.md)（待修订） | Worker: backend 417 passed/9 skipped；Controller review: 3 standards hard findings、2 spec P1 | — | 修复 bust-out、seed provenance、sparse seats 后重新验收 |
 
 ## 下一入口
 
@@ -37,6 +37,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F0 已快进进入 `codex/simulator-rebuild`。主控接受任务实测的后端、compileall、pip check 与 evaluator 证据；前端仍明确为继承基线、非 F0 实测。
 - 2026-08-12：F1-01 handoff 与 4 个交付文件一致；Worker 完整后端门为 381 passed/8 skipped，主控复跑 18 个 session/contract/replay 测试通过。因中央台账提交使分支分叉，交付与 handoff 分别以 `3492a68`、`aa2afc2` 线性 cherry-pick 进入集成分支，来源交付 head 保留为 `141b1c5`。
 - 2026-08-12：F1-02 handoff 与 10 个交付文件一致；Worker 完整后端门为 395 passed/9 skipped，主控复跑 SQLite/PostgreSQL 专项为 14 passed/9 live-PG skipped。交付与 handoff 以 `bd8de22`、`f94a320` 进入集成分支；live PostgreSQL 仍明确为未实测风险。
+- 2026-08-12：F1-03 首轮交付的 Git/handoff/测试证据一致，但合并前双轴审查发现 bust-out 后无法继续、seed 与持久化牌面未交叉验证、sparse active seat 与 F1-01 语义冲突等硬问题；未集成，已退回原 Worker 修订。
 
 ## 主控更新规则
 
