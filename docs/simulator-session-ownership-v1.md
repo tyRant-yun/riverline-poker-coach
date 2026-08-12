@@ -14,7 +14,10 @@ does not publish 2--5- or 7--8-max product modes.
 
 `SessionSeatV1.sitting_out` means the seat remains part of the table and retains
 its stack, but is excluded from the next hand and skipped during button rotation.
-At least two seats must participate.  An `ActiveHandV1` captures only the eligible
+A zero-stack seat likewise remains in the session but is not eligible for the
+next hand and is skipped by the button.  Starting another hand requires at least
+two funded, non-sitting-out seats and otherwise fails with
+`insufficient_funded_seats`.  An `ActiveHandV1` captures only the eligible
 seats and immutable opening-stack snapshots.  Its deterministic `HandId` is
 `{SessionId}:hand:{sequence}`, so a hand can belong to exactly one session and a
 completed session cannot reuse a hand sequence or ID.

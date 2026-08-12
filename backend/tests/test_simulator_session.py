@@ -163,3 +163,44 @@ def test_session_seam_never_silently_changes_session_or_hand_stack_ownership():
     assert tuple(seat.stack for seat in opened.topology.seats) == original_stacks
     assert tuple(seat.stack for seat in closed.topology.seats) == original_stacks
     assert snapshot_stacks == original_stacks
+
+
+def test_busted_seat_remains_in_session_but_is_excluded_from_the_next_hand():
+    opened = _session().start_next_hand()
+    assert opened.active_hand is not None
+
+    settled = opened.complete_active_hand(
+        hand_id=opened.active_hand.hand_id,
+        ending_stacks={0: 0, 1: 20_000, 2: 10_000, 3: 10_000, 4: 10_000, 5: 10_000},
+    )
+    next_hand = settled.start_next_hand()
+
+    assert settled.topology.seats[0].stack == 0
+    assert next_hand.active_hand is not None
+    assert tuple(seat.seat_id for seat in next_hand.active_hand.seats) == (1, 2, 3, 4, 5)
+
+
+def test_button_rotation_skips_a_zero_stack_seat():
+    opened = _session().start_next_hand()
+    assert opened.active_hand is not None
+
+    settled = opened.complete_active_hand(
+        hand_id=opened.active_hand.hand_id,
+        ending_stacks={0: 20_000, 1: 0, 2: 10_000, 3: 10_000, 4: 10_000, 5: 10_000},
+    )
+
+    assert settled.button_seat == 2
+
+
+def test_session_with_fewer_than_two_funded_seats_cannot_start_another_hand():
+    opened = _session().start_next_hand()
+    assert opened.active_hand is not None
+    settled = opened.complete_active_hand(
+        hand_id=opened.active_hand.hand_id,
+        ending_stacks={0: 60_000, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+    )
+
+    with pytest.raises(SessionLifecycleError) as caught:
+        settled.start_next_hand()
+
+    assert caught.value.code == "insufficient_funded_seats"

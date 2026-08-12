@@ -22,6 +22,8 @@ from poker_coach.domain.models import (
     Street,
 )
 
+from .contracts import SeededDealV1
+
 
 class ReplayError(ValueError):
     """A stable error raised when an event cannot be replayed legally."""
@@ -64,21 +66,13 @@ class _SeatMap:
     button_seat: int
 
 
-@dataclass(frozen=True)
-class SeededDeal:
-    """Project-owned result of PokerKit-validated deterministic dealing."""
-
-    hole_cards_by_seat: dict[int, tuple[str, str]]
-    board: tuple[str, ...]
-
-
 class PokerKitAdapter:
     """Translate ScenarioSpec events to and from one PokerKit state."""
 
     engine_name = "pokerkit"
     engine_version = package_version("pokerkit")
 
-    def deal_seeded(self, scenario: ScenarioSpec, *, rng_seed: int) -> SeededDeal:
+    def deal_seeded(self, scenario: ScenarioSpec, *, rng_seed: int) -> SeededDealV1:
         """Drive PokerKit's dealing state machine from one explicit RNG seed."""
 
         from pokerkit import Deck
@@ -111,7 +105,7 @@ class PokerKitAdapter:
             state.deal_board(cards)
             board.extend(_card_code(card) for card in cards)
 
-        return SeededDeal(
+        return SeededDealV1(
             hole_cards_by_seat={
                 seat: (cards[0], cards[1])
                 for seat, cards in hole_cards.items()

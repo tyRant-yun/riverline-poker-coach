@@ -66,9 +66,11 @@ class SeatTopologyV1(DomainModel):
 
     @property
     def participating_seats(self) -> tuple[SessionSeatV1, ...]:
-        """Seats eligible for the next hand; sitting-out seats retain their stack."""
+        """Funded, non-sitting-out seats eligible for the next hand."""
 
-        return tuple(seat for seat in self.seats if not seat.sitting_out)
+        return tuple(
+            seat for seat in self.seats if not seat.sitting_out and seat.stack > 0
+        )
 
 
 class FirstProductTableConfigV1(DomainModel):
@@ -192,6 +194,12 @@ class GameSession(DomainModel):
             raise SessionLifecycleError(
                 "hand_in_progress", "cannot start a hand while another hand is active"
             )
+        participating = self.topology.participating_seats
+        if len(participating) < 2:
+            raise SessionLifecycleError(
+                "insufficient_funded_seats",
+                "at least two funded, non-sitting-out seats are required",
+            )
         sequence = self.hand_sequence + 1
         active_hand = ActiveHandV1(
             session_id=self.session_id,
@@ -200,7 +208,7 @@ class GameSession(DomainModel):
             button_seat=self.button_seat,
             seats=tuple(
                 HandSeatSnapshotV1(seat_id=seat.seat_id, starting_stack=seat.stack)
-                for seat in self.topology.participating_seats
+                for seat in participating
             ),
         )
         return self._replace(hand_sequence=sequence, active_hand=active_hand)
@@ -254,7 +262,7 @@ class GameSession(DomainModel):
                 )
             )
         return self._replace(
-            button_seat=self._next_participating_button(),
+            button_seat=self._next_participating_button(topology),
             completed_hand_ids=(*self.completed_hand_ids, self.active_hand.hand_id),
             active_hand=None,
             topology=topology,
@@ -263,11 +271,13 @@ class GameSession(DomainModel):
     def _hand_id_for(self, sequence: int) -> str:
         return f"{self.session_id}:hand:{sequence}"
 
-    def _next_participating_button(self) -> int:
-        seats = self.topology.seats
+    def _next_participating_button(
+        self, topology: SeatTopologyV1 | None = None
+    ) -> int:
+        seats = (topology or self.topology).seats
         for offset in range(1, len(seats) + 1):
             candidate = (self.button_seat + offset) % len(seats)
-            if not seats[candidate].sitting_out:
+            if not seats[candidate].sitting_out and seats[candidate].stack > 0:
                 return candidate
         raise AssertionError("validated topology always has participating seats")
 

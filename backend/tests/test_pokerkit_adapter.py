@@ -1,7 +1,8 @@
 import pytest
+from pydantic import ValidationError
 
 from poker_coach.domain.models import ActionType, ScenarioSpec
-from poker_coach.rules import PokerKitAdapter, ReplayError
+from poker_coach.rules import PokerKitAdapter, ReplayError, SeededDealV1
 
 
 def scenario_with_history(action_history=None, board=None, villain_hole_cards=None, **extra):
@@ -27,6 +28,20 @@ def scenario_with_history(action_history=None, board=None, villain_hole_cards=No
         }
     payload.update(extra)
     return ScenarioSpec.model_validate(payload)
+
+
+def test_seeded_deal_v1_is_a_frozen_versioned_project_contract():
+    deal = PokerKitAdapter().deal_seeded(scenario_with_history(), rng_seed=20260812)
+
+    assert isinstance(deal, SeededDealV1)
+    assert deal.schema_version == 1
+    assert SeededDealV1.model_validate_json(deal.to_json()) == deal
+
+    with pytest.raises(ValidationError, match="frozen"):
+        deal.schema_version = 2
+
+    with pytest.raises(ValidationError):
+        SeededDealV1.model_validate({**deal.to_dict(), "schemaVersion": 2})
 
 
 def checkdown_history(*, river_action=None):

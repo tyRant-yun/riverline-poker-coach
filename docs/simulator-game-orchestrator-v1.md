@@ -7,6 +7,10 @@ the frozen `HandEventV1` payload union.  PokerKit remains the sole authority for
 deal order, actor order, legal actions, amount bounds, street transitions,
 all-in runout, side pots, winners, and payouts.
 
+The adapter exposes deterministic deals only through the project-owned,
+frozen, versioned `SeededDealV1` JSON contract.  No PokerKit state or upstream
+type crosses the adapter boundary.
+
 ## Commands
 
 - `OpenHandCommandV1` carries `sessionId`, `handId`, `commandId`,
@@ -18,13 +22,15 @@ all-in runout, side pots, winners, and payouts.
   action set and `none`/`cost`/`by`/`to` meanings are exactly the frozen
   `LegalActionV1` meanings; all-in is the legal bet/raise maximum endpoint.
 
-Before an action append, the orchestrator reads the complete durable hand,
-checks its opening facts against the supplied active session hand, rebuilds the
-PokerKit state, and validates actor/action/amount.  A street-closing action is
-batched with the PokerKit-requested seeded board deal.  A terminal action is
-batched with exactly one PokerKit-derived `hand_completed`.  Every batch is
-continuous, sourced as `game_orchestrator`, and carries producer, correlation,
-and command causation provenance.
+Before opening-command reconciliation or an action append, the orchestrator
+reads the complete durable hand, checks its opening facts against the supplied
+active session hand, regenerates the PokerKit seeded deal, and verifies every
+recorded hole card and board prefix against `HandStarted.rng_seed`.  It then
+rebuilds the PokerKit state and validates actor/action/amount.  A street-closing
+action is batched with the PokerKit-requested seeded board deal.  A terminal
+action is batched with exactly one PokerKit-derived `hand_completed`.  Every
+batch is continuous, sourced as `game_orchestrator`, and carries producer,
+correlation, and command causation provenance.
 
 ## Idempotency and conflicts
 
@@ -35,9 +41,10 @@ result and appends nothing.  Reusing it with a different intent fails with
 
 An `expected_sequence` conflict is never handled by changing the expected head
 and replaying a non-idempotent action.  The orchestrator rereads once: if the
-same command is now durable, it reconciles idempotently; otherwise it returns
-`append_conflict`.  Storage adapters retain responsibility for all-or-nothing
-batch commit.
+same command is now durable, it validates and reconciles idempotently;
+otherwise it returns `append_conflict`.  A reconciled opening command whose
+winner already completed the hand returns the settled successor session.
+Storage adapters retain responsibility for all-or-nothing batch commit.
 
 ## Recovery and current boundary
 

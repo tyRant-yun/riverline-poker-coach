@@ -126,6 +126,7 @@ class GameOrchestrator:
 
         durable = tuple(item.event for item in self._event_store.read(command.hand_id))
         if durable:
+            self._validate_seed_provenance(durable)
             self._validate_opening_facts(session, durable)
             caused = tuple(
                 event
@@ -156,12 +157,7 @@ class GameOrchestrator:
                     "command_id is already durable with a different opening intent",
                 )
             replayed = replay_hand(durable, adapter=self._adapter)
-            successor = session
-            if not replayed.state.hand_in_progress:
-                successor = session.complete_active_hand(
-                    hand_id=command.hand_id,
-                    ending_stacks=replayed.state.stacks,
-                )
+            successor = self._successor_for_replay(session, command.hand_id, replayed)
             return GameCommandResultV1(
                 session=successor,
                 appended_events=(),
@@ -229,10 +225,13 @@ class GameOrchestrator:
                     "append_conflict",
                     f"durable head advanced to {conflict.actual_sequence}; command was not retried",
                 ) from conflict
+            self._validate_seed_provenance(latest)
             self._validate_opening_facts(session, latest)
             reconciled = replay_hand(latest, adapter=self._adapter)
             return GameCommandResultV1(
-                session=session,
+                session=self._successor_for_replay(
+                    session, command.hand_id, reconciled
+                ),
                 appended_events=(),
                 replayed_hand=reconciled,
                 idempotent=True,
@@ -263,6 +262,7 @@ class GameOrchestrator:
             raise GameCommandError(
                 "hand_not_opened", "no durable opening facts exist for this hand"
             )
+        self._validate_seed_provenance(durable)
         if active is not None:
             self._validate_opening_facts(session, durable)
         caused = tuple(
@@ -303,12 +303,7 @@ class GameOrchestrator:
                     "command_id is already durable with a different intent",
                 )
             replayed = replay_hand(durable, adapter=self._adapter)
-            successor = session
-            if not replayed.state.hand_in_progress and active is not None:
-                successor = session.complete_active_hand(
-                    hand_id=command.hand_id,
-                    ending_stacks=replayed.state.stacks,
-                )
+            successor = self._successor_for_replay(session, command.hand_id, replayed)
             return GameCommandResultV1(
                 session=successor,
                 appended_events=(),
@@ -369,7 +364,7 @@ class GameOrchestrator:
             amount_semantics=command.amount_semantics,
         )
         payloads: list[object] = [action_payload]
-        event = self._events_for(
+        event_batch = self._events_for(
             hand_id=command.hand_id,
             session_id=command.session_id,
             command_id=command.command_id,
@@ -377,7 +372,7 @@ class GameOrchestrator:
             payloads=payloads,
             after_timestamp=durable[-1].timestamp,
         )
-        candidate = (*durable, *event)
+        candidate = (*durable, *event_batch)
         rule_result = self._adapter.replay(scenario_from_events(candidate))
         started = durable[0].payload
         assert isinstance(started, HandStartedPayloadV1)
@@ -403,7 +398,7 @@ class GameOrchestrator:
                     cards=seeded_deal.board[start:end],
                 )
             )
-            event = self._events_for(
+            event_batch = self._events_for(
                 hand_id=command.hand_id,
                 session_id=command.session_id,
                 command_id=command.command_id,
@@ -411,13 +406,13 @@ class GameOrchestrator:
                 payloads=payloads,
                 after_timestamp=durable[-1].timestamp,
             )
-            candidate = (*durable, *event)
+            candidate = (*durable, *event_batch)
             rule_result = self._adapter.replay(scenario_from_events(candidate))
 
         replayed = replay_hand(candidate, adapter=self._adapter)
         successor = session
         if not replayed.state.hand_in_progress:
-            event = self._events_for(
+            event_batch = self._events_for(
                 hand_id=command.hand_id,
                 session_id=command.session_id,
                 command_id=command.command_id,
@@ -431,7 +426,7 @@ class GameOrchestrator:
                 ),
                 after_timestamp=durable[-1].timestamp,
             )
-            replayed = replay_hand((*durable, *event), adapter=self._adapter)
+            replayed = replay_hand((*durable, *event_batch), adapter=self._adapter)
             successor = session.complete_active_hand(
                 hand_id=command.hand_id,
                 ending_stacks=replayed.state.stacks,
@@ -440,12 +435,13 @@ class GameOrchestrator:
             self._event_store.append(
                 hand_id=command.hand_id,
                 expected_sequence=command.expected_sequence,
-                events=tuple(RawHandEventV1.from_event(item) for item in event),
+                events=tuple(RawHandEventV1.from_event(item) for item in event_batch),
             )
         except ExpectedSequenceConflict as conflict:
             latest = tuple(
                 item.event for item in self._event_store.read(command.hand_id)
             )
+            self._validate_seed_provenance(latest)
             committed_action = next(
                 (
                     item
@@ -473,22 +469,29 @@ class GameOrchestrator:
                     f"durable head advanced to {conflict.actual_sequence}; command was not retried",
                 ) from conflict
             reconciled = replay_hand(latest, adapter=self._adapter)
-            reconciled_session = session
-            if not reconciled.state.hand_in_progress:
-                reconciled_session = session.complete_active_hand(
-                    hand_id=command.hand_id,
-                    ending_stacks=reconciled.state.stacks,
-                )
             return GameCommandResultV1(
-                session=reconciled_session,
+                session=self._successor_for_replay(
+                    session, command.hand_id, reconciled
+                ),
                 appended_events=(),
                 replayed_hand=reconciled,
                 idempotent=True,
             )
         return GameCommandResultV1(
             session=successor,
-            appended_events=event,
+            appended_events=event_batch,
             replayed_hand=replayed,
+        )
+
+    @staticmethod
+    def _successor_for_replay(
+        session: GameSession, hand_id: str, replayed: ReplayedHandV1
+    ) -> GameSession:
+        if replayed.state.hand_in_progress or session.active_hand is None:
+            return session
+        return session.complete_active_hand(
+            hand_id=hand_id,
+            ending_stacks=replayed.state.stacks,
         )
 
     def _validate_opening_facts(
@@ -527,6 +530,37 @@ class GameOrchestrator:
             raise GameCommandError(
                 "opening_facts_mismatch",
                 "durable hand opening facts do not match the active session hand",
+            )
+
+    def _validate_seed_provenance(
+        self, durable: Sequence[HandEventV1]
+    ) -> None:
+        started = durable[0].payload if durable else None
+        if not isinstance(started, HandStartedPayloadV1):
+            raise GameCommandError(
+                "opening_facts_mismatch", "durable hand does not start with HandStarted"
+            )
+        seeded = self._adapter.deal_seeded(
+            scenario_from_events(durable), rng_seed=started.rng_seed
+        )
+        durable_holes = {
+            event.payload.seat_id: event.payload.cards
+            for event in durable
+            if isinstance(event.payload, HoleCardsRecordedPayloadV1)
+        }
+        durable_board = tuple(
+            card
+            for event in durable
+            if isinstance(event.payload, BoardDealtPayloadV1)
+            for card in event.payload.cards
+        )
+        if (
+            durable_holes != seeded.hole_cards_by_seat
+            or durable_board != seeded.board[: len(durable_board)]
+        ):
+            raise GameCommandError(
+                "seed_provenance_mismatch",
+                "durable hole or board cards do not match the HandStarted rng_seed",
             )
 
     def _events_for(

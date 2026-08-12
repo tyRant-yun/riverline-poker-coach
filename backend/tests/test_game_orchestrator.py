@@ -48,6 +48,20 @@ def _opened_session_with_stacks(stacks: tuple[int, ...]) -> GameSession:
     ).start_next_hand()
 
 
+def _opened_session_with_sitting_out(*seat_ids: int) -> GameSession:
+    return GameSession.create(
+        session_id="session-f1-03",
+        seats=tuple(
+            SessionSeatV1(
+                seat_id=seat_id,
+                stack=10_000,
+                sitting_out=seat_id in seat_ids,
+            )
+            for seat_id in range(6)
+        ),
+    ).start_next_hand()
+
+
 def test_open_hand_persists_seeded_pokerkit_validated_opening_facts(tmp_path):
     session = _opened_session()
     assert session.active_hand is not None
@@ -89,6 +103,31 @@ def test_open_hand_persists_seeded_pokerkit_validated_opening_facts(tmp_path):
     ]
     assert replay_hand(stored).state.hand_in_progress is True
     assert replay_hand(stored).state.pot == 150
+    store.close()
+
+
+def test_sparse_active_seats_are_rejected_at_the_frozen_hand_event_v1_boundary(
+    tmp_path,
+):
+    session = _opened_session_with_sitting_out(1, 2)
+    assert session.active_hand is not None
+    assert tuple(seat.seat_id for seat in session.active_hand.seats) == (0, 3, 4, 5)
+    store = SQLiteHandEventStore(tmp_path / "sparse-active.sqlite3")
+
+    with pytest.raises(SessionLifecycleError) as caught:
+        GameOrchestrator(store).open_hand(
+            session,
+            OpenHandCommandV1(
+                session_id=session.session_id,
+                hand_id=session.active_hand.hand_id,
+                command_id="sparse-open",
+                expected_sequence=0,
+                rng_seed=20260812,
+            ),
+        )
+
+    assert caught.value.code == "unsupported_active_topology"
+    assert store.read(session.active_hand.hand_id) == ()
     store.close()
 
 
@@ -550,6 +589,85 @@ def test_open_command_retry_is_idempotent_and_seed_conflict_is_explicit(tmp_path
     store.close()
 
 
+def test_open_retry_rejects_durable_hole_cards_that_do_not_match_the_seed(tmp_path):
+    session = _opened_session()
+    assert session.active_hand is not None
+    source = SQLiteHandEventStore(tmp_path / "seed-hole-source.sqlite3")
+    command = OpenHandCommandV1(
+        session_id=session.session_id,
+        hand_id=session.active_hand.hand_id,
+        command_id="open-command-1",
+        expected_sequence=0,
+        rng_seed=20260812,
+    )
+    GameOrchestrator(source).open_hand(session, command)
+    events = [item.event for item in source.read(session.active_hand.hand_id)]
+    source.close()
+    first_cards = events[1].payload.cards
+    second_cards = events[2].payload.cards
+    events[1] = events[1].model_copy(
+        update={"payload": events[1].payload.model_copy(update={"cards": second_cards})}
+    )
+    events[2] = events[2].model_copy(
+        update={"payload": events[2].payload.model_copy(update={"cards": first_cards})}
+    )
+    tampered = SQLiteHandEventStore(tmp_path / "seed-hole-tampered.sqlite3")
+    tampered.append(
+        hand_id=session.active_hand.hand_id,
+        expected_sequence=0,
+        events=tuple(RawHandEventV1.from_event(event) for event in events),
+    )
+
+    with pytest.raises(GameCommandError) as caught:
+        GameOrchestrator(tampered).open_hand(session, command)
+
+    assert caught.value.code == "seed_provenance_mismatch"
+    assert len(tampered.read(session.active_hand.hand_id)) == 7
+    tampered.close()
+
+
+def test_restart_rejects_durable_board_cards_that_do_not_match_the_seed(tmp_path):
+    result, _, original = _run_seeded_checkdown(tmp_path / "seed-board-source.sqlite3")
+    session = _opened_session()
+    assert session.active_hand is not None
+    events = list(original)
+    board_index = next(
+        index for index, event in enumerate(events) if event.payload.kind == "board_dealt"
+    )
+    events[board_index] = events[board_index].model_copy(
+        update={
+            "payload": events[board_index].payload.model_copy(
+                update={"cards": ("4c", "9d", "7h")}
+            )
+        }
+    )
+    assert replay_hand(events).state.hand_in_progress is False
+    tampered = SQLiteHandEventStore(tmp_path / "seed-board-tampered.sqlite3")
+    tampered.append(
+        hand_id=session.active_hand.hand_id,
+        expected_sequence=0,
+        events=tuple(RawHandEventV1.from_event(event) for event in events),
+    )
+
+    with pytest.raises(GameCommandError) as caught:
+        GameOrchestrator(tampered).execute(
+            session,
+            PlayerActionCommandV1(
+                session_id=session.session_id,
+                hand_id=session.active_hand.hand_id,
+                command_id="after-restart",
+                expected_sequence=result.replayed_hand.state.applied_sequence,
+                actor_seat=0,
+                action="check",
+                amount_semantics="none",
+            ),
+        )
+
+    assert caught.value.code == "seed_provenance_mismatch"
+    assert len(tampered.read(session.active_hand.hand_id)) == len(events)
+    tampered.close()
+
+
 def test_second_open_command_observes_durable_head_instead_of_overwriting_hand(tmp_path):
     session = _opened_session()
     assert session.active_hand is not None
@@ -604,6 +722,31 @@ class _ConflictInjectingStore:
             hand_id=hand_id,
             expected_sequence=expected_sequence,
             events=winner,
+        )
+        raise ExpectedSequenceConflict(
+            hand_id=hand_id,
+            expected_sequence=expected_sequence,
+            actual_sequence=result.last_sequence,
+        )
+
+
+class _CompletedOpenConflictStore:
+    def __init__(self, delegate, completed_events):
+        self.delegate = delegate
+        self.completed_events = completed_events
+        self.append_calls = 0
+
+    def read(self, hand_id):
+        return self.delegate.read(hand_id)
+
+    def append(self, *, hand_id, expected_sequence, events):
+        self.append_calls += 1
+        result = self.delegate.append(
+            hand_id=hand_id,
+            expected_sequence=expected_sequence,
+            events=tuple(
+                RawHandEventV1.from_event(event) for event in self.completed_events
+            ),
         )
         raise ExpectedSequenceConflict(
             hand_id=hand_id,
@@ -689,6 +832,36 @@ def test_open_append_conflict_reconciles_only_the_same_durable_command(
 
     assert conflict_store.append_calls == 1
     assert len(durable.read(hand_id)) == 7
+    durable.close()
+
+
+def test_open_append_conflict_returns_completed_successor_when_winner_finished_hand(
+    tmp_path,
+):
+    winner, _, completed_events = _run_seeded_checkdown(
+        tmp_path / "completed-open-winner.sqlite3"
+    )
+    session = _opened_session()
+    assert session.active_hand is not None
+    durable = SQLiteHandEventStore(tmp_path / "completed-open-conflict.sqlite3")
+    conflict_store = _CompletedOpenConflictStore(durable, completed_events)
+
+    result = GameOrchestrator(conflict_store).open_hand(
+        session,
+        OpenHandCommandV1(
+            session_id=session.session_id,
+            hand_id=session.active_hand.hand_id,
+            command_id="open-command-1",
+            expected_sequence=0,
+            rng_seed=20260812,
+        ),
+    )
+
+    assert result.idempotent is True
+    assert result.session.active_hand is None
+    assert result.session.completed_hand_ids == (session.active_hand.hand_id,)
+    assert result.session.topology == winner.session.topology
+    assert conflict_store.append_calls == 1
     durable.close()
 
 
