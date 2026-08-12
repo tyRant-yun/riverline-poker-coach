@@ -30,6 +30,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F1-06 Hand Lab Compatibility | `019ff498-63cb-7bf2-aedb-969e973b6926` | `completed` | `merged` | `codex/f1-06-hand-lab-compatibility` | `e70e85e80724846ec0da968010cd6f9dcc0daa4d` | `6e2e5d55098e3d1369f78e3782006d095269b80e` | [F1-06 handoff](handoffs/F1-06.md) | Worker: focused 51 passed；backend 470 passed/10 skipped；compileall/pip check；independent MVP P0/P1 review PASS | F4-03（仍依赖 F3） | F1-05 PHH adapter |
 | F1-05 PHH Adapter | `019ff4c4-26dd-7020-b60c-84f097bae0ba` | `completed` | `merged` | `codex/f1-05-phh-adapter` | `0780d2d960dc2dea87220d2f9cd92205cd048e6e` | `b3bd7dc5e13a74337408af8775e715f8dcda1197` | [F1-05 handoff](handoffs/F1-05.md) | Worker: focused 7 passed；backend 477 passed/10 skipped；compileall/pip check；极窄 P1 re-review PASS | F1-07 | F1-07 recovery/seeded soak exit gate |
 | F1-07 Recovery/Soak Exit Gate | `019ff4e1-9866-7f93-837e-0dfc797034a8` | `in_progress` | `in_progress` | `codex/f1-07-recovery-soak` | `8f3501c2c5ac8b35d7a45a716e6784bcdf5e8d67` | — | — | — | — | F1 exit only: restart/rebuild/fingerprint/1,000-hand soak/rollback |
+| F2-01 Fixed/Blueprint Bot Providers | `019ff4e4-9f9c-7730-b987-80d498144ebc` | `in_progress` | `in_progress` | `codex/f2-01-bot-providers` | `3803ae6` | — | — | — | — | Three deterministic profiles + registry; no API/UI/rules/persistence |
 
 ## 下一入口
 
@@ -66,6 +67,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：控制面审计确认主要吞吐损耗来自严格单任务串行、F1-03/F1-04 三轮审查返工、每任务约 5.8 万字符固定上下文和每 15 分钟心跳重复读取，而非 WSL 本身。治理切换为最多两个独立实现槽、风险型一次审查、focused-per-task/批次全量门和增量心跳；WSL 启动损耗只通过批处理命令规避。
 - 2026-08-12：F1-05 两个 P1 由原 Worker 在约 4 分钟内测试先行修复，复用原审查上下文做极窄 re-review，结论 PASS；Worker 实测 focused 7 passed、backend 477 passed/10 skipped、compileall/pip check。四项交付/handoff 提交以 `76eaed9` 至 `71c8ea0` 集成，未重复运行全仓审查或主控测试。
 - 2026-08-12：F1-07 从已验收基线 `8f3501c` 派发至任务 `019ff4e1-9866-7f93-837e-0dfc797034a8`；使用 Sol/high 处理窄范围恢复与规则出口门。任务采用精确文件清单与批处理命令，不加载全部规划/ADR/handoff；F2 尚不与同一规则链并发。
+- 2026-08-12：启用第二实现槽，将已由 F1 Observation/BotRuntime 解锁且不触碰 F1-07 文件所有权的 F2-01 派发至任务 `019ff4e4-9f9c-7730-b987-80d498144ebc`，使用 Terra/medium、focused-only 门；这是受控并发，不提前启动 F2 session API。
 
 ## 主控更新规则
 
