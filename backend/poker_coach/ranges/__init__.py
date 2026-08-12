@@ -46,6 +46,7 @@ from .seat_priors import (
     SeatPriorUnavailableReason,
     default_seat_prior_provider,
 )
+from .event_beliefs import PublicEventBeliefConsumer, SeatBeliefProvenanceV1, SeatBeliefResultV1, SeatBeliefUnavailableReason
 from .trace import RangeBeliefTrace, board_at_sequence, build_range_trace, dead_cards_for_belief
 from .update import apply_dead_cards, snapshot_from_range, update_range_belief
 from .views import RangeBeliefComboView, RangeBeliefView, build_belief_view
@@ -71,12 +72,16 @@ __all__ = [
     "RangeBeliefTrace",
     "RangeBeliefView",
     "RangeUpdateMetadata",
+    "PublicEventBeliefConsumer",
     "SeatPriorCoverageV1",
     "SeatPriorProvider",
     "SeatPriorProvenanceV1",
     "SeatPriorQueryV1",
     "SeatPriorResultV1",
     "SeatPriorUnavailableReason",
+    "SeatBeliefProvenanceV1",
+    "SeatBeliefResultV1",
+    "SeatBeliefUnavailableReason",
     "SolverPolicyAdapter",
     "UnsupportedActionError",
     "ZeroProbabilityActionError",
