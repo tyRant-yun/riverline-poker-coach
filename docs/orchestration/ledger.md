@@ -81,6 +81,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：第二实现槽继续派发 F4-01 会话统计投影至任务 `019ff508-1e0f-7ec2-a536-ff90eab7836a`；与 F2-04 API 文件所有权分离，使用 Terra/medium、真实 SQLite focused tests，目标是连续桌上线即有 VPIP/PFR/3Bet 数据池。
 - 2026-08-12：F4-01 Git/handoff 事实一致，11 focused tests 与 compileall 通过；重复投递、restart 和 rebuild fingerprint 等价证据接受，无独立审查或完整测试。交付以 `0d0a734`、`07664eb` 集成，统计 read model 可由连续桌 API/复盘消费。
 - 2026-08-12：F4-01 验收后空出的实现槽派发 F3-01 6-max seat priors 至任务 `019ff514-afc8-7513-89c0-c0c4bbd6f7fa`；与 F2-04 API 文件所有权分离，使用 Terra/medium、focused-only，先解锁可解释且诚实降级的 Range Belief consumer。
+- 2026-08-12：F2-04 独立极窄 MVP 审查发现一个 P1：进行中牌局的 seat stack 投影错误读取仅手末更新的 session topology，而非 replayed PokerKit authority stacks，导致下注后/重连显示开手筹码。交付未集成，已退回原 Worker 只补 stack authority 负向测试与最小修复；F2-06 暂不启动，F3-01 继续独立推进。
 
 ## 主控更新规则
 
