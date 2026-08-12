@@ -28,10 +28,11 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F1-03 PokerKit GameOrchestrator | `019ff3e3-bda6-7e21-903e-d4fe0611a5a9` | `completed` | `merged` | `codex/f1-03-pokerkit-game-orchestrator` | `91fb7f08d760753259f611284318b512c5f30ed4` | `e46f4df666e2513750147862674e6d9ce64634fd` | [F1-03 handoff](handoffs/F1-03.md) | Worker: backend 433 passed/9 skipped、146 relevant passed、compileall/pip check；Controller: 146 relevant passed before and after integration | F1-04、F1-05、F1-06 | F1-04 projection/checkpoint/outbox recovery |
 | F1-04 Projection/Outbox Recovery | `019ff446-caf8-78a2-85cd-c582310780ad` | `completed` | `merged` | `codex/f1-04-projection-outbox-recovery` | `9353fcd735adf9205877b7d8070c54c99089dc30` | `efb1a5ae83b63fd52ee28845c32c56e009362ff2` | [F1-04 handoff](handoffs/F1-04.md) | Worker: backend 457 passed/10 skipped at ddbe65c；final focused 21 passed/10 skipped；independent P1 re-review PASS | F4-01 | F1-05 PHH adapter for MVP interchange |
 | F1-06 Hand Lab Compatibility | `019ff498-63cb-7bf2-aedb-969e973b6926` | `completed` | `merged` | `codex/f1-06-hand-lab-compatibility` | `e70e85e80724846ec0da968010cd6f9dcc0daa4d` | `6e2e5d55098e3d1369f78e3782006d095269b80e` | [F1-06 handoff](handoffs/F1-06.md) | Worker: focused 51 passed；backend 470 passed/10 skipped；compileall/pip check；independent MVP P0/P1 review PASS | F4-03（仍依赖 F3） | F1-05 PHH adapter |
+| F1-05 PHH Adapter | `019ff4c4-26dd-7020-b60c-84f097bae0ba` | `in_progress` | `in_progress` | `codex/f1-05-phh-adapter` | `0780d2d960dc2dea87220d2f9cd92205cd048e6e` | — | — | — | — | 最小 PHH 交换适配与权威事实 round-trip golden fixtures |
 
 ## 下一入口
 
-`F1-06`：优先连接 authoritative events 与现有 ScenarioSpec/Hand Lab API/UI 兼容面，尽快形成可体验 MVP。F1-05 PHH 已解锁但后置，避免并行扩张。
+`F1-05`：用最小 PHH 交换适配与 golden fixtures 补齐 F1 依赖；不扩建 API/UI。完成后进入 F1-07 的 MVP 恢复/soak 收口。
 
 ## MVP 执行策略
 
@@ -56,6 +57,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F1-04 最终窄修使用存储端事务内当前时间验证 ack/retry lease，独立审查结论 PASS；final focused 21 passed/10 live-PG skipped，沿用前一修订提交的完整 backend 457 passed/10 skipped。三项交付与三项 handoff 治理提交以 `ff90f30` 至 `f389027` 进入 `codex/simulator-rebuild`。P2 nested payload 深冻结进入 post-MVP backlog；live PostgreSQL 仍未实测。
 - 2026-08-12：为尽快获得可体验 MVP，F1-06 先于 F1-05 启动；任务 `019ff498-63cb-7bf2-aedb-969e973b6926` 从集成提交 `e70e85e` 创建，使用 Terra/high，仅做现有 Hand Lab/API/E2E 兼容桥，F1-05 继续后置。
 - 2026-08-12：F1-06 handoff 校正后与 Git 事实一致；独立窄审查仅检查规则真相、stable/sparse seats、信息隔离、authoritative all-in 与既有 API hooks，结论 PASS。Worker 实测 focused 51 passed、backend 470 passed/10 skipped；主控未重复测试。交付及 handoff 以 `cb8f68d`、`6cb9953`、`6dcd26b` 进入 `codex/simulator-rebuild`。
+- 2026-08-12：F1-05 从集成提交 `0780d2d` 派发至任务 `019ff4c4-26dd-7020-b60c-84f097bae0ba`，使用 Terra/medium 单任务实现最小 PHH exchange/round-trip；不并行启动其他任务。
 
 ## 主控更新规则
 
