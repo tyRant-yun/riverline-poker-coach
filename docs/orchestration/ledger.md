@@ -32,13 +32,13 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F1-07 Recovery/Soak Exit Gate | `019ff4e1-9866-7f93-837e-0dfc797034a8` | `completed` | `merged` | `codex/f1-07-recovery-soak` | `8f3501c2c5ac8b35d7a45a716e6784bcdf5e8d67` | `598ca76e5a7a3eb65bd3a8b004db9061ef3d404c` | [F1-07 handoff](handoffs/F1-07.md) | Backend 480 passed/10 skipped；1,000-hand soak 24.25s；focused fix 2 passed；independent recovery re-review PASS | F2 continuous table | F2-04 continuous table vertical slice |
 | F2-01 Fixed/Blueprint Bot Providers | `019ff4e4-9f9c-7730-b987-80d498144ebc` | `completed` | `merged` | `codex/f2-01-bot-providers` | `3803ae6` | `a7e26def5fc5c05dd7bed13fadeb1d6fa834c017` | [F2-01 handoff](handoffs/F2-01.md) | Worker: bot/runtime focused 26 passed；simulator compileall；no full backend by fast-path policy | F2-02、F2-04、F2-05 | F2-04 continuous table after F1-07 |
 | F3-03 Formula/L0 Advisor | `019ff500-f1ba-7af2-9663-5c4aa1826bf6` | `completed` | `merged` | `codex/f3-03-formula-advisor` | `6d94bb4` | `903024a5e288810591ac0207fd747d770c166950` | [F3-03 handoff](handoffs/F3-03.md) | Worker: 38 focused passed；compileall；1,000 samples p95 0.0137ms | F3-06 | Wire L0 result into table API/advisor UI |
-| F2-04 Continuous Table API | `019ff505-db5d-7323-b396-a75ade283897` | `in_progress` | `in_progress` | `codex/f2-04-continuous-table-api` | `dd7757e80e1038e38e91c4b6ea8090fb4d00242c` | — | — | — | — | Hero + 5 bots, durable consecutive hands, reconnect, safe projection |
+| F2-04 Continuous Table API | `019ff505-db5d-7323-b396-a75ade283897` | `completed` | `merged` | `codex/f2-04-continuous-table-api` | `dd7757e80e1038e38e91c4b6ea8090fb4d00242c` | `eac26af6932b329e55e69cf001467e52b089b45b` | [F2-04 handoff](handoffs/F2-04.md) | Worker focused suite + compileall；stack fix focused 4 passed；independent P1 re-review PASS | F2-06 | Reuse Worker for minimal polling table UI |
 | F4-01 Session Stats Projection | `019ff508-1e0f-7ec2-a536-ff90eab7836a` | `completed` | `merged` | `codex/f4-01-session-stats` | `a5c2e2bf1fde44172253f367a91b3e87b5cae46b` | `94c72bf685b2a18212d943e7ba299cc800162640` | [F4-01 handoff](handoffs/F4-01.md) | Worker: 11 focused passed；compileall；incremental=rebuild fingerprint | Stats API/review consumers | Feed F2-04/F4 review flow |
-| F3-01 6-max Seat Priors | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `in_progress` | `in_progress` | `codex/f3-01-seat-priors` | `f9829b9f44d477510801ce07b92aa7719c755ee0` | — | — | — | — | Provenance/coverage-aware heuristic seat priors; no action updates/API/UI |
+| F3-01 6-max Seat Priors | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-01-seat-priors` | `f9829b9f44d477510801ce07b92aa7719c755ee0` | `df06fd389f5e7412baec994f4a5b81f47850c18e` | [F3-01 handoff](handoffs/F3-01.md) | Worker: 68 focused passed；compileall/diff check；heuristic provenance explicit | F3-02 | Reuse Worker for public-event belief updates |
 
 ## 下一入口
 
-`F2-04`：连续 GameSession API 纵向切片，接通已完成的 F1 durable session 与 F2-01 Bot profiles；随后直接接最小牌桌 UI。
+`F2-06 + F3-02`：复用原 Worker 并行推进最小轮询牌桌 UI 与基于公共事件的 Range Belief 更新。
 
 ## MVP 执行策略
 
@@ -82,6 +82,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F4-01 Git/handoff 事实一致，11 focused tests 与 compileall 通过；重复投递、restart 和 rebuild fingerprint 等价证据接受，无独立审查或完整测试。交付以 `0d0a734`、`07664eb` 集成，统计 read model 可由连续桌 API/复盘消费。
 - 2026-08-12：F4-01 验收后空出的实现槽派发 F3-01 6-max seat priors 至任务 `019ff514-afc8-7513-89c0-c0c4bbd6f7fa`；与 F2-04 API 文件所有权分离，使用 Terra/medium、focused-only，先解锁可解释且诚实降级的 Range Belief consumer。
 - 2026-08-12：F2-04 独立极窄 MVP 审查发现一个 P1：进行中牌局的 seat stack 投影错误读取仅手末更新的 session topology，而非 replayed PokerKit authority stacks，导致下注后/重连显示开手筹码。交付未集成，已退回原 Worker 只补 stack authority 负向测试与最小修复；F2-06 暂不启动，F3-01 继续独立推进。
+- 2026-08-12：F2-04 stack authority 修复经原 Reviewer 极窄复审 PASS，focused regression 4 passed；交付以 `075dfe0` 至 `370b46b` 集成。F3-01 Git/handoff 与 68 focused tests/compileall 证据一致，仅修正 thread ID 后以 `5e0d1bf` 至 `d486638` 集成。下一步复用两名原 Worker 分别推进 F2-06 与 F3-02，避免新上下文。
 
 ## 主控更新规则
 
