@@ -2,9 +2,15 @@
 
 > Riverline 可观测德州扑克认知模拟器状态快照
 > 更新日期：2026-08-12
-> 当前阶段：F1 Authoritative Session 收口中；F1-05 P1 修订进行中，随后执行 F1-07 恢复/soak 出口门
+> 当前阶段：F2 持续牌桌 MVP 基础已集成；F2-06S 浏览器 smoke 进行中，F3-06/F4 复盘 UI 接线留待后续预算
 
 任务回传与依赖的权威入口：[`docs/orchestration/handoff-v1.md`](docs/orchestration/handoff-v1.md) 与主控单写的 [`docs/orchestration/ledger.md`](docs/orchestration/ledger.md)。
+
+## 当前集成快照
+
+已集成的模拟器基础包括：权威牌局 session、可恢复的事件/投影/outbox 链、固定/蓝图 Bot、连续牌桌 API 与轮询 UI、L0 公式 Advisor、6-max seat priors、仅消费公开事件的 Range Belief，以及 session stats projection。F2-06S 的单条 Playwright mock smoke 尚未交付，因而不计入本次发布证据。
+
+这是一份可观察模拟器的 MVP 基础，而非完整产品闭环：Advisor/Belief/Stats 仍未接入持续牌桌 UI，自动复盘尚未实现；live PostgreSQL 恢复演练也尚未测量。AGPL-3.0-or-later 的源码可得边界及第三方来源要求继续适用。
 
 ## 1. 产品与范围
 
@@ -79,7 +85,9 @@ F0 未触及 `frontend/`，因此未重复执行 Vitest、tsc、build 或 Playwr
 - Solver artifact 必须绑定场景/节点 fingerprint 和精确 policy sequence；不能把 HU 翻后结果包装成 6-max 全节点真值；
 - 已通过的交互文案、按钮名、aria-label、class 和 action amount 语义属于 E2E 兼容面。具体清单与历史能力证据保留在 `docs/product-remediation-execution.md`、`docs/product-full-chain-audit.md` 和既有测试中。
 
-## 6. 当前明确风险
+## 6. F0 历史风险快照
+
+本节保留 F0 阶段风险记录；当前已集成范围、验证和未完成项以 ledger 及各任务 handoff 为准。
 
 - F0 event store 是内存/fixture 级 contract spike；尚无 durable session aggregate、并发追加控制、幂等 command 或数据库迁移；
 - `ObservationV1` 已证明不泄漏，但还没有覆盖完整 session 调度器内所有 reveal/showdown 权限；
@@ -89,9 +97,9 @@ F0 未触及 `frontend/`，因此未重复执行 Vitest、tsc、build 或 Playwr
 - 现有 Range Belief/solver 覆盖仍是显式窄节点，不等于 6-max 完整策略；
 - 本次未重新验证前端继承基线；未来任何 frontend 变更必须重新跑全部前端门。
 
-## 7. 当前阶段入口：F1 Authoritative Session 收口
+## 7. 历史阶段：F1 Authoritative Session（已完成）
 
-F1 建立在 F0 V1 contract 与 ADR 上；F1-01 至 F1-04、F1-06 已集成，F1-05 正在修订独立审查发现的两个 P1，之后只剩 F1-07 出口门。完整历史以中央 ledger 为准：
+F1 建立在 F0 V1 contract 与 ADR 上，F1-01 至 F1-07 已集成。以下内容保留为阶段交付摘要；当前入口与完整历史以中央 ledger 为准：
 
 1. `F1-01`：定义 `GameSession`/`HandId`/`SessionId` 所有权、6-max 100BB table config 与 2–8 topology 校验；
 2. `F1-02`：实现持久化 `hand_events` append port 与 PostgreSQL/SQLite adapters，加入 `(hand_id, sequence)`/`event_id` 唯一约束和 expected-sequence 乐观追加；依赖 F1-01；
@@ -101,7 +109,7 @@ F1 建立在 F0 V1 contract 与 ADR 上；F1-01 至 F1-04、F1-06 已集成，F1
 6. `F1-06`：建立现有 `ScenarioSpec`/Hand Lab 兼容 bridge，保留当前 API/E2E hooks；依赖 F1-03；
 7. `F1-07`：故障恢复、重放 fingerprint、筹码守恒、1,000-hand seeded soak 和 rollback 演练；依赖 F1-02–F1-06。
 
-F1 出口门：固定 seed 的 6-max session 可跨进程恢复；事件连续且不可重复；每手筹码守恒、结算一致；所有投影丢弃后可重建；现有 Hand Lab/E2E 兼容面无回退。后续 F2–F6 的任务、依赖和验收门见 `docs/simulator-refactor-master-plan.md`。
+F1 出口门：固定 seed 的 6-max session 可跨进程恢复；事件连续且不可重复；每手筹码守恒、结算一致；所有投影丢弃后可重建；现有 Hand Lab/E2E 兼容面无回退。该出口门已由 F1-07 关闭；后续任务、依赖和验收门以中央 ledger 为准。
 
 ## 8. 常用验证命令
 
