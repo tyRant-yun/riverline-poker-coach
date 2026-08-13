@@ -165,3 +165,8 @@ export const continuousTableApi = {
   insights: (sessionId: string) => requestGet<TableInsightsResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/insights`),
   reviews: (sessionId: string, handId?: string) => requestGet<TableReviewResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/reviews${handId ? `/${encodeURIComponent(handId)}` : ""}`),
 };
+
+/** Lightweight availability probe for the local Riverline backend. */
+export const systemApi = {
+  health: () => requestGet<{ status: string; requestId: string; appVersion: string }>("/health"),
+};

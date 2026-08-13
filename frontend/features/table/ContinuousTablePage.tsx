@@ -112,25 +112,32 @@ export default function ContinuousTablePage() {
       </div>
       {!table && <button className="primary" onClick={create} disabled={busy} data-testid="create-continuous-table">{busy ? "连接中…" : "开始牌桌"}</button>}
       {error && <p className="warning" role="alert">{error}</p>}
-      {table && <>
+      {table && <div className="continuous-table__layout">
+        <div className="continuous-table__main">
         <p className="muted" data-testid="continuous-table-status">Hand {table.handSequence} · {table.street ?? "等待开局"} · {table.currentActor == null ? "本手结束" : `Seat ${table.currentActor} 行动`}</p>
         <PokerTable seats={seats} board={table.board} pot={table.pot} unit="chips" />
-        {table.handComplete ? <><div data-testid="table-review-status">{review ? `复盘可用：${review.heroDecisions.length} 个 Hero 决策` : "复盘未就绪"}</div><button className="primary" onClick={nextHand} disabled={busy} data-testid="next-hand">下一手</button></> :
+        <div className="continuous-table__action-dock">{table.handComplete ? <><div data-testid="table-review-status">{review ? `复盘可用：${review.heroDecisions.length} 个 Hero 决策` : "复盘未就绪"}</div><button className="primary" onClick={nextHand} disabled={busy} data-testid="next-hand">下一手</button></> :
           <div className="action-buttons" data-testid="hero-legal-actions">
             {table.heroLegalActions.map((legal) => <div key={legal.action}>
               {legal.minAmount != null && <input aria-label={`${legal.action} amount`} type="number" min={legal.minAmount} max={legal.maxAmount} value={amounts[legal.action] ?? legal.minAmount} onChange={(event) => setAmounts({ ...amounts, [legal.action]: event.target.value })} />}
               <button className="action-btn" onClick={() => submit(legal)} disabled={busy} data-testid={`hero-action-${legal.action}`}>{legal.action}{legal.minAmount != null ? ` ${legal.minAmount}-${legal.maxAmount}` : ""}</button>
             </div>)}
           </div>}
+        </div>
         <div className="continuous-table__details">
           <section><h3>行动历史</h3><ol data-testid="table-action-history">{table.actionHistory.map((action) => <li key={action.sequence}>Seat {action.actorSeat} {action.action}{action.amount != null ? ` ${action.amount}` : ""}</li>)}</ol></section>
           <section><h3>Bot 来源</h3><ul data-testid="bot-provenance">{table.botDecisionProvenance.map((item) => <li key={item.sequence}>Seat {item.actorSeat} · {item.profileId} · {item.provider}{item.degraded ? " (fallback)" : ""}</li>)}</ul></section>
-          <aside className="notice" data-testid="table-insights"><strong>Table Insights（只读）</strong><br />
-            {!insights?.available ? "洞察未就绪" : <><p>Advisor: {insights.advisor?.available ? `${insights.advisor.result?.recommendedAction?.action ?? "无建议"} · ${insights.advisor.result?.source}` : insights.advisor?.unavailableReason}</p>
-            <p>Range Belief: {insights.seatBeliefs?.map((belief) => `Seat ${belief.seatId} ${belief.available ? belief.provenance?.version : belief.unavailableReason}`).join(" · ")}</p>
-            <p>Stats: {insights.stats?.available ? insights.stats.bySeat.map((stat) => `Seat ${stat.seatId} VPIP ${(stat.vpip * 100).toFixed(0)}% PFR ${(stat.pfr * 100).toFixed(0)}% 3B ${(stat.threeBet * 100).toFixed(0)}%`).join(" · ") : insights.stats?.unavailableReason}</p></>}</aside>
         </div>
-      </>}
+        </div>
+        <aside className="notice continuous-table__insights" data-testid="table-insights"><strong>牌桌洞察（只读）</strong>
+          {!insights?.available ? <p>洞察未就绪</p> : <div className="insight-sections">
+            <section><h3>Advisor</h3><p>{insights.advisor?.available ? `${insights.advisor.result?.recommendedAction?.action ?? "无建议"} · ${insights.advisor.result?.source ?? "来源未提供"}` : insights.advisor?.unavailableReason ?? "当前不可用"}</p><p className="muted small">公式/启发式建议，不是 Solver 或 GTO 结果。</p></section>
+            <section><h3>Range</h3>{insights.seatBeliefs?.length ? <ul>{insights.seatBeliefs.map((belief) => <li key={belief.seatId}>Seat {belief.seatId}：{belief.available ? <>{belief.currentMass != null ? `mass ${belief.currentMass} · ` : ""}{belief.provenance?.provider ?? "provider 未提供"} · {belief.provenance?.version ?? "version 未提供"} · {belief.provenance?.trustLevel ?? "trust 未提供"}</> : belief.unavailableReason ?? "不可用"}</li>)}</ul> : <p>当前未返回座位 Range Belief。</p>}<p className="muted small">独立座位边际；不含对手私牌。</p></section>
+            <section><h3>Stats</h3><p>{insights.stats?.available ? insights.stats.bySeat.map((stat) => `Seat ${stat.seatId} VPIP ${(stat.vpip * 100).toFixed(0)}% PFR ${(stat.pfr * 100).toFixed(0)}% 3B ${(stat.threeBet * 100).toFixed(0)}%`).join(" · ") : insights.stats?.unavailableReason ?? "当前不可用"}</p></section>
+            <section><h3>Solver</h3><p>当前未连接/不可用。</p><p className="muted small">本桌 API 未返回真实 Solver 结果。</p></section>
+          </div>}
+        </aside>
+      </div>}
     </section>
   );
 }

@@ -35,6 +35,9 @@ describe("ContinuousTablePage", () => {
     expect(screen.getByLabelText("Q♥")).toBeInTheDocument();
     expect(screen.getAllByLabelText("card back")).toHaveLength(10);
     expect(screen.getByTestId("table-insights")).toHaveTextContent("deterministic_formula");
+    expect(screen.getByTestId("table-insights")).toHaveTextContent("公式/启发式建议，不是 Solver 或 GTO 结果");
+    expect(screen.getByTestId("table-insights")).toHaveTextContent("当前未连接/不可用");
+    expect(screen.getByTestId("table-insights")).toHaveTextContent("独立座位边际；不含对手私牌");
   });
 
   it("reconnects, submits only a backend legal action, and starts the next hand", async () => {
