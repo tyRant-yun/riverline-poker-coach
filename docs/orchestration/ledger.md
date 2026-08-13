@@ -45,10 +45,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | MVP Release Gate | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `blocked` | `codex/mvp-release-gate` | `96da383` | `a9cfb866567dcd9536e18729cc372eb12f6a4d3a` | [MVP release handoff](handoffs/MVP-RELEASE-GATE.md) | Backend 536 passed; frontend 161 passed; build; Playwright 9/9; live smoke PASS | License provenance closure | Only blocker: reproducible resolved-dependency SBOM/NOTICE for LGPL transitive binary |
 | License Provenance Closure | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `merged` | `codex/license-provenance-closure` | `0f4badd` | `b78c68e6f2aa959108022056b5a7e4934e800bf0` | [License closure handoff](handoffs/LICENSE-CLOSURE.md) | 296-component deterministic SBOM/NOTICE; focused 3/3; generator --check; source gate PASS | GitHub source merge | Integrated `3c56618..774e5b9`; bundled binary/container gate remains FAIL |
 | PR2 CI Compatibility Fix | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `merged` | `codex/pr2-ci-fix` | `cc37fbc` | `c8e373540cb36ae47fdf93a977ae3efc096ee6b9` | [PR2 CI fix handoff](handoffs/PR2-CI-FIX.md) | Provenance 5 passed; Node contract 1 passed; claim/lease 6 passed; diff check | PR #2 checks | Integrated `e5d9044..8c46c8b`; live PG and exact Node 24.15 await GitHub CI |
+| PR2 CI Recheck | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `in_progress` | `in_progress` | `codex/pr2-ci-fix` | `8cb77c9` | — | — | — | PR #2 merge | Diagnose only the second CI run first; any fix remains limited to observed CI contract failures |
+| R5-01 MVP Frontend Shell | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `in_progress` | `in_progress` | `codex/r5-01-mvp-frontend-shell` | `8cb77c9` | — | — | — | R5-02/R5-03 | Reuse table Worker; table + reviews only, real health, no legacy deletion or backend changes |
 
 ## 下一入口
 
-`PR #2 checks`：三项最小 CI 修复已集成；推送后等待 GitHub Node 24.15、live PostgreSQL 与完整 workflow。全绿后合并 `main`；不得创建 bundled binary/container artifact。
+`PR #2 checks + R5-01`：第二轮 CI 只做失败日志驱动的最小修复；并行重构 MVP 产品壳，但暂不删除旧文件。CI 全绿后合并 `main`；R5-01 经 focused UI 验收后再进入启动可靠性和 legacy prune。
 
 ## MVP 执行策略
 
@@ -108,6 +110,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-13：许可证闭环生成 296 组件确定性 SBOM/NOTICE，focused provenance 3/3 与 generator `--check` 通过；`source_repository_release=PASS`，`bundled_binary_container_release=FAIL`。仅解锁 GitHub 源码 PR/merge，继续禁止所有捆绑二进制/容器发布。
 - 2026-08-13：PR #2 远端 CI 首轮失败；只读诊断确认三个环境/测试契约根因：provenance 混入本机 metadata、Node 20 不满足锁定 jsdom/undici、live-PG fixture 混用固定 claim 时间与真实当前时钟。产品负责人已确认仅做三项最小兼容修复，不放宽恢复安全校验。
 - 2026-08-13：三项最小修复以 `e5d9044..8c46c8b` 集成；focused provenance 5 passed、Node contract 1 passed、claim/lease 6 passed。精确 Node 24.15 与 live PostgreSQL 证据交由 PR #2 GitHub CI，不重复本地完整门。
+- 2026-08-13：产品负责人授权按新产品闭环自主移除旧产品表面。Controller 冻结 R5 顺序：新产品壳 → 本地启动可靠性 → 复盘/数据体验 → 调用关系驱动的旧功能删除；复用原 Worker，最多两实现槽，独立审查只看 P0/P1 增量。
 
 ## 主控更新规则
 
