@@ -8,7 +8,6 @@ deck, RNG seed, future board, or any other seat's private cards.
 from __future__ import annotations
 
 from enum import Enum
-from functools import lru_cache
 from hashlib import sha256
 from itertools import combinations
 from decimal import Decimal
@@ -122,7 +121,7 @@ class SeatPriorProvider:
                 seat_id=seat_id, position=position, available=False, coverage=coverage,
                 unavailable_reason=unavailable,
             )
-        snapshot = _cached_snapshot(seat_id, position, query.visible_blockers)
+        snapshot = _snapshot(seat_id, position, query.visible_blockers)
         return SeatPriorResultV1(
             seat_id=seat_id, position=position, available=True, coverage=coverage, snapshot=snapshot,
             provenance=SeatPriorProvenanceV1(provider=_PROVIDER, version=_VERSION,
@@ -192,9 +191,7 @@ def _position_weighted_combos(visible_blockers: tuple[Card, ...], position: Seat
     return {key: max(Decimal("0.02"), min(Decimal("0.98"), weight)) for key, weight in result.items()}
 
 
-@lru_cache(maxsize=128)
-def _cached_snapshot(seat_id: int, position: SeatPosition | None, visible_blockers: tuple[Card, ...]) -> RangeBeliefSnapshot:
-    """Reuse immutable seed snapshots across a hand's decision refreshes."""
+def _snapshot(seat_id: int, position: SeatPosition | None, visible_blockers: tuple[Card, ...]) -> RangeBeliefSnapshot:
     weights = _position_weighted_combos(visible_blockers, position)
     total = sum(weights.values(), Decimal("0"))
     probabilities = _normalized_probabilities(weights)
