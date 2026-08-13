@@ -44,6 +44,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F4-04 Automatic Review Experience | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f4-04-review-experience` | `a6291a6` | `ccf91f8c54c948eb237f63aeef37202561b4db27` | [F4-04 handoff](handoffs/F4-04.md) | Backend 14 passed; frontend 4 passed; tsc/compileall; independent P1 re-review PASS | Release gate | Integrated `6f06e75` through handoff `d16e709`; stale review P1 fixed before merge |
 | MVP Release Gate | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `blocked` | `codex/mvp-release-gate` | `96da383` | `a9cfb866567dcd9536e18729cc372eb12f6a4d3a` | [MVP release handoff](handoffs/MVP-RELEASE-GATE.md) | Backend 536 passed; frontend 161 passed; build; Playwright 9/9; live smoke PASS | License provenance closure | Only blocker: reproducible resolved-dependency SBOM/NOTICE for LGPL transitive binary |
 | License Provenance Closure | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `merged` | `codex/license-provenance-closure` | `0f4badd` | `b78c68e6f2aa959108022056b5a7e4934e800bf0` | [License closure handoff](handoffs/LICENSE-CLOSURE.md) | 296-component deterministic SBOM/NOTICE; focused 3/3; generator --check; source gate PASS | GitHub source merge | Integrated `3c56618..774e5b9`; bundled binary/container gate remains FAIL |
+| PR2 CI Compatibility Fix | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `in_progress` | `in_progress` | `codex/simulator-rebuild` | `0d41329` | — | — | — | PR #2 checks | Approved minimal fixes only: cross-OS provenance, Node 24 contract, deterministic PG test clock |
 
 ## 下一入口
 
@@ -105,6 +106,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-13：产品负责人明确授权 release gate 验收通过后推送 `codex/simulator-rebuild` 到既有 GitHub 远端，并通过 PR 合并 `main`；发布后同时交付本地 MVP 体验说明与 SaaS 分阶段计划。
 - 2026-08-13：release gate 功能证据全绿：backend 536 passed/10 live-PG skipped，frontend 31 files/161 tests，build、Playwright 9/9、live service smoke 通过；候选仅因完整 SBOM/NOTICE 与 `@img/sharp-win32-x64` LGPL provenance 未闭合而 FAIL。复用原发布任务做纯许可证据修复，不重复功能完整门。
 - 2026-08-13：许可证闭环生成 296 组件确定性 SBOM/NOTICE，focused provenance 3/3 与 generator `--check` 通过；`source_repository_release=PASS`，`bundled_binary_container_release=FAIL`。仅解锁 GitHub 源码 PR/merge，继续禁止所有捆绑二进制/容器发布。
+- 2026-08-13：PR #2 远端 CI 首轮失败；只读诊断确认三个环境/测试契约根因：provenance 混入本机 metadata、Node 20 不满足锁定 jsdom/undici、live-PG fixture 混用固定 claim 时间与真实当前时钟。产品负责人已确认仅做三项最小兼容修复，不放宽恢复安全校验。
 
 ## 主控更新规则
 
