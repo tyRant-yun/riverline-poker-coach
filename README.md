@@ -56,11 +56,13 @@ npm run dev
 
 API 默认限制单请求体为 1 MiB、单次分析超时为 120 秒、匿名会话每分钟 120 个请求；可用 `POKER_COACH_MAX_REQUEST_BYTES`、`POKER_COACH_MAX_TIMEOUT_SECONDS` 和 `POKER_COACH_RATE_LIMIT_PER_MINUTE` 调整，限流设为 `0` 可关闭（仅适合本地测试）。
 
-也可以使用 PowerShell 一键启动本地后端和前端：
+也可以使用 PowerShell 一键启动本地后端和前端。默认模式会只对它启动的子进程强制使用 SQLite 和无 Redis 降级，因此根 `.env` 中失效的 PostgreSQL/Redis 地址不会导致本地页面显示 `Failed to fetch`；它不会改写 `.env`：
 
 ```powershell
 .\scripts\run-local.ps1
 ```
+
+只有已启动外部 PostgreSQL/Redis 时才显式 opt-in：`./scripts/run-local.ps1 -UseExternalServices`。脚本会检查 8000/3000 端口、等待 `/health` 和网页 ready，并输出子进程 PID 与 `.data/local-logs/` 日志位置；若端口已被其他本地服务使用，可明确指定一对替代端口，例如 `./scripts/run-local.ps1 -ApiPort 8100 -WebPort 3100`。
 
 ## Docker 部署（API + 独立 worker + PostgreSQL + Redis）
 

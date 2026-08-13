@@ -26,6 +26,8 @@ cd C:\Users\Administrator\Documents\ChatGPT\德州扑克
 .\scripts\run-local.ps1
 ```
 
+默认一键模式会在本次子进程中屏蔽 `.env` 的 PostgreSQL/Redis 配置，固定使用本地 SQLite 和无 Redis 降级；不会修改或泄漏你的 `.env`。仅当外部服务已经可用时运行 `./scripts/run-local.ps1 -UseExternalServices`。启动脚本会等待 API `/health` 与 Web ready，并打印 URL、模式、PID 和 `.data/local-logs/`。
+
 然后验证：
 
 - API health：<http://127.0.0.1:8000/health>
