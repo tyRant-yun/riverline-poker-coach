@@ -42,11 +42,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F3-06 Table Insights Vertical Slice | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-06-table-insights` | `49b9471` | `a80504547f2a205bcfeafd91ca5592e61b8bad5e` | [F3-06 handoff](handoffs/F3-06.md) | Backend 17 passed; frontend 3 passed; compileall; TypeScript; independent P1 re-review PASS | F4-04/release gate | Integrated `b6ed09d` through handoff `2c449c9`; stale insight P1 fixed before merge |
 | F4-03 Automatic Review Projection | `019ff508-1e0f-7ec2-a536-ff90eab7836a` | `completed` | `merged` | `codex/f4-03-auto-review` | `2ebc46e` | `051e98fee37a0d96872cb8c5a16ac2887afcc534` | [F4-03 handoff](handoffs/F4-03.md) | Focused backend 22 passed; compileall; independent terminal/future/idempotency review PASS | F4-04 API/UI wiring | Integrated as `6369b22` with handoff `4e24f3f`; no API/frontend/rules changes |
 | F4-04 Automatic Review Experience | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f4-04-review-experience` | `a6291a6` | `ccf91f8c54c948eb237f63aeef37202561b4db27` | [F4-04 handoff](handoffs/F4-04.md) | Backend 14 passed; frontend 4 passed; tsc/compileall; independent P1 re-review PASS | Release gate | Integrated `6f06e75` through handoff `d16e709`; stale review P1 fixed before merge |
-| MVP Release Gate | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `in_progress` | `in_progress` | `codex/mvp-release-gate` | `96da383` | — | — | — | MVP candidate / targeted fix | Reuse release task; one full backend/frontend/build/E2E/license/local smoke gate, no feature expansion |
+| MVP Release Gate | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `blocked` | `codex/mvp-release-gate` | `96da383` | `a9cfb866567dcd9536e18729cc372eb12f6a4d3a` | [MVP release handoff](handoffs/MVP-RELEASE-GATE.md) | Backend 536 passed; frontend 161 passed; build; Playwright 9/9; live smoke PASS | License provenance closure | Only blocker: reproducible resolved-dependency SBOM/NOTICE for LGPL transitive binary |
+| License Provenance Closure | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `in_progress` | `in_progress` | `codex/license-provenance-closure` | `cda49ca` | — | — | — | Release recheck | Documentation/tooling only; produce reproducible offline Python/npm inventory, licenses, integrity and NOTICE evidence |
 
 ## 下一入口
 
-`Release gate`：在当前集成头运行一次发布前完整 backend/frontend/build/E2E/license/smoke 门；通过即形成可体验 MVP 候选，不扩大到 L1/L2 solver 或 SaaS 基础设施。
+`License provenance closure`：功能、构建、E2E 与服务 smoke 已全部通过；仅补可重复的 resolved dependency SBOM/NOTICE 和 LGPL 传递二进制合规证据，再运行许可门复核。不得修改产品功能或依赖版本。
 
 ## MVP 执行策略
 
@@ -102,6 +103,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-13：F4-04 初审发现旧 review 响应覆盖当前终局的 P1，原 Worker 增加独立 request token 与 terminal identity 后 frontend 4 passed、复审 PASS；交付以 `6f06e75..d16e709` 集成，MVP 功能链全部解锁，下一入口仅为 release gate。
 - 2026-08-13：复用既有发布任务从 `96da383` 启动单一 MVP release gate；只运行阶段完整门与记录证据，失败时仅允许定位/修复阻塞 MVP 的 P0/P1，P2/P3 进入 backlog。
 - 2026-08-13：产品负责人明确授权 release gate 验收通过后推送 `codex/simulator-rebuild` 到既有 GitHub 远端，并通过 PR 合并 `main`；发布后同时交付本地 MVP 体验说明与 SaaS 分阶段计划。
+- 2026-08-13：release gate 功能证据全绿：backend 536 passed/10 live-PG skipped，frontend 31 files/161 tests，build、Playwright 9/9、live service smoke 通过；候选仅因完整 SBOM/NOTICE 与 `@img/sharp-win32-x64` LGPL provenance 未闭合而 FAIL。复用原发布任务做纯许可证据修复，不重复功能完整门。
 
 ## 主控更新规则
 
