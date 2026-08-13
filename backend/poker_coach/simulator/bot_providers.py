@@ -44,8 +44,8 @@ class LightweightBlueprintProvider:
         time_budget_ms: int,
         rng_seed: int,
     ) -> BotDecisionV1:
-        del observation, time_budget_ms, rng_seed
-        legal = _select_profile_action(self.profile_id, legal_actions)
+        del time_budget_ms, rng_seed
+        legal = _select_profile_action(self.profile_id, observation, legal_actions)
         return BotDecisionV1(
             action=legal.action,
             amount=_profile_amount(self.profile_id, legal),
@@ -70,14 +70,41 @@ def build_bot_provider(profile_id: str):
 
 _PROFILE_DESCRIPTIONS = {
     "cautious": "fold-check-minimum",
-    "balanced": "check-call-midpoint",
+    "balanced": "visible-strength-price-action-variety",
     "aggressive": "maximum-bet-or-raise",
 }
 
 
 def _select_profile_action(
-    profile_id: str, legal_actions: tuple[LegalActionV1, ...]
+    profile_id: str,
+    observation: ObservationV1,
+    legal_actions: tuple[LegalActionV1, ...],
 ) -> LegalActionV1:
+    """Choose only from the legal set using deliberately coarse visible facts."""
+    by_action = {legal.action: legal for legal in legal_actions}
+    strength = _visible_hand_strength(observation)
+    call = by_action.get(SimulatorActionV1.CALL)
+    pot_odds = (
+        call.min_amount / (observation.pot + call.min_amount)
+        if call is not None and call.min_amount is not None
+        else 0.0
+    )
+    if profile_id == "balanced":
+        if call is None:
+            if strength >= 0.72 and SimulatorActionV1.BET in by_action:
+                return by_action[SimulatorActionV1.BET]
+            return _first_legal(
+                by_action,
+                (SimulatorActionV1.CHECK, SimulatorActionV1.BET, SimulatorActionV1.FOLD),
+            )
+        if strength >= 0.82 and SimulatorActionV1.RAISE in by_action:
+            return by_action[SimulatorActionV1.RAISE]
+        if strength < pot_odds + 0.08 and SimulatorActionV1.FOLD in by_action:
+            return by_action[SimulatorActionV1.FOLD]
+        return _first_legal(
+            by_action,
+            (SimulatorActionV1.CALL, SimulatorActionV1.CHECK, SimulatorActionV1.FOLD),
+        )
     priorities = {
         "cautious": (
             SimulatorActionV1.FOLD,
@@ -101,11 +128,45 @@ def _select_profile_action(
             SimulatorActionV1.FOLD,
         ),
     }[profile_id]
-    by_action = {legal.action: legal for legal in legal_actions}
+    return _first_legal(by_action, priorities)
+
+
+def _first_legal(
+    by_action: dict[SimulatorActionV1, LegalActionV1],
+    priorities: tuple[SimulatorActionV1, ...],
+) -> LegalActionV1:
     for action in priorities:
         if action in by_action:
             return by_action[action]
     raise ValueError("legal_actions must contain at least one action")
+
+
+def _visible_hand_strength(observation: ObservationV1) -> float:
+    """A coarse, explainable score from only own cards and public board.
+
+    This is intentionally not an equity calculation or solver approximation.
+    It only creates enough variety for a responsive MVP opponent.
+    """
+    ranks = {card[0] for card in observation.own_hole_cards}
+    board_ranks = [card[0] for card in observation.board]
+    rank_value = {"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "T": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
+    values = sorted((rank_value[card[0]] for card in observation.own_hole_cards), reverse=True)
+    if len(ranks) == 1:
+        strength = 0.78 + min(values[0] - 2, 10) / 100
+    elif any(rank in board_ranks for rank in ranks):
+        strength = 0.82 if max(board_ranks.count(rank) for rank in ranks) >= 2 else 0.74
+    elif values[0] >= 13 and values[1] >= 11:
+        strength = 0.64
+    elif values[0] >= 12:
+        strength = 0.48
+    else:
+        strength = 0.22
+    position_distance = (observation.observer_seat - observation.button_seat) % observation.table_size
+    if position_distance in (0, observation.table_size - 1):
+        strength += 0.03
+    if observation.street.value in ("turn", "river") and not any(rank in board_ranks for rank in ranks):
+        strength -= 0.05
+    return max(0.0, min(1.0, strength))
 
 
 def _profile_amount(profile_id: str, legal: LegalActionV1) -> int | None:

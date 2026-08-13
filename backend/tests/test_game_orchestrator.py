@@ -192,7 +192,7 @@ def test_sparse_active_seats_keep_session_seat_ids_through_open_action_and_obser
     store.close()
 
 
-def test_bust_out_next_hand_opens_with_a_sparse_active_set(tmp_path):
+def test_bust_out_next_hand_opens_after_a_durable_cash_rebuy(tmp_path):
     opened = _opened_session()
     assert opened.active_hand is not None
     settled = opened.complete_active_hand(
@@ -215,23 +215,17 @@ def test_bust_out_next_hand_opens_with_a_sparse_active_set(tmp_path):
     )
 
     started = result.appended_events[0].payload
-    assert started.active_seat_ids == (1, 2, 3, 4, 5)
+    assert started.active_seat_ids == (0, 1, 2, 3, 4, 5)
     assert started.starting_stacks == {
-        0: 0,
+        0: 10_000,
         1: 20_000,
         2: 10_000,
         3: 10_000,
         4: 10_000,
         5: 10_000,
     }
-    assert [event.payload.seat_id for event in result.appended_events[1:]] == [
-        1,
-        2,
-        3,
-        4,
-        5,
-    ]
-    assert result.replayed_hand.state.stacks.keys() == {1, 2, 3, 4, 5}
+    assert [event.payload.seat_id for event in result.appended_events[1:]] == list(range(6))
+    assert result.replayed_hand.state.stacks.keys() == set(range(6))
     store.close()
 
 

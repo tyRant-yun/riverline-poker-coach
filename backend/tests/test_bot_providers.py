@@ -14,7 +14,15 @@ from poker_coach.simulator import (
 )
 
 
-def _observation(legal_actions: list[dict[str, object]]):
+def _observation(
+    legal_actions: list[dict[str, object]],
+    *,
+    own_hole_cards: tuple[str, str] = ("As", "Kd"),
+    board: tuple[str, ...] = (),
+    street: str = "flop",
+    button_seat: int = 0,
+    pot: int = 300,
+):
     from poker_coach.simulator import ObservationV1
 
     return ObservationV1.model_validate(
@@ -23,10 +31,11 @@ def _observation(legal_actions: list[dict[str, object]]):
             "sequence": 4,
             "observerSeat": 0,
             "tableSize": 2,
-            "buttonSeat": 0,
-            "street": "flop",
-            "ownHoleCards": ["As", "Kd"],
-            "pot": 300,
+            "buttonSeat": button_seat,
+            "street": street,
+            "ownHoleCards": own_hole_cards,
+            "board": board,
+            "pot": pot,
             "stacks": {"0": 9700, "1": 9700},
             "streetCommitments": {"0": 0, "1": 0},
             "activeSeats": [0, 1],
@@ -109,3 +118,48 @@ def test_blueprint_sizing_respects_minimum_midpoint_and_maximum_boundaries():
 def test_factory_rejects_unknown_profile_id():
     with pytest.raises(ValueError, match="unknown bot profile"):
         build_bot_provider("solver-gto")
+
+
+def test_balanced_blueprint_has_deterministic_passive_fold_bet_and_raise_spots():
+    provider = LightweightBlueprintProvider("balanced")
+    spots = {
+        "passive": _observation([_legal("check"), _legal("bet", 100, 900)]),
+        "fold": _observation(
+            [_legal("fold"), _legal("call", 900, 900), _legal("raise", 1800, 3000)],
+            own_hole_cards=("7c", "2d"),
+            pot=100,
+        ),
+        "bet": _observation(
+            [_legal("check"), _legal("bet", 100, 900)],
+            own_hole_cards=("Ah", "Ad"),
+            board=("Ac", "7d", "2h"),
+        ),
+        "raise": _observation(
+            [_legal("fold"), _legal("call", 150, 150), _legal("raise", 400, 1500)],
+            own_hole_cards=("Ah", "Ad"),
+            board=("Ac", "7d", "2h"),
+        ),
+        "call": _observation(
+            [_legal("fold"), _legal("call", 50, 50), _legal("raise", 200, 800)],
+            own_hole_cards=("Ks", "Qd"),
+            pot=400,
+        ),
+    }
+
+    decisions = {
+        name: asyncio.run(provider.decide(spot, spot.legal_actions, 20, 123))
+        for name, spot in spots.items()
+    }
+
+    assert {name: decision.action.value for name, decision in decisions.items()} == {
+        "passive": "check",
+        "fold": "fold",
+        "bet": "bet",
+        "raise": "raise",
+        "call": "call",
+    }
+    assert decisions["raise"].amount == 950
+    assert all(
+        any(legal.accepts(action=decision.action, amount=decision.amount) for legal in spots[name].legal_actions)
+        for name, decision in decisions.items()
+    )
