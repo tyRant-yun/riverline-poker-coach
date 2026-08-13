@@ -73,13 +73,15 @@ test("continuous table create, legal action, completion, next hand, reconnect, a
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "持续牌桌" }).click();
+  await page.getByRole("button", { name: "牌桌", exact: true }).click();
   await page.getByTestId("bot-profile").selectOption("aggressive");
   await page.getByTestId("create-continuous-table").click();
+  await expect(page.getByTestId("table-workspace-v2")).toBeVisible();
+  await expect(page.getByLabel("底池与公共牌安全区")).toContainText("450");
   await expect(page.getByTestId("hero-legal-actions")).toBeVisible();
   await expect(page.getByLabel("Q♥")).toBeVisible();
-  await expect(page.getByText("Q♠")).toBeVisible();
-  expect(await page.locator(".seat:not(.seat--hero) .playing-card--back").count()).toBe(10);
+  await expect(page.getByLabel("Q♠")).toBeVisible();
+  expect(await page.getByLabel("card back").count()).toBe(0);
   await expect(page.getByTestId("bot-provenance")).toContainText("aggressive");
 
   await page.getByTestId("hero-action-call").click();
@@ -87,11 +89,11 @@ test("continuous table create, legal action, completion, next hand, reconnect, a
   await page.getByTestId("hero-action-call").click();
   await expect(page.getByTestId("next-hand")).toBeVisible();
   await page.getByTestId("next-hand").click();
-  await expect(page.getByTestId("continuous-table-status")).toContainText("Hand 2");
+  await expect(page.getByTestId("continuous-table-status")).toContainText("第 2 手");
 
   await page.reload();
-  await page.getByRole("button", { name: "持续牌桌" }).click();
-  await expect(page.getByTestId("continuous-table-status")).toContainText("Hand 2");
+  await page.getByRole("button", { name: "牌桌", exact: true }).click();
+  await expect(page.getByTestId("continuous-table-status")).toContainText("第 2 手");
   expect(calls).toContain(`GET /v1/tables/${sessionId}`);
   expect(calls).toContain("POST /v1/tables");
   expect(calls).toContain(`POST /v1/tables/${sessionId}/actions`);

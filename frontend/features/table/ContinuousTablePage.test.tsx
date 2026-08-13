@@ -33,13 +33,23 @@ describe("ContinuousTablePage", () => {
     fireEvent.change(screen.getByTestId("bot-profile"), { target: { value: "aggressive" } });
     fireEvent.click(screen.getByTestId("create-continuous-table"));
     await waitFor(() => expect(api.create).toHaveBeenCalledWith(expect.objectContaining({ botProfile: "aggressive" })));
-    expect(screen.getByTestId("poker-table")).toBeInTheDocument();
+    expect(screen.getByTestId("table-workspace-v2")).toBeInTheDocument();
     expect(screen.getByLabelText("Q♥")).toBeInTheDocument();
-    expect(screen.getAllByLabelText("card back")).toHaveLength(10);
+    expect(screen.queryByLabelText("A♥")).not.toBeInTheDocument();
     expect(screen.getByTestId("table-insights")).toHaveTextContent("deterministic_formula");
     expect(screen.getByTestId("table-insights")).toHaveTextContent("公式/启发式建议，不是 Solver 或 GTO 结果");
-    expect(screen.getByTestId("table-insights")).toHaveTextContent("Fast EV Solver L1");
-    expect(screen.getByTestId("table-insights")).toHaveTextContent("独立座位边际；不含对手私牌");
+    fireEvent.click(screen.getByRole("button", { name: "Range" }));
+    expect(screen.getByTestId("table-insights")).toHaveTextContent("Range Belief");
+  });
+
+  it("uses the V2 workspace as the real table entry and renders backend table facts", async () => {
+    render(<ContinuousTablePage />);
+    fireEvent.click(screen.getByTestId("create-continuous-table"));
+
+    expect(await screen.findByTestId("table-workspace-v2")).toBeInTheDocument();
+    expect(screen.getByLabelText("底池与公共牌安全区")).toHaveTextContent("450");
+    expect(screen.getByLabelText("Hero 操作区")).toHaveTextContent("Q♥ Q♠");
+    expect(screen.queryByTestId("poker-table")).not.toBeInTheDocument();
   });
 
   it("keeps L0 visible while L1 loads and ignores an old solver response after a new decision", async () => {
@@ -55,7 +65,8 @@ describe("ContinuousTablePage", () => {
     expect(screen.getByTestId("table-insights")).toHaveTextContent("deterministic_formula");
     fireEvent.click(screen.getByTestId("hero-action-call"));
     await waitFor(() => expect(api.solver).toHaveBeenCalledTimes(2));
-    expect(screen.getByTestId("table-insights")).toHaveTextContent("Solver 计算中");
+    fireEvent.click(screen.getByRole("button", { name: "Solver" }));
+    expect(screen.getByTestId("table-insights")).toHaveTextContent("Fast Solver 计算中");
 
     resolveB!({ solver: { status: "degraded", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "call", amount: 100, approximateEvChips: "4" }], equity: "0.4", iterations: 20, source: "monte_carlo_uniform_opponents", version: "fast-ev-solver/v1", limitations: ["partial"] } });
     await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("近似 EV 求解（降级）"));
@@ -101,12 +112,12 @@ describe("ContinuousTablePage", () => {
 
     expect(await screen.findByLabelText("A♥")).toBeInTheDocument();
     expect(screen.getByLabelText("K♥")).toBeInTheDocument();
-    expect(screen.getAllByLabelText("card back")).toHaveLength(8);
+    expect(screen.queryByLabelText("card back")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("next-hand"));
     await screen.findByLabelText("2♣");
     expect(screen.queryByLabelText("A♥")).not.toBeInTheDocument();
-    expect(screen.getAllByLabelText("card back")).toHaveLength(10);
+    expect(screen.queryByLabelText("card back")).not.toBeInTheDocument();
   });
 
   it("clears old insights and ignores an out-of-order response after a table transition", async () => {
@@ -121,12 +132,12 @@ describe("ContinuousTablePage", () => {
     await waitFor(() => expect(api.insights).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByTestId("hero-action-call"));
     await waitFor(() => expect(api.insights).toHaveBeenCalledTimes(2));
-    expect(screen.getByTestId("table-insights")).toHaveTextContent("洞察未就绪");
+    expect(screen.getByTestId("table-insights")).toHaveTextContent("Advisor 未就绪");
 
     resolveB!({ insights: { available: true, advisor: { available: true, result: { recommendedAction: { action: "call", reason: "B" }, source: "deterministic_formula", version: "formula-advisor/v1" } }, seatBeliefs: [], stats: { available: false, unavailableReason: "stats_not_ready", bySeat: [] } } });
-    await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("call · deterministic_formula"));
+    await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("建议：跟注"));
     resolveA!({ insights: { available: true, advisor: { available: true, result: { recommendedAction: { action: "check", reason: "A" }, source: "deterministic_formula", version: "formula-advisor/v1" } }, seatBeliefs: [], stats: { available: false, unavailableReason: "stats_not_ready", bySeat: [] } } });
-    await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("call · deterministic_formula"));
+    await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("建议：跟注"));
   });
 
   it("clears the prior hand review and ignores an out-of-order terminal review", async () => {
