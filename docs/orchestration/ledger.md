@@ -51,10 +51,11 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R5-03 Local Experience | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `merged` | `codex/r5-03-local-experience` | `a85784c` | `773bfe0fdef3684e46f183d0ea1d68e8ff408b88` | [R5-03 handoff](handoffs/R5-03.md) | launcher health/create/3 actions/Web 200; Playwright 3 passed; tsc; build | stage release gate | Integrated `47a0788..674db80`; default launch isolates dead external DB/Redis config and cleans only owned process trees |
 | R5-04 MVP Experience Release Gate | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `blocked` | `codex/r5-04-experience-gate` | `ce3620e` | `bc4aa427af48962f17359db6457a6a7e86f8ef23` | [R5-04 handoff](handoffs/R5-04.md) | Backend 541 passed/10 skipped/1 failed; remaining gates measured false | R5-02F | Old post-bust sparse-seat fixture conflicts with approved auto-rebuy re-entry semantics; gate stopped before expansion |
 | R5-02F Sparse-seat Re-entry Fix | `019ff4e4-9f9c-7730-b987-80d498144ebc` | `completed` | `merged` | `codex/r5-02f-sparse-reentry` | `f7df3cc` | `6ac09f5` | [R5-02F handoff](handoffs/R5-02F.md) | Exact red/green 1 passed; focused 21 passed; recovery 1 passed; independent re-review 1 passed | R5-04 resume | Integrated `8da0498..626d429`; fixture preserves PHH authority and locks 100BB seat re-entry |
+| R5-05 Random Deal + Showdown Reveal | `019ff9a9-e983-7271-827e-c1d66ca1e544` | `in_progress` | `in_progress` | `codex/r5-05-deal-showdown` | `1f7c6a2` | — | — | — | independent rules/privacy review; R5-04 resume | Default hands use fresh entropy; explicit seed remains reproducible; only live showdown contenders reveal at terminal |
 
 ## 下一入口
 
-`R5-02F → R5-04 resume`：产品决定为 busted seat 自动补至 100BB 并于下一手重新入桌；只修复与旧 sparse-seat PHH fixture 的冲突并做独立 P0/P1 复审。通过后仅续跑 R5-04 尚未完成的门与精确 backend 回归，不重复已绿的 541 项。
+`R5-05 → R5-04 resume`：发布门因用户实测重复牌序与 showdown 不翻牌暂停。先修默认新鲜随机牌序及 terminal-only live-contender reveal，做独立规则/私牌 P0/P1 窄审查；通过后修 5 个旧入口前端测试并继续未完成发布门，不重复已绿后端范围。
 
 ## MVP 执行策略
 
