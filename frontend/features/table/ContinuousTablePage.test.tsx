@@ -48,4 +48,24 @@ describe("ContinuousTablePage", () => {
     fireEvent.click(screen.getByTestId("next-hand"));
     await waitFor(() => expect(api.nextHand).toHaveBeenCalledWith("table-1", expect.objectContaining({ expectedRevision: 18 })));
   });
+
+  it("clears old insights and ignores an out-of-order response after a table transition", async () => {
+    let resolveA: (value: unknown) => void;
+    let resolveB: (value: unknown) => void;
+    api.insights
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveA = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveB = resolve; }));
+    api.action.mockResolvedValueOnce({ table: { ...table, revision: 19, board: ["As", "Kd", "7c", "2h"] } });
+    render(<ContinuousTablePage />);
+    fireEvent.click(screen.getByTestId("create-continuous-table"));
+    await waitFor(() => expect(api.insights).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTestId("hero-action-call"));
+    await waitFor(() => expect(api.insights).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("table-insights")).toHaveTextContent("洞察未就绪");
+
+    resolveB!({ insights: { available: true, advisor: { available: true, result: { recommendedAction: { action: "call", reason: "B" }, source: "deterministic_formula", version: "formula-advisor/v1" } }, seatBeliefs: [], stats: { available: false, unavailableReason: "stats_not_ready", bySeat: [] } } });
+    await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("call · deterministic_formula"));
+    resolveA!({ insights: { available: true, advisor: { available: true, result: { recommendedAction: { action: "check", reason: "A" }, source: "deterministic_formula", version: "formula-advisor/v1" } }, seatBeliefs: [], stats: { available: false, unavailableReason: "stats_not_ready", bySeat: [] } } });
+    await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("call · deterministic_formula"));
+  });
 });

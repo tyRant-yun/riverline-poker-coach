@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import PokerTable from "../../components/poker/PokerTable";
 import { continuousTableApi } from "../../lib/api/client";
@@ -22,8 +22,15 @@ export default function ContinuousTablePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [insights, setInsights] = useState<TableInsightsResponse["insights"] | null>(null);
+  const insightRequest = useRef(0);
 
-  function loadInsights(next: ContinuousTable) { continuousTableApi.insights(next.sessionId).then((response) => setInsights(response.insights)).catch(() => setInsights(null)); }
+  function loadInsights(next: ContinuousTable) {
+    const request = ++insightRequest.current;
+    setInsights(null);
+    continuousTableApi.insights(next.sessionId)
+      .then((response) => { if (request === insightRequest.current) setInsights(response.insights); })
+      .catch(() => { if (request === insightRequest.current) setInsights(null); });
+  }
 
   useEffect(() => {
     const sessionId = window.localStorage.getItem("riverline-continuous-table-session");
