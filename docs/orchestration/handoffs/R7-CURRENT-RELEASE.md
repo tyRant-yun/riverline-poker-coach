@@ -3,11 +3,11 @@
 ```yaml
 contract_version: handoff/v1
 task_id: R7 Current Snapshot Release
-thread_id: 019ff338-3cbc-7d91-999d-0c44208c325e
+thread_id: 019ff53a-fe87-7353-b7cc-ac3288f0553e
 branch: codex/r7-current-snapshot-release
 base_commit: e7ae8e83aa8392085465d71fa89c980d31ab40ae
 delivery_head: 76e2dcca9337a2c56e11b8c68b26c426cbc3553c
-governance_head: 76e2dcca9337a2c56e11b8c68b26c426cbc3553c
+governance_head: 6eeafd68095464bd02e2ae2ecf6bcfef36992222
 status: completed
 release_verdict: PASS
 scope:
@@ -37,7 +37,7 @@ quality_gates:
     result: 19 passed
     measured: true
   - command: py -3.13 -m pytest backend/tests -q
-    result: passed; 10 existing environment/live-service skips
+    result: passed; passed count not captured in the retained test output; 10 existing environment/live-service skips
     measured: true
   - command: py -3.13 -m compileall -q backend
     result: exit 0
