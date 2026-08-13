@@ -60,11 +60,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R6 MVP Release Gate | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `blocked` | `codex/r6-release-gate` | `8fac229` | — | — | paused by controller | R7 plan | User reported Advisor availability, Solver accuracy and layout/contrast blockers; no PR/main merge until R7 gates close |
 | R7-01 Hero-centered High-contrast UI | `019ffa56-4dad-7751-a426-f54cff4f3ceb` | `completed` | `merged` | `codex/r7-01-ui-geometry` | `4286066cda633f8ade9a827ebee8f5c639b5abfe` | `82383d89a79d3a10a128b5cbb5459c9862ba9958` | [R7-01 handoff](handoffs/R7-01.md) | Vitest 4; tsc; build; four-viewport Playwright geometry/contrast PASS | R7-07 integration | Integrated as `31f532a..6b761f1`; Hero centered, larger cards, stronger contrast, Advisor/Range/Solver simultaneously visible |
 | R7-02 Always-on Advisor Contract | `019ffa56-4db3-7382-b46e-7b3ff1604b56` | `completed` | `merged` | `codex/r7-02-advisor-reliability` | `4286066cda633f8ade9a827ebee8f5c639b5abfe` | `33e07dcd2c8ee3f4a8a1238ba8214ee42a2525f7` | [R7-02 handoff](handoffs/R7-02.md) | Worker 26 focused passed; Advisor p95 7.321ms; reviewer 13 direct tests PASS | R7-02I; R7-04/R7-05 consume contract | Integrated as `b2c4da5..3f5d060`; independent [R7-02R](handoffs/R7-02R.md) P0/P1 review PASS at `d2ece37` |
-| R7-02I Advisor Type Fixture | `019ffa56-4dad-7751-a426-f54cff4f3ceb` | `in_progress` | `not_started` | `codex/r7-02i-type-fixture` | `d2ece37` | — | — | one direct TypeScript fixture plus focused tsc/Vitest | R7-03 | Integration tsc found missing additive `amountSemantics`; no production logic change authorized |
+| R7-02I Advisor Type Fixture | `019ffa56-4dad-7751-a426-f54cff4f3ceb` | `completed` | `merged` | `codex/r7-02i-type-fixture` | `d2ece371be873eace5a79062702047ffcc0aac40` | `6aac88150b51df79c50e90bab9e315b97f8aca52` | [R7-02I handoff](handoffs/R7-02I.md) | tsc; TableWorkspaceV2 4/4; diff check PASS | current-snapshot release | Integrated as `a4e307f..dca70d4`; production logic unchanged |
+| R7 Current Snapshot Release | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `in_progress` | `not_started` | `codex/r7-current-snapshot-release` | `dca70d4` | — | — | release gates, repository hygiene, GitHub PR/merge, final report | none | User explicitly stopped before R7-03; release must describe Range V2/Solver L1.5/L2 as deferred, not shipped |
 
 ## 下一入口
 
-`R7-02I`：R7-01 与 R7-02 已集成，独立 Advisor 审查 PASS；先关闭唯一 TypeScript fixture 回归，再启动 R7-03 evaluator/oracle spike。不提前并发 Range V2 或 Solver L1.5。
+`R7 Current Snapshot Release`：R7-01、R7-02、R7-02I 已集成。按用户决定不启动 R7-03；只完成当前范围的发布门、仓库整理、GitHub PR/合并和整体报告。
 
 ## MVP 执行策略
 
