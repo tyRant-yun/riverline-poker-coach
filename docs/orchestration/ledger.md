@@ -39,6 +39,8 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F3-02 Public-event Belief Consumer | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-01-seat-priors` | `0f5b1e4` | `b0fefbfe5091a78f9f28f8012535328ebf1ff6ae` | [F3-02 handoff](handoffs/F3-02.md) | Worker: 72 focused passed；compileall/diff check；private events rejected | F3-06 | Defer API/UI insight wiring to next budget |
 | F2-06S Browser Smoke | `019ff505-db5d-7323-b396-a75ade283897` | `completed` | `merged` | `codex/f2-04-continuous-table-api` | `a4acea3` | `ad781f1af0189f636bbe18936120dfbd14adf07e` | [F2-06S handoff](handoffs/F2-06S.md) | Worker: Playwright 1 passed in 5.0s | F3-06/F4 review wiring | Integrated as `c75c294` through corrected handoff `f00ccd1`; unrelated generated `frontend/next-env.d.ts` preserved in Worker worktree |
 | Release Cleanup/GitHub Draft PR | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `in_progress` | `in_progress` | release worktree from `codex/simulator-rebuild` | `1a5c576` | — | — | — | — | Safe worktree audit, final smoke intake if ready, push integration branch, open Draft PR |
+| F3-06 Table Insights Vertical Slice | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `in_progress` | `in_progress` | `codex/f3-06-table-insights` | `49b9471` | — | — | — | F4-04/release gate | Reuse Range worker; read-only honest L0 advice + seat beliefs + stats API/UI, no L1/L2 solver |
+| F4-03 Automatic Review Projection | `019ff508-1e0f-7ec2-a536-ff90eab7836a` | `in_progress` | `in_progress` | `codex/f4-03-auto-review` | `49b9471` | — | — | — | F4-04 API/UI wiring | Reuse stats worker; backend-only event-backed completed-hand review projection, no shared API/frontend files |
 
 ## 下一入口
 
@@ -91,6 +93,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：F2-06 handoff/Git 与 11 focused tests、tsc、production build 证据一致，以 `00b9a9c`、`99ddb08` 集成。F3-02 handoff/Git 与 72 focused tests、compileall、private-event rejection 证据一致，以 `f422430`、`05c125f` 集成。剩余额度仅安排复用 F2 Worker 的单一 Playwright smoke，不再开功能链或新进程。
 - 2026-08-12：按产品负责人要求创建最终发布任务 `019ff53a-fe87-7353-b7cc-ac3288f0553e`，使用 GitHub yeet 流程安全整理 clean/merged/idle worktree、接收已完成的 F2-06S（若可验收）、推送 `codex/simulator-rebuild` 并创建 Draft PR；不强制删除、不合并 main、不发布 release。
 - 2026-08-13：F2-06S handoff/Git 与 Playwright 1 passed 证据一致，交付及纠正后的 handoff 以 `c75c294` 至 `f00ccd1` 集成；不重复测试。下一入口切换到 F3-06 桌面洞察与 F4 自动复盘接线。
+- 2026-08-13：从集成基线 `49b9471` 受控并行复用 Range 与 Stats 两个原任务进程：F3-06 独占桌面洞察 API/UI 文件，F4-03 独占自动复盘 projection/service 文件；禁止交叉修改，均仅运行 focused tests。
 
 ## 主控更新规则
 
