@@ -37,12 +37,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F3-01 6-max Seat Priors | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-01-seat-priors` | `f9829b9f44d477510801ce07b92aa7719c755ee0` | `df06fd389f5e7412baec994f4a5b81f47850c18e` | [F3-01 handoff](handoffs/F3-01.md) | Worker: 68 focused passed；compileall/diff check；heuristic provenance explicit | F3-02 | Reuse Worker for public-event belief updates |
 | F2-06 Minimal Polling Table UI | `019ff505-db5d-7323-b396-a75ade283897` | `completed` | `merged` | `codex/f2-04-continuous-table-api` | `1391405` | `6d34e7a0b17edb564e423f43fcd1c29827803aa5` | [F2-06 handoff](handoffs/F2-06.md) | Worker: 11 focused tests；tsc；Next production build | Table browser smoke | Reuse Worker for one Playwright smoke only |
 | F3-02 Public-event Belief Consumer | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-01-seat-priors` | `0f5b1e4` | `b0fefbfe5091a78f9f28f8012535328ebf1ff6ae` | [F3-02 handoff](handoffs/F3-02.md) | Worker: 72 focused passed；compileall/diff check；private events rejected | F3-06 | Defer API/UI insight wiring to next budget |
-| F2-06S Browser Smoke | `019ff505-db5d-7323-b396-a75ade283897` | `in_progress` | `in_progress` | `codex/f2-04-continuous-table-api` | `a4acea3` | — | — | — | — | Single mocked Playwright create/action/next/reconnect/privacy smoke; final budget task |
+| F2-06S Browser Smoke | `019ff505-db5d-7323-b396-a75ade283897` | `completed` | `merged` | `codex/f2-04-continuous-table-api` | `a4acea3` | `ad781f1af0189f636bbe18936120dfbd14adf07e` | [F2-06S handoff](handoffs/F2-06S.md) | Worker: Playwright 1 passed in 5.0s | F3-06/F4 review wiring | Integrated as `c75c294` through corrected handoff `f00ccd1`; unrelated generated `frontend/next-env.d.ts` preserved in Worker worktree |
 | Release Cleanup/GitHub Draft PR | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `in_progress` | `in_progress` | release worktree from `codex/simulator-rebuild` | `1a5c576` | — | — | — | — | Safe worktree audit, final smoke intake if ready, push integration branch, open Draft PR |
 
 ## 下一入口
 
-`F2-06 browser smoke`：仅补持续牌桌 create/action/next/reconnect 的 Playwright mock-contract smoke；完成后停止扩大范围，后续预算进入 F3-06/F4 review 接线。
+`F3-06 + F4 review wiring`：从最新集成基线并行推进两个文件所有权不重叠的 MVP 纵向任务——桌面洞察接线，以及牌局完成后的事件驱动自动复盘后端闭环；只做 focused tests，暂不扩大到 L1/L2 solver 或 SaaS 基础设施。
 
 ## MVP 执行策略
 
@@ -90,6 +90,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-12：不创建新进程，F2-04 Worker 在同分支从 `1391405` 续接 F2-06 最小轮询牌桌 UI；F3-01 Worker 在同分支从 `0f5b1e4` 续接 F3-02 公共事件 Belief consumer。两者通过 `git show codex/simulator-rebuild:AGENTS.md` 读取新规则，避免为旧 worktree 缺少治理文件重启或复制无关提交。
 - 2026-08-12：F2-06 handoff/Git 与 11 focused tests、tsc、production build 证据一致，以 `00b9a9c`、`99ddb08` 集成。F3-02 handoff/Git 与 72 focused tests、compileall、private-event rejection 证据一致，以 `f422430`、`05c125f` 集成。剩余额度仅安排复用 F2 Worker 的单一 Playwright smoke，不再开功能链或新进程。
 - 2026-08-12：按产品负责人要求创建最终发布任务 `019ff53a-fe87-7353-b7cc-ac3288f0553e`，使用 GitHub yeet 流程安全整理 clean/merged/idle worktree、接收已完成的 F2-06S（若可验收）、推送 `codex/simulator-rebuild` 并创建 Draft PR；不强制删除、不合并 main、不发布 release。
+- 2026-08-13：F2-06S handoff/Git 与 Playwright 1 passed 证据一致，交付及纠正后的 handoff 以 `c75c294` 至 `f00ccd1` 集成；不重复测试。下一入口切换到 F3-06 桌面洞察与 F4 自动复盘接线。
 
 ## 主控更新规则
 
