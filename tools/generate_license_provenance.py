@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.metadata as metadata
 import json
 import re
 import sys
@@ -17,7 +16,7 @@ import tomllib
 from pathlib import Path
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 PYTHON_COPyleft_ALLOWLIST = {
     "psycopg": {"LGPL-3.0-only"},
     "psycopg-binary": {"LGPL-3.0-only"},
@@ -33,9 +32,6 @@ NPM_COPYLEFT_DECISIONS = {
         ],
         "obligations": "Retain applicable notices and provide/point to the corresponding LGPL source and license material for the shipped libvips binary; obtain legal review for the actual distribution.",
     }
-}
-PYTHON_LICENSE_OVERRIDES = {
-    "colorama": {"license": "BSD-3-Clause", "evidence": "installed package Trove classifier plus docs/dependency-inventory.md"},
 }
 COPYLEFT_RE = re.compile(r"(?:^|\W)(?:A?GPL|LGPL)(?:-|\W|$)", re.I)
 
@@ -68,7 +64,19 @@ def direct_python_names(project: dict[str, object]) -> set[str]:
     return {normalise(re.match(r"([A-Za-z0-9_.-]+)", spec).group(1)) for spec in specs}
 
 
-def python_components(root: Path, failures: list[str]) -> list[dict[str, object]]:
+def license_decisions(root: Path) -> dict[str, object]:
+    path = root / "tools" / "license_provenance_decisions.json"
+    decisions = json.loads(path.read_text(encoding="utf-8"))
+    if decisions.get("schema_version") != 1 or not isinstance(
+        decisions.get("python_licenses"), dict
+    ):
+        raise ValueError("unsupported license provenance decision schema")
+    return decisions
+
+
+def python_components(
+    root: Path, failures: list[str], decisions: dict[str, object]
+) -> list[dict[str, object]]:
     pyproject = root / "backend" / "pyproject.toml"
     requirements = root / "backend" / "requirements.lock"
     project = tomllib.loads(pyproject.read_text(encoding="utf-8"))
@@ -88,27 +96,22 @@ def python_components(root: Path, failures: list[str]) -> list[dict[str, object]
             "evidence": ["backend/requirements.lock", "backend/pyproject.toml"],
             "unknown": ["artifact integrity hash"],
         }
-        try:
-            distribution = metadata.distribution(name)
-            installed_version = distribution.version
-            license_value = distribution.metadata.get("License-Expression") or distribution.metadata.get("License")
-            metadata_path = Path(distribution._path) / "METADATA"  # noqa: SLF001: stdlib Distribution path
-            item["installed"] = {"status": "present", "version": installed_version}
-            item["metadata_sha256"] = sha256(metadata_path) if metadata_path.exists() else None
-            item["evidence"].append("installed Python distribution METADATA")
-            if installed_version != version:
-                failures.append(f"pypi:{name}: installed {installed_version}, lock requires {version}")
-            if license_value:
-                item["license"] = {"status": "metadata", "value": license_value}
-            elif name in PYTHON_LICENSE_OVERRIDES:
-                override = PYTHON_LICENSE_OVERRIDES[name]
-                item["license"] = {"status": "reviewed-override", "value": override["license"]}
-                item["evidence"].append(override["evidence"])
-            else:
-                failures.append(f"pypi:{name}: missing license metadata")
-        except metadata.PackageNotFoundError:
-            item["installed"] = {"status": "missing", "version": None}
-            failures.append(f"pypi:{name}: locked distribution is not installed")
+        decision_key = f"{name}=={version}"
+        decision = decisions.get("python_licenses", {}).get(decision_key)
+        if isinstance(decision, dict) and decision.get("license"):
+            item["license"] = {
+                "status": "reviewed-decision",
+                "value": decision["license"],
+            }
+            item["evidence"].append(
+                f"tools/license_provenance_decisions.json#{decision_key}"
+            )
+            item["evidence"].extend(decision.get("evidence", []))
+        else:
+            item["unknown"].append("license")
+            failures.append(
+                f"pypi:{name}: missing repository-controlled license decision for {version}"
+            )
         license_value = item["license"]["value"]
         if license_value and COPYLEFT_RE.search(str(license_value)):
             allowed = PYTHON_COPyleft_ALLOWLIST.get(name, set())
@@ -165,7 +168,8 @@ def npm_components(root: Path, failures: list[str]) -> list[dict[str, object]]:
 
 def inventory(root: Path) -> dict[str, object]:
     source_failures: list[str] = []
-    components = python_components(root, source_failures) + npm_components(root, source_failures)
+    decisions = license_decisions(root)
+    components = python_components(root, source_failures, decisions) + npm_components(root, source_failures)
     binary_failures = list(source_failures)
     for component in components:
         if component["ecosystem"] == "pypi" and component["integrity"]["status"] == "unknown":
@@ -179,6 +183,7 @@ def inventory(root: Path) -> dict[str, object]:
         "backend/pyproject.toml",
         "backend/requirements.lock",
         "frontend/package-lock.json",
+        "tools/license_provenance_decisions.json",
         "LICENSE",
     ]
     return {

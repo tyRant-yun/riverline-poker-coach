@@ -223,7 +223,8 @@ def test_live_hand_event_append_round_trip_and_same_expected_sequence_race(pg_st
 
 
 def test_live_projection_rebuild_and_transactional_outbox_dispatch(pg_store):
-    event_store = PostgresHandEventStore(PG_URL)
+    fixed_now = datetime(2026, 8, 12, tzinfo=timezone.utc)
+    event_store = PostgresHandEventStore(PG_URL, clock=lambda: fixed_now)
     projection_store = PostgresProjectionStore(PG_URL)
     event = RawHandEventV1.from_event(
         HandEventV1.model_validate(
@@ -284,7 +285,7 @@ def test_live_projection_rebuild_and_transactional_outbox_dispatch(pg_store):
         result = OutboxDispatcher(event_store).dispatch_once(
             worker_id="live-worker",
             dispatch=lambda message: delivered.append(message.idempotency_key),
-            now=datetime(2026, 8, 12, tzinfo=timezone.utc),
+            now=fixed_now,
         )
 
         assert rebuilt.payload == incremental.payload

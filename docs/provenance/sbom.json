@@ -6974,21 +6974,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#alembic==1.19.1"
       ],
-      "installed": {
-        "status": "present",
-        "version": "1.19.1"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "b5ace39f60723a27beec126ce46fef5e288d47acd5875ccc3e9a8203f9c03939",
       "name": "alembic",
       "resolved": {
         "status": "locked",
@@ -7009,21 +7004,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#annotated-doc==0.0.5"
       ],
-      "installed": {
-        "status": "present",
-        "version": "0.0.5"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "8c24d70c5d9153d22123353a906042fd7603df2d15c2196290b0f8a962558c46",
       "name": "annotated-doc",
       "resolved": {
         "status": "locked",
@@ -7044,21 +7034,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#annotated-types==0.8.0"
       ],
-      "installed": {
-        "status": "present",
-        "version": "0.8.0"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "614985b278f601b8ef863f82783b991cc3ada4b89f592eb71c7c48c5f2ef2298",
       "name": "annotated-types",
       "resolved": {
         "status": "locked",
@@ -7079,21 +7064,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#anyio==4.14.2"
       ],
-      "installed": {
-        "status": "present",
-        "version": "4.14.2"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "c5e6fc4dfd833319913b287be7a30d9935e9208c7ef917630621855aaac4d419",
       "name": "anyio",
       "resolved": {
         "status": "locked",
@@ -7114,21 +7094,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#certifi==2026.7.22"
       ],
-      "installed": {
-        "status": "present",
-        "version": "2026.7.22"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MPL-2.0"
       },
-      "metadata_sha256": "ef5af1638fbb23676ac3c5777dfcfc2cd9c348fe4172ed5ba3d277655b248090",
       "name": "certifi",
       "resolved": {
         "status": "locked",
@@ -7149,21 +7124,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#click==8.4.2"
       ],
-      "installed": {
-        "status": "present",
-        "version": "8.4.2"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "BSD-3-Clause"
       },
-      "metadata_sha256": "194c9dd81d567f9081f026c7e401060fbafa7bc147c8e0a58b3668b40a64c031",
       "name": "click",
       "resolved": {
         "status": "locked",
@@ -7184,22 +7154,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA",
-        "installed package Trove classifier plus docs/dependency-inventory.md"
+        "tools/license_provenance_decisions.json#colorama==0.4.6"
       ],
-      "installed": {
-        "status": "present",
-        "version": "0.4.6"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "reviewed-override",
+        "status": "reviewed-decision",
         "value": "BSD-3-Clause"
       },
-      "metadata_sha256": "7baed29eb50c3b29bdb33ff84e3177bf1bc05784f7685ecdcaa4471c7dd810cc",
       "name": "colorama",
       "resolved": {
         "status": "locked",
@@ -7220,21 +7184,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#fakeredis==2.37.0"
       ],
-      "installed": {
-        "status": "present",
-        "version": "2.37.0"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "BSD-3-Clause"
       },
-      "metadata_sha256": "619f4e01f24cbb8b3665919cf2aa1f2fee7ed87c118d7c5e36e4f893896a538a",
       "name": "fakeredis",
       "resolved": {
         "status": "locked",
@@ -7255,21 +7214,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#fastapi==0.139.2"
       ],
-      "installed": {
-        "status": "present",
-        "version": "0.139.2"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "c86d24b58212c20d55d906fbbb537b2d2e63320eb22969257cebc596ee56a35e",
       "name": "fastapi",
       "resolved": {
         "status": "locked",
@@ -7290,21 +7244,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#greenlet==3.5.4"
       ],
-      "installed": {
-        "status": "present",
-        "version": "3.5.4"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT AND PSF-2.0"
       },
-      "metadata_sha256": "cd54b553dbb3fe69d78b74d8cf0b37866614db8fd9df7dc66278e38c63daacb0",
       "name": "greenlet",
       "resolved": {
         "status": "locked",
@@ -7325,21 +7274,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#h11==0.16.0"
       ],
-      "installed": {
-        "status": "present",
-        "version": "0.16.0"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "28f326098ac09fcba79b8f180f96087c841fe2456215cb7b872a9c7d5cd19d64",
       "name": "h11",
       "resolved": {
         "status": "locked",
@@ -7360,21 +7304,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#httpcore==1.0.9"
       ],
-      "installed": {
-        "status": "present",
-        "version": "1.0.9"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "BSD-3-Clause"
       },
-      "metadata_sha256": "fe2d4fda6199128978779e0cf27f3c045c531863fcdd987eacc74f3a18d41c21",
       "name": "httpcore",
       "resolved": {
         "status": "locked",
@@ -7395,21 +7334,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#httpx==0.28.1"
       ],
-      "installed": {
-        "status": "present",
-        "version": "0.28.1"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "BSD-3-Clause"
       },
-      "metadata_sha256": "febb9b0f8f3e80d57c8199c304f35c4336e8581d1d18d7983c92766b82793b25",
       "name": "httpx",
       "resolved": {
         "status": "locked",
@@ -7430,21 +7364,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#idna==3.18"
       ],
-      "installed": {
-        "status": "present",
-        "version": "3.18"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "BSD-3-Clause"
       },
-      "metadata_sha256": "46dfe6e5ac462d0f680ecd9abcf66e829b6a2334824b4d9e3979b31135caf281",
       "name": "idna",
       "resolved": {
         "status": "locked",
@@ -7465,21 +7394,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#iniconfig==2.3.0"
       ],
-      "installed": {
-        "status": "present",
-        "version": "2.3.0"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "40d773f84e4e112f495bbf4f1be9cbd2d456c0aeb6ef5311f75d1bf322f2165b",
       "name": "iniconfig",
       "resolved": {
         "status": "locked",
@@ -7500,21 +7424,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#mako==1.4.1"
       ],
-      "installed": {
-        "status": "present",
-        "version": "1.4.1"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "1f427af53f47988519af11a1a04136154eadbda5b9607fe30a64eb653d5118a8",
       "name": "mako",
       "resolved": {
         "status": "locked",
@@ -7535,21 +7454,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#markupsafe==3.0.3"
       ],
-      "installed": {
-        "status": "present",
-        "version": "3.0.3"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "BSD-3-Clause"
       },
-      "metadata_sha256": "f0ae5dbb09d50fb5f7632c3d53f0220995ef76019e5892e0a545740136a4e3cb",
       "name": "markupsafe",
       "resolved": {
         "status": "locked",
@@ -7570,21 +7484,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#packaging==26.2"
       ],
-      "installed": {
-        "status": "present",
-        "version": "26.2"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "Apache-2.0 OR BSD-2-Clause"
       },
-      "metadata_sha256": "4f9cbcd7933415a4793f7767c98a2b6a512c823fc81c87337815705f230ecabf",
       "name": "packaging",
       "resolved": {
         "status": "locked",
@@ -7605,21 +7514,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#pluggy==1.6.0"
       ],
-      "installed": {
-        "status": "present",
-        "version": "1.6.0"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "7438c35ee25a095eb7416f84b461c2d74425c5e734ad54c3912453c65244e01c",
       "name": "pluggy",
       "resolved": {
         "status": "locked",
@@ -7640,21 +7544,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#pokerkit==0.7.4"
       ],
-      "installed": {
-        "status": "present",
-        "version": "0.7.4"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "e3a55cb355735bac54e7ed65033514943b4e8f155160a5f59370d299689ba5cd",
       "name": "pokerkit",
       "resolved": {
         "status": "locked",
@@ -7676,21 +7575,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#psycopg==3.3.4"
       ],
-      "installed": {
-        "status": "present",
-        "version": "3.3.4"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "LGPL-3.0-only"
       },
-      "metadata_sha256": "daef30765d48b6c646bffb62457da8e1e969f0ff3bacf563c14da60f185c253d",
       "name": "psycopg",
       "resolved": {
         "status": "locked",
@@ -7712,21 +7606,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#psycopg-binary==3.3.4"
       ],
-      "installed": {
-        "status": "present",
-        "version": "3.3.4"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "LGPL-3.0-only"
       },
-      "metadata_sha256": "c15311f1318c7ceb5de9ec676727ba3e397fab14a5ff7ed14f718b29c638b3fd",
       "name": "psycopg-binary",
       "resolved": {
         "status": "locked",
@@ -7748,21 +7637,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#psycopg-pool==3.3.1"
       ],
-      "installed": {
-        "status": "present",
-        "version": "3.3.1"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "LGPL-3.0-only"
       },
-      "metadata_sha256": "caa52de12a12bbb1ec6cae113e0877afdf3b610e9b1ee78ff394b71ebe069c03",
       "name": "psycopg-pool",
       "resolved": {
         "status": "locked",
@@ -7783,21 +7667,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#pydantic==2.13.4"
       ],
-      "installed": {
-        "status": "present",
-        "version": "2.13.4"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "d1e56c3412492512fb6b59a9dfc25ab7af2a8204585cd7bca000513023133394",
       "name": "pydantic",
       "resolved": {
         "status": "locked",
@@ -7818,21 +7697,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#pydantic-core==2.46.4"
       ],
-      "installed": {
-        "status": "present",
-        "version": "2.46.4"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "e2d0298dfb8712190ad250722e11a46a4391e71d687d5c7667c09e935cadc63b",
       "name": "pydantic-core",
       "resolved": {
         "status": "locked",
@@ -7853,21 +7727,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#pygments==2.20.0"
       ],
-      "installed": {
-        "status": "present",
-        "version": "2.20.0"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "BSD-2-Clause"
       },
-      "metadata_sha256": "e0528f51b30427fae94723662ba622f8d8db2a4d8d3f1365698d67a52450a845",
       "name": "pygments",
       "resolved": {
         "status": "locked",
@@ -7888,21 +7757,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#pytest==9.1.1"
       ],
-      "installed": {
-        "status": "present",
-        "version": "9.1.1"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "c5d032518012789cabc870d46589aca3aeda36cf9fa4399ee88bda3d10438451",
       "name": "pytest",
       "resolved": {
         "status": "locked",
@@ -7923,21 +7787,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#python-dotenv==1.2.2"
       ],
-      "installed": {
-        "status": "present",
-        "version": "1.2.2"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "BSD-3-Clause"
       },
-      "metadata_sha256": "59430a9dee8f8118dbf693e41c4a3e5150626d19901f4727503da9499f5a64a1",
       "name": "python-dotenv",
       "resolved": {
         "status": "locked",
@@ -7958,21 +7817,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#redis==8.1.0"
       ],
-      "installed": {
-        "status": "present",
-        "version": "8.1.0"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "4668671cc6f1f9d6687255571a069e98f146dff48ba9840f38801b3e8cabba06",
       "name": "redis",
       "resolved": {
         "status": "locked",
@@ -7993,21 +7847,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#sortedcontainers==2.4.0"
       ],
-      "installed": {
-        "status": "present",
-        "version": "2.4.0"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "Apache 2.0"
       },
-      "metadata_sha256": "eedf115109e215001e904da0882851beae50b03c0b0161a8b9e74b7cfd679473",
       "name": "sortedcontainers",
       "resolved": {
         "status": "locked",
@@ -8028,21 +7877,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#sqlalchemy==2.0.51"
       ],
-      "installed": {
-        "status": "present",
-        "version": "2.0.51"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "4a6cf97c8553ad6bd2eee09249b799f387bf565443736d05af50a1afa6ce77fc",
       "name": "sqlalchemy",
       "resolved": {
         "status": "locked",
@@ -8063,21 +7907,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#starlette==1.6.0"
       ],
-      "installed": {
-        "status": "present",
-        "version": "1.6.0"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "BSD-3-Clause"
       },
-      "metadata_sha256": "43f6240f976044f4cf9a573506d96d895391094717c55682700c931d5cd3c5a2",
       "name": "starlette",
       "resolved": {
         "status": "locked",
@@ -8098,21 +7937,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#typing-extensions==4.16.0"
       ],
-      "installed": {
-        "status": "present",
-        "version": "4.16.0"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "PSF-2.0"
       },
-      "metadata_sha256": "b05084ca1d50879865178d9fff9fabeab61bdfb1f361bfbde95421ffc8f9be46",
       "name": "typing-extensions",
       "resolved": {
         "status": "locked",
@@ -8133,21 +7967,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#typing-inspection==0.4.2"
       ],
-      "installed": {
-        "status": "present",
-        "version": "0.4.2"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "MIT"
       },
-      "metadata_sha256": "61096cd0bfe3c7040b6f98c22b02d190fe01936d0ff7616c5134fed02891953a",
       "name": "typing-inspection",
       "resolved": {
         "status": "locked",
@@ -8168,21 +7997,16 @@
       "evidence": [
         "backend/requirements.lock",
         "backend/pyproject.toml",
-        "installed Python distribution METADATA"
+        "tools/license_provenance_decisions.json#uvicorn==0.51.0"
       ],
-      "installed": {
-        "status": "present",
-        "version": "0.51.0"
-      },
       "integrity": {
         "status": "unknown",
         "value": null
       },
       "license": {
-        "status": "metadata",
+        "status": "reviewed-decision",
         "value": "BSD-3-Clause"
       },
-      "metadata_sha256": "07c70790c0cde6812f89168f7aa7c185800a690f7e657dfb5603848c1375017e",
       "name": "uvicorn",
       "resolved": {
         "status": "locked",
@@ -8209,7 +8033,11 @@
     },
     {
       "path": "frontend/package-lock.json",
-      "sha256": "b41742559b75a5946b1e0726c0ec07679d315cc903a6c7eaacefbd85b8ffcf08"
+      "sha256": "1be0fa2627e38dd50fee4cbba03e08f262a01500ff80f98c15f28dcfce97cc41"
+    },
+    {
+      "path": "tools/license_provenance_decisions.json",
+      "sha256": "6ee96d5728e7241adbce362a38d7dc209475956329fb69dae04bf86b12742bb8"
     },
     {
       "path": "LICENSE",
@@ -8220,7 +8048,7 @@
     "license": "AGPL-3.0-or-later",
     "name": "Riverline"
   },
-  "schema_version": 1,
+  "schema_version": 2,
   "verdicts": {
     "bundled_binary_container_release": {
       "failures": [

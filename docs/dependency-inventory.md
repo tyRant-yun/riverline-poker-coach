@@ -61,7 +61,7 @@
 
 ## 发布范围与复核
 
-在仓库根目录运行 `py -3.13 tools/generate_license_provenance.py --check`。它不联网、不安装包，并从 `backend/pyproject.toml`、`backend/requirements.lock`、受控 Python distribution metadata 和 `frontend/package-lock.json` 生成确定性 SBOM/NOTICE 报告。
+在仓库根目录运行 `py -3.13 tools/generate_license_provenance.py --check`。它不联网、不安装包，并从 `backend/pyproject.toml`、`backend/requirements.lock`、仓库受控的 `tools/license_provenance_decisions.json` 和 `frontend/package-lock.json` 生成确定性 SBOM/NOTICE 报告；本机安装状态、路径和 distribution metadata 哈希不会进入提交产物。
 
 - `source_repository_release`：适用于只提交 Git 源码和锁文件的 GitHub 分支/PR 合并。要求准确版本、license 与 source/provenance；lockfile 中已有的 npm integrity 会被记录；未知 license/source、禁止的 GPL/AGPL runtime 依赖和无人工决定的 copyleft 条目均 fail-closed。
 - `bundled_binary_container_release`：适用于 Docker image、wheel、安装包或其他携带二进制的制品。除 source gate 外，还要求实际 artifact hash 与制品的 NOTICE/source 义务。当前为 FAIL：Python lock 未固定 artifact hashes，且 sharp/libvips 二进制的实际分发义务尚未逐制品核验。
