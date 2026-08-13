@@ -51,11 +51,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R5-03 Local Experience | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `merged` | `codex/r5-03-local-experience` | `a85784c` | `773bfe0fdef3684e46f183d0ea1d68e8ff408b88` | [R5-03 handoff](handoffs/R5-03.md) | launcher health/create/3 actions/Web 200; Playwright 3 passed; tsc; build | stage release gate | Integrated `47a0788..674db80`; default launch isolates dead external DB/Redis config and cleans only owned process trees |
 | R5-04 MVP Experience Release Gate | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `blocked` | `codex/r5-04-experience-gate` | `ce3620e` | `bc4aa427af48962f17359db6457a6a7e86f8ef23` | [R5-04 handoff](handoffs/R5-04.md) | Backend 541 passed/10 skipped/1 failed; remaining gates measured false | R5-02F | Old post-bust sparse-seat fixture conflicts with approved auto-rebuy re-entry semantics; gate stopped before expansion |
 | R5-02F Sparse-seat Re-entry Fix | `019ff4e4-9f9c-7730-b987-80d498144ebc` | `completed` | `merged` | `codex/r5-02f-sparse-reentry` | `f7df3cc` | `6ac09f5` | [R5-02F handoff](handoffs/R5-02F.md) | Exact red/green 1 passed; focused 21 passed; recovery 1 passed; independent re-review 1 passed | R5-04 resume | Integrated `8da0498..626d429`; fixture preserves PHH authority and locks 100BB seat re-entry |
-| R5-05 Random Deal + Showdown Reveal | `019ff9a9-e983-7271-827e-c1d66ca1e544` | `completed` | `pending_acceptance` | `codex/r5-05-deal-showdown` | `1f7c6a2` | `354c8c44e6396ed66a52ec3eb8feaef747ff56d8` | [R5-05 handoff](handoffs/R5-05.md) | Backend 76 passed; frontend 14 passed; compileall/tsc; real two-hand browser smoke | independent rules/privacy review; R5-06 | Awaiting base..head randomness/private-card P0/P1 review before integration |
+| R5-05 Random Deal + Showdown Reveal | `019ff9a9-e983-7271-827e-c1d66ca1e544` | `completed` | `merged` | `codex/r5-05-deal-showdown` | `1f7c6a2` | `354c8c44e6396ed66a52ec3eb8feaef747ff56d8` | [R5-05 handoff](handoffs/R5-05.md) | Backend 76 passed; frontend 14 passed; reviewer exact 6 passed; compileall/tsc; real two-hand browser smoke | R5-06 | Integrated `8e19d43..2b1c6ec`; independent randomness/replay/private-card P0/P1 review PASS |
+| R5-06 Fast Solver L1 | `019ff500-f1ba-7af2-9663-5c4aa1826bf6` | `in_progress` | `in_progress` | `codex/r5-06-fast-solver` | pending controller commit | — | — | — | focused solver/privacy review; release gate | Reuse Formula Advisor Worker; bounded approximate EV search, honest provenance, timeout/fallback, table Solver panel |
 
 ## 下一入口
 
-`R5-05 review → R5-06 Fast Solver L1`：随机牌序/摊牌修复已回传，等待独立 P0/P1 窄审查后集成。随后复用 F3-03 Advisor 任务实现异步、限时、可降级的真实 L1 Solver 建议；再修 5 个旧入口测试并恢复发布门。
+`R5-06 Fast Solver L1`：随机牌序/摊牌安全修复已集成。复用 F3-03 Advisor 任务实现异步、限时、可降级的近似 EV Solver，并在牌桌展示真实 action EV/provenance/limitations；完成后做一次 solver/私牌 focused review，再修 5 个旧入口测试并恢复发布门。
 
 ## MVP 执行策略
 
