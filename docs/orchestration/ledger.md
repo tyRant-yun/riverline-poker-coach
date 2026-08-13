@@ -41,6 +41,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | Release Cleanup/GitHub Draft PR | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `blocked` | release worktree from `codex/simulator-rebuild` | `1a5c576` | `2ebc46e6466863cc4846a11e3407892ef574a2e8` | release handoff | Branch push succeeded; Draft PR failed with GitHub connector 403 and gh usage limit | Manual Draft PR or later retry | No worktree deletion/main merge/release; branch needs another incremental push after F3-06/F4-03 integration |
 | F3-06 Table Insights Vertical Slice | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-06-table-insights` | `49b9471` | `a80504547f2a205bcfeafd91ca5592e61b8bad5e` | [F3-06 handoff](handoffs/F3-06.md) | Backend 17 passed; frontend 3 passed; compileall; TypeScript; independent P1 re-review PASS | F4-04/release gate | Integrated `b6ed09d` through handoff `2c449c9`; stale insight P1 fixed before merge |
 | F4-03 Automatic Review Projection | `019ff508-1e0f-7ec2-a536-ff90eab7836a` | `completed` | `merged` | `codex/f4-03-auto-review` | `2ebc46e` | `051e98fee37a0d96872cb8c5a16ac2887afcc534` | [F4-03 handoff](handoffs/F4-03.md) | Focused backend 22 passed; compileall; independent terminal/future/idempotency review PASS | F4-04 API/UI wiring | Integrated as `6369b22` with handoff `4e24f3f`; no API/frontend/rules changes |
+| F4-04 Automatic Review Experience | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `in_progress` | `in_progress` | `codex/f4-04-review-experience` | `a6291a6` | — | — | — | Release gate | Reuse table-insights Worker; automatic terminal materialization + permission-safe read API + table/review UI entry |
 
 ## 下一入口
 
@@ -96,6 +97,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-13：从集成基线 `49b9471` 受控并行复用 Range 与 Stats 两个原任务进程：F3-06 独占桌面洞察 API/UI 文件，F4-03 独占自动复盘 projection/service 文件；禁止交叉修改，均仅运行 focused tests。
 - 2026-08-13：F4-03 旧 Codex worktree 的浅化对象库无法解析 `49b9471`，单次 fetch 后仅 `FETCH_HEAD`/远端 tip 可用；不重启进程，将任务基线等价提升为包含原基线且仅多治理提交的 `2ebc46e`，从已获取 tip 续跑。
 - 2026-08-13：F3-06 初审发现异步旧响应覆盖新决策建议的 P1，原 Worker 修复后 frontend 3 passed 且独立复审 PASS；F4-03 terminal/future/idempotency focused 22 passed 且独立窄审查 PASS。两项分别以 `b6ed09d..2c449c9`、`6369b22..4e24f3f` 集成，解锁 F4-04 与发布门。
+- 2026-08-13：复用 F3-06 原 Worker 从本地集成头 `a6291a6` 串行启动 F4-04；范围仅限自动复盘 materialization、权限安全只读 API 与桌面/Hand Lab 入口，完成后直接进入发布门。
 
 ## 主控更新规则
 
