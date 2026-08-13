@@ -192,3 +192,21 @@ def test_table_insights_are_read_only_and_never_expose_opponent_cards(tmp_path):
     assert "holeCards" not in str(insights)
     assert insights["stats"]["unavailableReason"] == "stats_not_ready"
     service.close()
+
+
+def test_completed_table_materializes_one_safe_review_and_reconnects(tmp_path):
+    client, service = _client(tmp_path)
+    table = _create(client)
+    while not table["handComplete"]:
+        response = _hero_action(client, table, f"review-{table['revision']}")
+        assert response.status_code == 200, response.text
+        table = response.json()["table"]
+    response = client.get(f"/v1/tables/{table['sessionId']}/reviews/{table['handId']}")
+    assert response.status_code == 200, response.text
+    review = response.json()["review"]
+    assert review["heroSeat"] == table["heroSeat"]
+    assert "holeCards" not in str(review)
+    assert "payout" not in str(review).lower()
+    duplicate = client.get(f"/v1/tables/{table['sessionId']}/reviews")
+    assert len(duplicate.json()["reviews"]) == 1
+    service.close()

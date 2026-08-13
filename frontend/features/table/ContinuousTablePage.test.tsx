@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ContinuousTablePage from "./ContinuousTablePage";
 
 const api = vi.hoisted(() => ({
-  create: vi.fn(), get: vi.fn(), action: vi.fn(), nextHand: vi.fn(), insights: vi.fn(),
+  create: vi.fn(), get: vi.fn(), action: vi.fn(), nextHand: vi.fn(), insights: vi.fn(), reviews: vi.fn(),
 }));
 vi.mock("../../lib/api/client", () => ({ continuousTableApi: api }));
 
@@ -23,6 +23,7 @@ describe("ContinuousTablePage", () => {
     window.localStorage.clear(); vi.clearAllMocks();
     api.create.mockResolvedValue({ table }); api.action.mockResolvedValue({ table }); api.nextHand.mockResolvedValue({ table: { ...table, handSequence: 4 } });
     api.insights.mockResolvedValue({ insights: { available: true, advisor: { available: true, result: { recommendedAction: { action: "check", reason: "free" }, source: "deterministic_formula", version: "formula-advisor/v1" } }, seatBeliefs: [{ seatId: 1, available: true, provenance: { version: "heuristic_likelihood_v1" } }], stats: { available: false, unavailableReason: "stats_not_ready", bySeat: [] } } });
+    api.reviews.mockResolvedValue({ available: true, review: { handId: table.handId, heroSeat: 0, completionSequence: 12, heroDecisions: [], references: {} } });
   });
 
   it("creates a selected bot-profile table and shows only hero cards", async () => {

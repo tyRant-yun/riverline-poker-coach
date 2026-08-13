@@ -389,6 +389,14 @@ def create_app(
     async def get_table_insights(request: Request, session_id: str):
         return {"schemaVersion": 1, "requestId": request.state.request_id, "insights": table_service.insights(session_id)}
 
+    @app.get("/v1/tables/{session_id}/reviews")
+    async def list_table_reviews(request: Request, session_id: str):
+        return {"schemaVersion": 1, "requestId": request.state.request_id, **table_service.reviews(session_id)}
+
+    @app.get("/v1/tables/{session_id}/reviews/{hand_id}")
+    async def get_table_review(request: Request, session_id: str, hand_id: str):
+        return {"schemaVersion": 1, "requestId": request.state.request_id, **table_service.reviews(session_id, hand_id)}
+
     @app.post("/v1/tables/{session_id}/actions")
     async def submit_continuous_table_action(request: Request, session_id: str):
         payload = await request.json()

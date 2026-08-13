@@ -47,6 +47,7 @@ export type ContinuousTable = {
 
 export type ContinuousTableResponse = { schemaVersion: number; idempotent?: boolean; table: ContinuousTable };
 export type TableInsightsResponse = { schemaVersion: number; insights: { available: boolean; unavailableReason?: string; advisor?: { available: boolean; unavailableReason?: string; result?: { recommendedAction?: { action: string; reason: string } | null; recommendationUnavailableReason?: string | null; source: string; version: string }; provenance?: { source: string; version: string; degraded: boolean } }; seatBeliefs?: { seatId: number; available: boolean; unavailableReason?: string; currentMass?: string; provenance?: { provider: string; version: string; trustLevel: string } | null }[]; stats?: { available: boolean; unavailableReason?: string; bySeat: { seatId: number; vpip: number; pfr: number; threeBet: number }[] } } };
+export type TableReviewResponse = { schemaVersion: number; available: boolean; unavailableReason?: string | null; review?: { handId: string; heroSeat: number; completionSequence: number; heroDecisions: { actionSequence: number; street: string; action: string }[]; references: Record<string, { status: string; unavailableReason?: string | null }> } | null; reviews?: { handId: string }[] };
 
 export type AnalysisResponse = {
   analysis: {

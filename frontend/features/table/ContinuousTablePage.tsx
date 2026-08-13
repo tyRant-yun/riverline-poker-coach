@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import PokerTable from "../../components/poker/PokerTable";
 import { continuousTableApi } from "../../lib/api/client";
 import { cardsToViewModels } from "../../lib/poker/cards";
-import type { ContinuousTable, TableInsightsResponse } from "../../types/api";
+import type { ContinuousTable, TableInsightsResponse, TableReviewResponse } from "../../types/api";
 import type { SeatViewModel } from "../../types/poker";
 
 const profiles = ["cautious", "balanced", "aggressive"] as const;
@@ -22,6 +22,7 @@ export default function ContinuousTablePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [insights, setInsights] = useState<TableInsightsResponse["insights"] | null>(null);
+  const [review, setReview] = useState<TableReviewResponse["review"] | null>(null);
   const insightRequest = useRef(0);
 
   function loadInsights(next: ContinuousTable) {
@@ -31,13 +32,14 @@ export default function ContinuousTablePage() {
       .then((response) => { if (request === insightRequest.current) setInsights(response.insights); })
       .catch(() => { if (request === insightRequest.current) setInsights(null); });
   }
+  function loadReview(next: ContinuousTable) { if (next.handComplete && next.handId) continuousTableApi.reviews(next.sessionId, next.handId).then((response) => setReview(response.review ?? null)).catch(() => setReview(null)); }
 
   useEffect(() => {
     const sessionId = window.localStorage.getItem("riverline-continuous-table-session");
     if (!sessionId) return;
     setBusy(true);
     continuousTableApi.get(sessionId)
-      .then((response) => { setTable(response.table); loadInsights(response.table); })
+      .then((response) => { setTable(response.table); loadInsights(response.table); loadReview(response.table); })
       .catch((cause) => {
         window.localStorage.removeItem("riverline-continuous-table-session");
         setError(cause instanceof Error ? cause.message : "无法重连牌桌");
@@ -49,7 +51,7 @@ export default function ContinuousTablePage() {
     setBusy(true); setError(null);
     try {
       const response = await continuousTableApi.create({ commandId: commandId("create"), botProfile: profile });
-      setTable(response.table); loadInsights(response.table);
+      setTable(response.table); loadInsights(response.table); loadReview(response.table);
       window.localStorage.setItem("riverline-continuous-table-session", response.table.sessionId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "创建牌桌失败");
@@ -66,7 +68,7 @@ export default function ContinuousTablePage() {
         action: legal.action, amountSemantics: legal.amountSemantics,
         ...(legal.minAmount != null ? { amount: Number(amount || legal.minAmount) } : {}),
       });
-      setTable(response.table); loadInsights(response.table);
+      setTable(response.table); loadInsights(response.table); loadReview(response.table);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "行动未被接受"); }
     finally { setBusy(false); }
   }
@@ -76,7 +78,7 @@ export default function ContinuousTablePage() {
     setBusy(true); setError(null);
     try {
       const response = await continuousTableApi.nextHand(table.sessionId, { commandId: commandId("next"), expectedRevision: table.revision });
-      setTable(response.table); loadInsights(response.table);
+      setTable(response.table); loadInsights(response.table); loadReview(response.table);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "无法开始下一手"); }
     finally { setBusy(false); }
   }
@@ -102,7 +104,7 @@ export default function ContinuousTablePage() {
       {table && <>
         <p className="muted" data-testid="continuous-table-status">Hand {table.handSequence} · {table.street ?? "等待开局"} · {table.currentActor == null ? "本手结束" : `Seat ${table.currentActor} 行动`}</p>
         <PokerTable seats={seats} board={table.board} pot={table.pot} unit="chips" />
-        {table.handComplete ? <button className="primary" onClick={nextHand} disabled={busy} data-testid="next-hand">下一手</button> :
+        {table.handComplete ? <><div data-testid="table-review-status">{review ? `复盘可用：${review.heroDecisions.length} 个 Hero 决策` : "复盘未就绪"}</div><button className="primary" onClick={nextHand} disabled={busy} data-testid="next-hand">下一手</button></> :
           <div className="action-buttons" data-testid="hero-legal-actions">
             {table.heroLegalActions.map((legal) => <div key={legal.action}>
               {legal.minAmount != null && <input aria-label={`${legal.action} amount`} type="number" min={legal.minAmount} max={legal.maxAmount} value={amounts[legal.action] ?? legal.minAmount} onChange={(event) => setAmounts({ ...amounts, [legal.action]: event.target.value })} />}

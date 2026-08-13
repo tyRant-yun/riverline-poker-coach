@@ -11,6 +11,7 @@ from threading import RLock
 from uuid import uuid4
 
 from poker_coach.persistence.hand_event_store import SQLiteHandEventStore
+from poker_coach.persistence.review_projection_store import SQLiteReviewProjectionStore
 from poker_coach.persistence.session_store import (
     GameSessionStoreError,
     SessionRevisionConflict,
@@ -20,6 +21,7 @@ from poker_coach.persistence.session_store import (
 
 from .bot_providers import BLUEPRINT_PROFILE_IDS, build_bot_provider
 from .bot_runtime import BotRuntime
+from .auto_review import AutomaticReviewProjectionService
 from .contracts import ActionTakenPayloadV1, HandCompletedPayloadV1, HoleCardsRecordedPayloadV1
 from .event_store import ExpectedSequenceConflict, HandEventStore
 from .observation import build_observation
@@ -27,6 +29,7 @@ from .orchestrator import GameCommandError, GameOrchestrator, OpenHandCommandV1,
 from .replay import replay_hand, scenario_from_events
 from .session import GameSession, SessionLifecycleError, SessionSeatV1
 from .table_insights import build_table_insights
+from .table_reviews import TableReviewReader, public_review
 
 
 class ContinuousTableError(ValueError):
@@ -62,6 +65,8 @@ class ContinuousTableService:
         self.path = str(metadata_path)
         self._orchestrator = GameOrchestrator(event_store)
         self._bot_runtime = bot_runtime or BotRuntime()
+        self._review_store = SQLiteReviewProjectionStore(self.path)
+        self._review_service = AutomaticReviewProjectionService(event_store, self._review_store)
         self._lock = RLock()
         self._connection = sqlite3.connect(self.path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
@@ -104,6 +109,7 @@ class ContinuousTableService:
         )
 
     def close(self) -> None:
+        self._review_store.close()
         self._connection.close()
         self.session_store.close()
         close = getattr(self.event_store, "close", None)
@@ -168,6 +174,27 @@ class ContinuousTableService:
                 return {"schemaVersion": 1, "available": False, "unavailableReason": "hand_not_ready"}
             events = tuple(item.event for item in self.event_store.read(active.hand_id))
             return build_table_insights(events=events, session_id=session_id, hero_seat=int(metadata["hero_seat"]), database_path=self.path)
+
+    def reviews(self, session_id: str, hand_id: str | None = None) -> dict[str, object]:
+        with self._lock:
+            metadata = self._metadata(session_id)
+            hero = int(metadata["hero_seat"])
+            self._materialize_completed(session_id)
+            reader = TableReviewReader(self.path)
+            try:
+                if hand_id is not None:
+                    review = reader.get(session_id, hand_id, hero)
+                    return {"available": review is not None, "unavailableReason": None if review else "review_not_ready", "review": None if review is None else public_review(review)}
+                reviews = reader.list(session_id, hero)
+                return {"available": bool(reviews), "unavailableReason": None if reviews else "review_not_ready", "reviews": [public_review(review) for review in reviews]}
+            finally:
+                reader.close()
+
+    def _materialize_completed(self, session_id: str) -> None:
+        stored = self._recover(session_id)
+        hero = int(self._metadata(session_id)["hero_seat"])
+        for hand_id in stored.session.completed_hand_ids:
+            self._review_service.apply_hand(session_id=session_id, hand_id=hand_id, hero_seat=hero)
 
     async def submit_hero_action(
         self, session_id: str, request: dict[str, object]
@@ -262,6 +289,7 @@ class ContinuousTableService:
                     stored.session.complete_active_hand(hand_id=active.hand_id, ending_stacks=replayed.state.stacks),
                     expected_revision=stored.revision,
                 )
+                self._review_service.apply_hand(session_id=stored.session.session_id, hand_id=active.hand_id, hero_seat=int(metadata["hero_seat"]))
                 return
             actor = self._actor(events)
             if actor is None or actor == int(metadata["hero_seat"]):
