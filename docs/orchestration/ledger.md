@@ -101,6 +101,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-13：复用 F3-06 原 Worker 从本地集成头 `a6291a6` 串行启动 F4-04；范围仅限自动复盘 materialization、权限安全只读 API 与桌面/Hand Lab 入口，完成后直接进入发布门。
 - 2026-08-13：F4-04 初审发现旧 review 响应覆盖当前终局的 P1，原 Worker 增加独立 request token 与 terminal identity 后 frontend 4 passed、复审 PASS；交付以 `6f06e75..d16e709` 集成，MVP 功能链全部解锁，下一入口仅为 release gate。
 - 2026-08-13：复用既有发布任务从 `96da383` 启动单一 MVP release gate；只运行阶段完整门与记录证据，失败时仅允许定位/修复阻塞 MVP 的 P0/P1，P2/P3 进入 backlog。
+- 2026-08-13：产品负责人明确授权 release gate 验收通过后推送 `codex/simulator-rebuild` 到既有 GitHub 远端，并通过 PR 合并 `main`；发布后同时交付本地 MVP 体验说明与 SaaS 分阶段计划。
 
 ## 主控更新规则
 
