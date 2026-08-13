@@ -58,10 +58,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R6-03B V2 Visual Integration | `019ff9fe-49f7-7080-90d8-c5efcd61b954` | `completed` | `merged` | `codex/r6-03b-visual-integration` | `3970fba` | `e5ca657` | [R6-03B handoff](handoffs/R6-03B.md) | Vitest 11 passed; reviewer repeated 11 passed; tsc; build; Playwright 2; four-resolution screenshots; real SQLite smoke | R6-02 | Integrated `27c7023..3d8b15c`; reveal/playback/async P0/P1 review PASS |
 | R6-02 Range Data + Heatmap | `019ffa15-575d-7ce2-a7fd-a1b4ab0f67a5` | `completed` | `merged` | `codex/r6-02-range-data` | `73eb846` | `997535a` | [R6-02 handoff](handoffs/R6-02.md) | Backend 17 passed; frontend 4 passed; tsc/compileall; visible reviewer 17 passed | release gate | Integrated `ef31175..496cc25`; visible privacy review PASS; 6-max median 41.440ms remains non-blocking performance backlog |
 | R6 MVP Release Gate | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `blocked` | `codex/r6-release-gate` | `8fac229` | — | — | paused by controller | R7 plan | User reported Advisor availability, Solver accuracy and layout/contrast blockers; no PR/main merge until R7 gates close |
+| R7-01 Hero-centered High-contrast UI | `019ffa56-4dad-7751-a426-f54cff4f3ceb` | `in_progress` | `not_started` | `codex/r7-01-ui-geometry` | `4286066cda633f8ade9a827ebee8f5c639b5abfe` | — | — | focused frontend geometry/accessibility/tests only | R7-02 independent; R7-07 integration | Hero centered, larger cards, stronger contrast, Advisor/Range/Solver simultaneously visible |
+| R7-02 Always-on Advisor Contract | `019ffa56-4db3-7382-b46e-7b3ff1604b56` | `in_progress` | `not_started` | `codex/r7-02-advisor-reliability` | `4286066cda633f8ade9a827ebee8f5c639b5abfe` | — | — | focused backend Advisor/API/tests; no TSX/CSS | R7-01 independent; R7-04/R7-05 consume contract | Every active Hero decision returns honest ready/degraded legal advice independent of Solver |
 
 ## 下一入口
 
-`R7-01 + R7-02`：R6 发布已暂停，冻结基线 `154cbc5`。按 [R7 精度与交互计划](../plans/r7-accuracy-and-ux-upgrade.md) 先并行修 Hero/牌面/对比度/Range+Solver 同屏，以及 Advisor always-on contract；随后 evaluator/oracle spike、Range V2、Solver L1.5 与受限 L2。
+`R7-01 + R7-02` 已并行执行：R6 发布已暂停，冻结代码基线 `154cbc5`，R7 规划基线 `4286066`。完成后先做结构化 handoff 验收与安全集成，再启动 evaluator/oracle spike；不提前并发 Range V2 或 Solver L1.5。
 
 ## MVP 执行策略
 
