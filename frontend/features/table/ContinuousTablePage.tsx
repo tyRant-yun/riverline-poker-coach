@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import PokerTable from "../../components/poker/PokerTable";
 import { continuousTableApi } from "../../lib/api/client";
 import { cardsToViewModels } from "../../lib/poker/cards";
-import type { ContinuousTable } from "../../types/api";
+import type { ContinuousTable, TableInsightsResponse } from "../../types/api";
 import type { SeatViewModel } from "../../types/poker";
 
 const profiles = ["cautious", "balanced", "aggressive"] as const;
@@ -21,13 +21,16 @@ export default function ContinuousTablePage() {
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [insights, setInsights] = useState<TableInsightsResponse["insights"] | null>(null);
+
+  function loadInsights(next: ContinuousTable) { continuousTableApi.insights(next.sessionId).then((response) => setInsights(response.insights)).catch(() => setInsights(null)); }
 
   useEffect(() => {
     const sessionId = window.localStorage.getItem("riverline-continuous-table-session");
     if (!sessionId) return;
     setBusy(true);
     continuousTableApi.get(sessionId)
-      .then((response) => setTable(response.table))
+      .then((response) => { setTable(response.table); loadInsights(response.table); })
       .catch((cause) => {
         window.localStorage.removeItem("riverline-continuous-table-session");
         setError(cause instanceof Error ? cause.message : "无法重连牌桌");
@@ -39,7 +42,7 @@ export default function ContinuousTablePage() {
     setBusy(true); setError(null);
     try {
       const response = await continuousTableApi.create({ commandId: commandId("create"), botProfile: profile });
-      setTable(response.table);
+      setTable(response.table); loadInsights(response.table);
       window.localStorage.setItem("riverline-continuous-table-session", response.table.sessionId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "创建牌桌失败");
@@ -56,7 +59,7 @@ export default function ContinuousTablePage() {
         action: legal.action, amountSemantics: legal.amountSemantics,
         ...(legal.minAmount != null ? { amount: Number(amount || legal.minAmount) } : {}),
       });
-      setTable(response.table);
+      setTable(response.table); loadInsights(response.table);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "行动未被接受"); }
     finally { setBusy(false); }
   }
@@ -66,7 +69,7 @@ export default function ContinuousTablePage() {
     setBusy(true); setError(null);
     try {
       const response = await continuousTableApi.nextHand(table.sessionId, { commandId: commandId("next"), expectedRevision: table.revision });
-      setTable(response.table);
+      setTable(response.table); loadInsights(response.table);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "无法开始下一手"); }
     finally { setBusy(false); }
   }
@@ -102,7 +105,10 @@ export default function ContinuousTablePage() {
         <div className="continuous-table__details">
           <section><h3>行动历史</h3><ol data-testid="table-action-history">{table.actionHistory.map((action) => <li key={action.sequence}>Seat {action.actorSeat} {action.action}{action.amount != null ? ` ${action.amount}` : ""}</li>)}</ol></section>
           <section><h3>Bot 来源</h3><ul data-testid="bot-provenance">{table.botDecisionProvenance.map((item) => <li key={item.sequence}>Seat {item.actorSeat} · {item.profileId} · {item.provider}{item.degraded ? " (fallback)" : ""}</li>)}</ul></section>
-          <aside className="notice" data-testid="advisor-sidebar-placeholder"><strong>Advisor / Range / Stats</strong><br />将在后续版本以只读方式接入。</aside>
+          <aside className="notice" data-testid="table-insights"><strong>Table Insights（只读）</strong><br />
+            {!insights?.available ? "洞察未就绪" : <><p>Advisor: {insights.advisor?.available ? `${insights.advisor.result?.recommendedAction?.action ?? "无建议"} · ${insights.advisor.result?.source}` : insights.advisor?.unavailableReason}</p>
+            <p>Range Belief: {insights.seatBeliefs?.map((belief) => `Seat ${belief.seatId} ${belief.available ? belief.provenance?.version : belief.unavailableReason}`).join(" · ")}</p>
+            <p>Stats: {insights.stats?.available ? insights.stats.bySeat.map((stat) => `Seat ${stat.seatId} VPIP ${(stat.vpip * 100).toFixed(0)}% PFR ${(stat.pfr * 100).toFixed(0)}% 3B ${(stat.threeBet * 100).toFixed(0)}%`).join(" · ") : insights.stats?.unavailableReason}</p></>}</aside>
         </div>
       </>}
     </section>

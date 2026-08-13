@@ -179,3 +179,16 @@ def test_active_hand_stacks_follow_pokerkit_and_survive_reconnect(tmp_path):
         seat.stack for seat in rebuilt.session_store.load(session_id).session.topology.seats
     ]
     rebuilt.close()
+
+
+def test_table_insights_are_read_only_and_never_expose_opponent_cards(tmp_path):
+    client, service = _client(tmp_path)
+    table = _create(client)
+    response = client.get(f"/v1/tables/{table['sessionId']}/insights")
+    assert response.status_code == 200, response.text
+    insights = response.json()["insights"]
+    assert insights["advisor"]["available"] is True
+    assert all(item["seatId"] != table["heroSeat"] for item in insights["seatBeliefs"])
+    assert "holeCards" not in str(insights)
+    assert insights["stats"]["unavailableReason"] == "stats_not_ready"
+    service.close()

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ContinuousTablePage from "./ContinuousTablePage";
 
 const api = vi.hoisted(() => ({
-  create: vi.fn(), get: vi.fn(), action: vi.fn(), nextHand: vi.fn(),
+  create: vi.fn(), get: vi.fn(), action: vi.fn(), nextHand: vi.fn(), insights: vi.fn(),
 }));
 vi.mock("../../lib/api/client", () => ({ continuousTableApi: api }));
 
@@ -22,6 +22,7 @@ describe("ContinuousTablePage", () => {
   beforeEach(() => {
     window.localStorage.clear(); vi.clearAllMocks();
     api.create.mockResolvedValue({ table }); api.action.mockResolvedValue({ table }); api.nextHand.mockResolvedValue({ table: { ...table, handSequence: 4 } });
+    api.insights.mockResolvedValue({ insights: { available: true, advisor: { available: true, result: { recommendedAction: { action: "check", reason: "free" }, source: "deterministic_formula", version: "formula-advisor/v1" } }, seatBeliefs: [{ seatId: 1, available: true, provenance: { version: "heuristic_likelihood_v1" } }], stats: { available: false, unavailableReason: "stats_not_ready", bySeat: [] } } });
   });
 
   it("creates a selected bot-profile table and shows only hero cards", async () => {
@@ -32,7 +33,7 @@ describe("ContinuousTablePage", () => {
     expect(screen.getByTestId("poker-table")).toBeInTheDocument();
     expect(screen.getByLabelText("Q♥")).toBeInTheDocument();
     expect(screen.getAllByLabelText("card back")).toHaveLength(10);
-    expect(screen.getByTestId("advisor-sidebar-placeholder")).toBeInTheDocument();
+    expect(screen.getByTestId("table-insights")).toHaveTextContent("deterministic_formula");
   });
 
   it("reconnects, submits only a backend legal action, and starts the next hand", async () => {

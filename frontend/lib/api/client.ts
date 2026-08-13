@@ -20,6 +20,7 @@ import type {
   SolverSpotPayload,
   StateResponse,
   ContinuousTableResponse,
+  TableInsightsResponse,
   TeachingResponse,
 } from "../../types/api";
 import type { RangeBeliefTraceResponse, RangeBeliefView } from "../../types/rangeBelief";
@@ -160,4 +161,5 @@ export const continuousTableApi = {
     request<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/actions`, { schemaVersion: 1, ...payload }),
   nextHand: (sessionId: string, payload: { commandId: string; expectedRevision: number }) =>
     request<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/hands`, { schemaVersion: 1, ...payload }),
+  insights: (sessionId: string) => requestGet<TableInsightsResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/insights`),
 };

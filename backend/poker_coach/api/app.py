@@ -385,6 +385,10 @@ def create_app(
             "table": table_service.projection(session_id),
         }
 
+    @app.get("/v1/tables/{session_id}/insights")
+    async def get_table_insights(request: Request, session_id: str):
+        return {"schemaVersion": 1, "requestId": request.state.request_id, "insights": table_service.insights(session_id)}
+
     @app.post("/v1/tables/{session_id}/actions")
     async def submit_continuous_table_action(request: Request, session_id: str):
         payload = await request.json()

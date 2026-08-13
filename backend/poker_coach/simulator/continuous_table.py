@@ -26,6 +26,7 @@ from .observation import build_observation
 from .orchestrator import GameCommandError, GameOrchestrator, OpenHandCommandV1, PlayerActionCommandV1
 from .replay import replay_hand, scenario_from_events
 from .session import GameSession, SessionLifecycleError, SessionSeatV1
+from .table_insights import build_table_insights
 
 
 class ContinuousTableError(ValueError):
@@ -157,6 +158,16 @@ class ContinuousTableService:
             stored = self._recover(session_id)
             metadata = self._metadata(session_id)
             return self._projection(stored, metadata)
+
+    def insights(self, session_id: str) -> dict[str, object]:
+        with self._lock:
+            stored = self._recover(session_id)
+            metadata = self._metadata(session_id)
+            active = stored.session.active_hand
+            if active is None:
+                return {"schemaVersion": 1, "available": False, "unavailableReason": "hand_not_ready"}
+            events = tuple(item.event for item in self.event_store.read(active.hand_id))
+            return build_table_insights(events=events, session_id=session_id, hero_seat=int(metadata["hero_seat"]), database_path=self.path)
 
     async def submit_hero_action(
         self, session_id: str, request: dict[str, object]
