@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 
 from poker_coach.api import AppConfig, create_app
 from poker_coach.persistence import SQLiteHandEventStore, SQLiteGameSessionStore
+from poker_coach.simulator import FormulaAdvisor
 from poker_coach.simulator.continuous_table import ContinuousTableService
+from poker_coach.simulator.observation import build_observation
 from poker_coach.simulator.contracts import (
     BotDecisionV1,
     HandStartedPayloadV1,
@@ -359,6 +361,156 @@ def test_table_insights_are_read_only_and_never_expose_opponent_cards(tmp_path):
     assert all(len(item["matrix169"]) == 169 for item in insights["seatBeliefs"] if item["available"])
     assert all("combos" not in item and "AsKs" not in str(item) for item in insights["seatBeliefs"])
     assert insights["stats"]["unavailableReason"] == "stats_not_ready"
+    service.close()
+
+
+def test_advisor_is_always_on_for_current_hero_decision_and_rejects_stale_identity(tmp_path):
+    client, service = _client(tmp_path)
+    table = _create(client)
+    insights = client.get(f"/v1/tables/{table['sessionId']}/insights").json()["insights"]
+
+    assert insights["advisor"]["available"] is True
+    assert insights["advisor"]["status"] in {"ready", "degraded"}
+    advisor = client.post(
+        f"/v1/tables/{table['sessionId']}/advisor",
+        json={"handId": table["handId"], "decisionFingerprint": table["fingerprint"]},
+    )
+    assert advisor.status_code == 200, advisor.text
+    result = advisor.json()["advisor"]
+    assert result["status"] in {"ready", "degraded"}
+    assert result["decision"]["fingerprint"] == table["fingerprint"]
+    action = result["recommendedAction"]
+    assert action is not None
+    legal = {item["action"]: item for item in table["heroLegalActions"]}
+    assert action["action"] in legal
+    if action["amountSemantics"] == "none":
+        assert action["amount"] is None
+    else:
+        assert legal[action["action"]]["minAmount"] <= action["amount"] <= legal[action["action"]]["maxAmount"]
+
+    advanced = _hero_action(client, table, "advisor-advance")
+    assert advanced.status_code == 200, advanced.text
+    stale = client.post(
+        f"/v1/tables/{table['sessionId']}/advisor",
+        json={"handId": table["handId"], "decisionFingerprint": table["fingerprint"]},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "stale_decision"
+    service.close()
+
+
+def test_range_failure_never_makes_a_hero_advisor_unavailable(tmp_path, monkeypatch):
+    client, service = _client(tmp_path)
+    table = _create(client)
+    from poker_coach.ranges.event_beliefs import PublicEventBeliefConsumer
+
+    monkeypatch.setattr(
+        PublicEventBeliefConsumer, "beliefs_at",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("range is offline")),
+    )
+    response = client.get(f"/v1/tables/{table['sessionId']}/insights")
+
+    assert response.status_code == 200, response.text
+    advisor = response.json()["insights"]["advisor"]
+    assert advisor["status"] in {"ready", "degraded"}
+    assert advisor["available"] is True
+    assert "range is offline" not in str(response.json())
+    service.close()
+
+
+def test_advisor_internal_observation_failure_returns_a_legal_degraded_fallback(tmp_path, monkeypatch):
+    client, service = _client(tmp_path)
+    table = _create(client)
+    import poker_coach.simulator.continuous_table as continuous_table_module
+
+    original = continuous_table_module.build_observation
+    calls = 0
+
+    def fail_only_advisor_snapshot(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise RuntimeError("internal poison")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        continuous_table_module, "build_observation",
+        fail_only_advisor_snapshot,
+    )
+    response = client.post(
+        f"/v1/tables/{table['sessionId']}/advisor",
+        json={"handId": table["handId"], "decisionFingerprint": table["fingerprint"]},
+    )
+
+    assert response.status_code == 200, response.text
+    result = response.json()["advisor"]
+    assert result["status"] == "degraded"
+    assert result["recommendedAction"]["action"] in {
+        item["action"] for item in table["heroLegalActions"]
+    }
+    assert "internal poison" not in str(result)
+    service.close()
+
+
+def test_advisor_privacy_poison_does_not_depend_on_opponent_cards_or_rng(tmp_path):
+    client, service = _client(tmp_path)
+    table = _create(client)
+    events = tuple(item.event for item in service.event_store.read(table["handId"]))
+    original = build_observation(
+        events, observer_seat=table["heroSeat"], after_sequence=events[-1].sequence
+    )
+    opponent_cards = [
+        (index, event.payload)
+        for index, event in enumerate(events)
+        if isinstance(event.payload, HoleCardsRecordedPayloadV1)
+        and event.payload.seat_id != table["heroSeat"]
+    ]
+    assert len(opponent_cards) >= 2
+    poisoned = list(events)
+    first_index, first_payload = opponent_cards[0]
+    second_index, second_payload = opponent_cards[1]
+    poisoned[first_index] = events[first_index].model_copy(
+        update={"payload": first_payload.model_copy(update={"cards": second_payload.cards})}
+    )
+    poisoned[second_index] = events[second_index].model_copy(
+        update={"payload": second_payload.model_copy(update={"cards": first_payload.cards})}
+    )
+    started_index = next(
+        index for index, event in enumerate(events)
+        if isinstance(event.payload, HandStartedPayloadV1)
+    )
+    started = events[started_index].payload
+    assert isinstance(started, HandStartedPayloadV1)
+    poisoned[started_index] = events[started_index].model_copy(
+        update={"payload": started.model_copy(update={"rng_seed": started.rng_seed + 1})}
+    )
+    changed = build_observation(
+        tuple(poisoned), observer_seat=table["heroSeat"], after_sequence=events[-1].sequence
+    )
+
+    baseline = FormulaAdvisor().evaluate(original, decision_fingerprint=table["fingerprint"])
+    result = FormulaAdvisor().evaluate(changed, decision_fingerprint=table["fingerprint"])
+    assert baseline.model_dump(exclude={"latency"}) == result.model_dump(exclude={"latency"})
+    assert "knownHoleCards" not in str(result.to_dict())
+    service.close()
+
+
+def test_terminal_advisor_is_not_ready_but_never_returns_unavailable(tmp_path):
+    client, service = _client(tmp_path, bot_runtime=_FoldBotRuntime())
+    table = _create(client)
+    while not table["handComplete"]:
+        response = _passive_hero_action(client, table, f"advisor-terminal-{table['revision']}")
+        assert response.status_code == 200, response.text
+        table = response.json()["table"]
+
+    response = client.post(
+        f"/v1/tables/{table['sessionId']}/advisor",
+        json={"handId": table["handId"], "decisionFingerprint": table["fingerprint"]},
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()["advisor"]
+    assert result["status"] == "not_ready"
+    assert result["recommendedAction"] is None
     service.close()
 
 

@@ -9,21 +9,52 @@ from poker_coach.simulator.formula_advisor import FormulaAdvisorFactory
 from poker_coach.simulator.observation import build_observation
 
 
-def build_table_insights(*, events: tuple[HandEventV1, ...], session_id: str, hero_seat: int, database_path: str) -> dict[str, object]:
+def build_table_insights(
+    *, events: tuple[HandEventV1, ...], session_id: str, hero_seat: int,
+    database_path: str, decision_fingerprint: str | None = None,
+) -> dict[str, object]:
     """Compose L0, opponent marginals, and projected stats from safe inputs."""
     if not events:
         return {"schemaVersion": 1, "available": False, "unavailableReason": "hand_not_ready"}
     public = _public_stream(events)
-    beliefs = PublicEventBeliefConsumer().beliefs_at(public, observer_visible_cards=_hero_cards(events, hero_seat))
-    opponents = [_compressed_belief(result, events[0].hand_id) for seat, result in beliefs.items() if seat != hero_seat]
-    advisor: dict[str, object] = {"available": False, "unavailableReason": "not_hero_decision"}
+    try:
+        beliefs = PublicEventBeliefConsumer().beliefs_at(
+            public, observer_visible_cards=_hero_cards(events, hero_seat)
+        )
+        opponents = [
+            _compressed_belief(result, events[0].hand_id)
+            for seat, result in beliefs.items() if seat != hero_seat
+        ]
+    except Exception:
+        # Range is an independent optional consumer. Its outage must not remove L0.
+        opponents = []
+    advisor: dict[str, object]
     try:
         observation = build_observation(events, observer_seat=hero_seat, after_sequence=events[-1].sequence)
     except Exception:
-        pass
+        # This only covers terminal hands, a non-Hero turn, or a malformed/recovered
+        # non-decision stream. It is never the ordinary Hero-decision support path.
+        advisor = {
+            "available": False,
+            "status": "not_ready",
+            "unavailableReason": "not_hero_decision_or_terminal",
+            "decision": {"fingerprint": decision_fingerprint, "handId": events[0].hand_id,
+                         "sequence": events[-1].sequence},
+        }
     else:
-        result = FormulaAdvisorFactory().create().evaluate(observation)
-        advisor = {"available": True, "result": result.to_dict(), "provenance": {"source": result.source, "version": result.version, "degraded": False}}
+        result = FormulaAdvisorFactory().create().evaluate(
+            observation, decision_fingerprint=decision_fingerprint
+        )
+        advisor = {
+            "available": result.status in {"ready", "degraded"},
+            "status": result.status,
+            "result": result.to_dict(),
+            "provenance": {
+                "source": result.source,
+                "version": result.version,
+                "degraded": result.status == "degraded",
+            },
+        }
     stats_store = SQLiteSessionStatsStore(database_path)
     try:
         stats = stats_store.load(session_id)

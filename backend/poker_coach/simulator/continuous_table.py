@@ -27,6 +27,7 @@ from .auto_review import AutomaticReviewProjectionService
 from .contracts import ActionTakenPayloadV1, HandCompletedPayloadV1, HoleCardsRecordedPayloadV1
 from .event_store import ExpectedSequenceConflict, HandEventStore
 from .fast_solver import FastSolver
+from .formula_advisor import FormulaAdvisorFactory
 from .observation import build_observation
 from .orchestrator import GameCommandError, GameOrchestrator, OpenHandCommandV1, PlayerActionCommandV1
 from .replay import replay_hand, scenario_from_events
@@ -177,11 +178,55 @@ class ContinuousTableService:
         with self._lock:
             stored = self._recover(session_id)
             metadata = self._metadata(session_id)
-            active = stored.session.active_hand
-            if active is None:
+            current = self._projection(stored, metadata)
+            hand_id = current["handId"]
+            if not isinstance(hand_id, str):
                 return {"schemaVersion": 1, "available": False, "unavailableReason": "hand_not_ready"}
-            events = tuple(item.event for item in self.event_store.read(active.hand_id))
-            return build_table_insights(events=events, session_id=session_id, hero_seat=int(metadata["hero_seat"]), database_path=self.path)
+            events = tuple(item.event for item in self.event_store.read(hand_id))
+            return build_table_insights(
+                events=events, session_id=session_id, hero_seat=int(metadata["hero_seat"]),
+                database_path=self.path, decision_fingerprint=str(current["fingerprint"]),
+            )
+
+    def advisor(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
+        """Return the independent L0 result only after matching the current decision."""
+
+        hand_id = request.get("handId")
+        fingerprint = request.get("decisionFingerprint")
+        if not isinstance(hand_id, str) or not isinstance(fingerprint, str):
+            raise ContinuousTableError("invalid_advisor_request", "handId and decisionFingerprint are required strings")
+        with self._lock:
+            stored = self._recover(session_id)
+            metadata = self._metadata(session_id)
+            current = self._projection(stored, metadata)
+            if current["handId"] != hand_id:
+                raise ContinuousTableError("stale_decision", "advisor request is not for the current hand", conflict=True)
+            if current["fingerprint"] != fingerprint:
+                raise ContinuousTableError("stale_decision", "advisor request does not match the current decision", conflict=True)
+            hero = int(metadata["hero_seat"])
+            events = tuple(item.event for item in self.event_store.read(hand_id))
+            state = replay_hand(events).state
+            if not state.hand_in_progress or self._actor(events) != hero:
+                return {
+                    "status": "not_ready", "recommendedAction": None,
+                    "source": "deterministic_formula", "version": "formula-advisor/v1",
+                    "confidence": "unavailable", "explanationKey": "advisor.not_ready.not_hero_decision",
+                    "limitations": ["L0 Advisor is only applicable to an active Hero decision."],
+                    "decision": {"fingerprint": fingerprint, "handId": hand_id,
+                                 "sequence": events[-1].sequence, "street": state.street.value},
+                }
+            try:
+                observation = build_observation(
+                    events, observer_seat=hero, after_sequence=events[-1].sequence
+                )
+            except Exception:
+                return _advisor_projection_fallback(
+                    current=current, hand_id=hand_id, fingerprint=fingerprint,
+                    sequence=events[-1].sequence, street=state.street.value,
+                )
+        return FormulaAdvisorFactory().create().evaluate(
+            observation, decision_fingerprint=fingerprint
+        ).to_dict()
 
     def solver(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
         """Take a safe decision snapshot, then solve outside the table lock.
@@ -484,6 +529,34 @@ class ContinuousTableService:
     def _require_revision(request: dict[str, object], projection: dict[str, object]) -> None:
         if request.get("expectedRevision") != projection["revision"]:
             raise ContinuousTableError("revision_conflict", "expectedRevision does not match the authoritative table revision", conflict=True)
+
+
+def _advisor_projection_fallback(
+    *, current: dict[str, object], hand_id: str, fingerprint: str, sequence: int, street: str
+) -> dict[str, object]:
+    """Last-resort L0 envelope derived exclusively from the projected legal actions."""
+
+    legal = current["heroLegalActions"]
+    assert isinstance(legal, list)
+    preferred = next(
+        (item for item in legal if isinstance(item, dict) and item.get("action") == "check"),
+        next((item for item in legal if isinstance(item, dict) and item.get("action") == "call"), legal[0]),
+    )
+    assert isinstance(preferred, dict)
+    amount = preferred.get("minAmount")
+    semantics = preferred["amountSemantics"]
+    return {
+        "status": "degraded",
+        "recommendedAction": {
+            "action": preferred["action"], "amountSemantics": semantics,
+            "amount": None if semantics == "none" else amount,
+            "reason": "a safe legal fallback was selected from the current authoritative action set",
+        },
+        "source": "safe_legal_fallback", "version": "formula-advisor/v1",
+        "confidence": "limited", "explanationKey": "advisor.degraded.safe_legal_action",
+        "limitations": ["L0 fallback uses only current public facts, Hero visibility, and legal actions."],
+        "decision": {"fingerprint": fingerprint, "handId": hand_id, "sequence": sequence, "street": street},
+    }
 
 
 def _required_text(request: dict[str, object], name: str) -> str:
