@@ -104,6 +104,15 @@ from .recovery import (
     ProjectionStoreFailure,
     UnsupportedRecoverySchemaVersion,
 )
+from .auto_review import (
+    AutomaticReviewProjectionService,
+    AutomaticReviewV1,
+    HeroDecisionNodeV1,
+    ReviewProjectionError,
+    ReviewReferenceV1,
+    ReviewReferencesV1,
+    project_automatic_review,
+)
 
 __all__ = [
     "AmountSemanticsV1",
@@ -192,4 +201,11 @@ __all__ = [
     "OutboxStatusV1",
     "OutboxStore",
     "UnsupportedRecoverySchemaVersion",
+    "AutomaticReviewProjectionService",
+    "AutomaticReviewV1",
+    "HeroDecisionNodeV1",
+    "ReviewProjectionError",
+    "ReviewReferenceV1",
+    "ReviewReferencesV1",
+    "project_automatic_review",
 ]
