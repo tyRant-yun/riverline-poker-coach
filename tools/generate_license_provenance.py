@@ -41,7 +41,10 @@ def normalise(name: str) -> str:
 
 
 def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    canonical_text = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace(
+        "\r", "\n"
+    )
+    return hashlib.sha256(canonical_text.encode("utf-8")).hexdigest()
 
 
 def locked_requirements(path: Path) -> dict[str, str]:
@@ -189,7 +192,14 @@ def inventory(root: Path) -> dict[str, object]:
     return {
         "schema_version": SCHEMA_VERSION,
         "project": {"name": "Riverline", "license": "AGPL-3.0-or-later"},
-        "inputs": [{"path": item, "sha256": sha256(root / item)} for item in source_files],
+        "inputs": [
+            {
+                "path": item,
+                "sha256": sha256(root / item),
+                "canonicalization": "utf-8-lf",
+            }
+            for item in source_files
+        ],
         "components": sorted(components, key=lambda item: (item["ecosystem"], item["name"], item["version"] or "")),
         "verdicts": {
             "source_repository_release": {"status": "PASS" if not source_failures else "FAIL", "failures": sorted(set(source_failures))},

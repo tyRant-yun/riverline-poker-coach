@@ -61,6 +61,16 @@ def test_committed_inventory_ignores_environment_distribution_metadata(monkeypat
     assert "metadata_sha256" not in encoded
 
 
+def test_controlled_input_hash_normalises_checkout_line_endings(tmp_path):
+    generator = _load_generator()
+    lf = tmp_path / "lf.txt"
+    crlf = tmp_path / "crlf.txt"
+    lf.write_bytes(b"first\nsecond\n")
+    crlf.write_bytes(b"first\r\nsecond\r\n")
+
+    assert generator.sha256(lf) == generator.sha256(crlf)
+
+
 def test_missing_npm_license_fails_closed(tmp_path):
     (tmp_path / "backend").mkdir()
     (tmp_path / "frontend").mkdir()

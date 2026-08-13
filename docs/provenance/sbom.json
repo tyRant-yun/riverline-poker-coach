@@ -8024,24 +8024,29 @@
   ],
   "inputs": [
     {
+      "canonicalization": "utf-8-lf",
       "path": "backend/pyproject.toml",
-      "sha256": "492bcd1c154c331cd08769439c4ef74a0bba895f63c6a9250bcf0e2021ab53c3"
+      "sha256": "dc5f93e53903a1614d34590645532af90365fa13c1c10df76ccb5b996bafa683"
     },
     {
+      "canonicalization": "utf-8-lf",
       "path": "backend/requirements.lock",
-      "sha256": "c5e3a8c6bc3e0bebb423b54d9a100757f29e9bb386272ae08fd1c6e40dcf9bac"
+      "sha256": "197ad62c7b416dc1975b498e26babf5a39c01d92b922c193fd93415968903acd"
     },
     {
+      "canonicalization": "utf-8-lf",
       "path": "frontend/package-lock.json",
-      "sha256": "1be0fa2627e38dd50fee4cbba03e08f262a01500ff80f98c15f28dcfce97cc41"
+      "sha256": "c30149ced5a784a5e73be7dcd8752745cb9fa9bb6db8c37a76c0d1bed9958fe4"
     },
     {
+      "canonicalization": "utf-8-lf",
       "path": "tools/license_provenance_decisions.json",
       "sha256": "6ee96d5728e7241adbce362a38d7dc209475956329fb69dae04bf86b12742bb8"
     },
     {
+      "canonicalization": "utf-8-lf",
       "path": "LICENSE",
-      "sha256": "e0eedba615d5cd1b986afb6c5b3a4b1ae33713e7e9dc74d19daec5e3221f9d2e"
+      "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
     }
   ],
   "project": {
