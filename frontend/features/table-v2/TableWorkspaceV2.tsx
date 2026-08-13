@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { formatCard } from "../../lib/poker/cards";
+import { RANKS, matrixCell } from "../../lib/poker/matrix";
 import type { ContinuousTable, TableInsightsResponse, TableReviewResponse, TableSolverResponse } from "../../types/api";
 import "../../styles/table-v2.css";
 
@@ -98,8 +99,23 @@ export function HeroActionDockV2({ table, disabled = false, amounts = {}, onAmou
 }
 
 function rangeMessage(reason?: string) {
-  if (reason === "stack_bucket_unsupported") return "当前筹码档位暂不支持 Range 估计。";
-  return reason ?? "当前未返回座位 Range Belief。";
+  if (reason === "stack_bucket_unsupported") return "当前筹码档位暂无可用 Range 估计。";
+  if (reason === "private_event_forbidden") return "当前事件不是公开行动前缀，无法安全估计范围。";
+  return reason ? `当前暂无 Range 数据：${reason.replaceAll("_", " ")}` : "当前未返回座位 Range Belief。";
+}
+function approximationLabel(reason?: string | null) {
+  const match = reason?.match(/^nearest_stack_bucket:(.+)$/);
+  return match ? `近似：${match[1].toUpperCase()} 最近档` : "近似估计";
+}
+function RangeHeatmap({ belief }: { belief: NonNullable<TableInsightsResponse["insights"]["seatBeliefs"]>[number] }) {
+  const matrix = belief.matrix169;
+  if (!matrix) return null;
+  return <div className="tv2-range-heatmap" aria-label={`座位 ${belief.seatId + 1} Range 热图`}>
+    {RANKS.flatMap((_, row) => RANKS.map((__, column) => {
+      const hand = matrixCell(row, column); const cell = matrix[hand]; const mass = Number(cell?.probabilityMass ?? 0);
+      return <button type="button" key={hand} className="tv2-range-cell" style={{ "--range-mass": Math.min(1, mass * 10) } as React.CSSProperties} title={`${hand}：概率质量 ${(mass * 100).toFixed(2)}%，${cell?.comboCount ?? 0} 个合法组合`}>{hand}</button>;
+    }))}
+  </div>;
 }
 function statText(stats: NonNullable<TableInsightsResponse["insights"]["stats"]>) {
   return stats.bySeat.map((stat) => `座位 ${stat.seatId + 1}：入池率 ${(stat.vpip * 100).toFixed(0)}% · 翻前加注率 ${(stat.pfr * 100).toFixed(0)}% · 3Bet ${(stat.threeBet * 100).toFixed(0)}%`).join("；");
@@ -107,10 +123,12 @@ function statText(stats: NonNullable<TableInsightsResponse["insights"]["stats"]>
 
 export function InsightRailV2({ insights, solver, solverLoading = false, solverElapsedMs }: { insights?: TableInsightsResponse["insights"] | null; solver?: TableSolverResponse["solver"] | null; solverLoading?: boolean; solverElapsedMs?: number | null }) {
   const [tab, setTab] = useState("Advisor");
+  const [rangeSeatId, setRangeSeatId] = useState<number | null>(null);
   const range = insights?.seatBeliefs ?? [];
+  const selectedRange = range.find((belief) => belief.seatId === rangeSeatId) ?? range.find((belief) => belief.available) ?? range[0];
   const advisor = insights?.advisor;
   const stats = insights?.stats;
-  const content = tab === "Range" ? <><p>Range Belief（座位独立边际估计，不含对手私牌）</p>{range.length ? <ul>{range.map((belief) => <li key={belief.seatId}>座位 {belief.seatId + 1}：{belief.available ? <>{belief.currentMass != null ? `当前权重 ${belief.currentMass} · ` : ""}{belief.provenance?.provider ?? "来源未提供"} · {belief.provenance?.version ?? "版本未提供"}</> : rangeMessage(belief.unavailableReason)}</li>)}</ul> : <p>{rangeMessage()}</p>}<p className="tv2-honest-empty">组合级 heatmap 等待数据层支持；当前 DTO 未提供 combo 数据，未伪造热图。</p></> : tab === "Solver" ? <>{solverLoading ? <p>Fast Solver 计算中；Advisor 仍可用。</p> : solver?.status === "ready" || solver?.status === "degraded" ? <><p>{solver.status === "degraded" ? "近似 EV 求解（降级）" : "近似 EV 求解"}，不是 GTO 或 Nash。</p><p>权益 {solver.equity ?? "未返回"} · 迭代 {solver.iterations} · 耗时 {solverElapsedMs != null ? `${solverElapsedMs}ms` : "未测得"}</p>{solver.candidates.map((candidate) => <div className="tv2-ev" key={`${candidate.action}-${candidate.amount ?? ""}`}><span>{actionNames[candidate.action] ?? candidate.action}{candidate.amount != null ? ` ${candidate.amount}` : ""}</span><b>EV {candidate.approximateEvChips}</b></div>)}<small>来源 {solver.source} · {solver.version}。限制：{solver.limitations.join("；") || "后端未返回限制"}</small></> : <p>{solver?.unavailableReason ?? "当前不可用"}</p>}</> : tab === "Stats" ? <p>{stats?.available ? statText(stats) : stats?.unavailableReason ?? "统计未就绪"}</p> : <>{advisor?.available ? <><p>建议：{actionNames[advisor.result?.recommendedAction?.action ?? ""] ?? advisor.result?.recommendedAction?.action ?? "无建议"}</p><small>来源 {advisor.result?.source ?? advisor.provenance?.source ?? "未提供"} · {advisor.result?.version ?? advisor.provenance?.version ?? "版本未提供"}</small></> : <p>{advisor?.unavailableReason ?? "Advisor 未就绪"}</p>}<p className="tv2-honest-empty">公式/启发式建议，不是 Solver 或 GTO 结果。</p></>;
+  const content = tab === "Range" ? <><p>Range Belief（座位独立边际估计，不含对手私牌）</p>{range.length ? <><div className="tv2-range-seats">{range.map((belief) => <button key={belief.seatId} aria-pressed={selectedRange?.seatId === belief.seatId} onClick={() => setRangeSeatId(belief.seatId)}>座位 {belief.seatId + 1}</button>)}</div>{selectedRange?.available ? <><p>范围宽度 {selectedRange.rangeWidthPct?.toFixed(1) ?? "—"}% · 置信度 {selectedRange.confidence === "heuristic" ? "启发式" : selectedRange.confidence ?? "未提供"}</p><p>最近变化：{selectedRange.changeReason ?? "初始先验"}{selectedRange.approximate ? ` · ${approximationLabel(selectedRange.approximationReason)}` : ""}</p><RangeHeatmap belief={selectedRange} /><small>来源 {selectedRange.source} · {selectedRange.version}。限制：{selectedRange.limitations?.join("；") ?? "未提供"}</small></> : <p>{rangeMessage(selectedRange?.unavailableReason)}</p>}</> : <p>{rangeMessage()}</p>}</> : tab === "Solver" ? <>{solverLoading ? <p>Fast Solver 计算中；Advisor 仍可用。</p> : solver?.status === "ready" || solver?.status === "degraded" ? <><p>{solver.status === "degraded" ? "近似 EV 求解（降级）" : "近似 EV 求解"}，不是 GTO 或 Nash。</p><p>权益 {solver.equity ?? "未返回"} · 迭代 {solver.iterations} · 耗时 {solverElapsedMs != null ? `${solverElapsedMs}ms` : "未测得"}</p>{solver.candidates.map((candidate) => <div className="tv2-ev" key={`${candidate.action}-${candidate.amount ?? ""}`}><span>{actionNames[candidate.action] ?? candidate.action}{candidate.amount != null ? ` ${candidate.amount}` : ""}</span><b>EV {candidate.approximateEvChips}</b></div>)}<small>来源 {solver.source} · {solver.version}。限制：{solver.limitations.join("；") || "后端未返回限制"}</small></> : <p>{solver?.unavailableReason ?? "当前不可用"}</p>}</> : tab === "Stats" ? <p>{stats?.available ? statText(stats) : stats?.unavailableReason ?? "统计未就绪"}</p> : <>{advisor?.available ? <><p>建议：{actionNames[advisor.result?.recommendedAction?.action ?? ""] ?? advisor.result?.recommendedAction?.action ?? "无建议"}</p><small>来源 {advisor.result?.source ?? advisor.provenance?.source ?? "未提供"} · {advisor.result?.version ?? advisor.provenance?.version ?? "版本未提供"}</small></> : <p>{advisor?.unavailableReason ?? "Advisor 未就绪"}</p>}<p className="tv2-honest-empty">公式/启发式建议，不是 Solver 或 GTO 结果。</p></>;
   return <aside className="tv2-rail" data-testid="table-insights" aria-label="分析洞察"><nav>{["Advisor", "Range", "Solver", "Stats"].map((name) => <button key={name} aria-selected={tab === name} onClick={() => setTab(name)}>{name}</button>)}</nav><div className="tv2-rail-content">{content}</div></aside>;
 }
 

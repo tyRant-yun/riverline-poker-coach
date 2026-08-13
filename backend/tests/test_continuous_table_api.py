@@ -356,6 +356,8 @@ def test_table_insights_are_read_only_and_never_expose_opponent_cards(tmp_path):
     assert insights["advisor"]["available"] is True
     assert all(item["seatId"] != table["heroSeat"] for item in insights["seatBeliefs"])
     assert "holeCards" not in str(insights)
+    assert all(len(item["matrix169"]) == 169 for item in insights["seatBeliefs"] if item["available"])
+    assert all("combos" not in item and "AsKs" not in str(item) for item in insights["seatBeliefs"])
     assert insights["stats"]["unavailableReason"] == "stats_not_ready"
     service.close()
 
