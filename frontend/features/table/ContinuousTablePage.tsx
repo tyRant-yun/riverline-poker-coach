@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import PokerTable from "../../components/poker/PokerTable";
 import { continuousTableApi } from "../../lib/api/client";
 import { cardsToViewModels } from "../../lib/poker/cards";
-import type { ContinuousTable, TableInsightsResponse, TableReviewResponse } from "../../types/api";
+import type { ContinuousTable, TableInsightsResponse, TableReviewResponse, TableSolverResponse } from "../../types/api";
 import type { SeatViewModel } from "../../types/poker";
 
 const profiles = ["cautious", "balanced", "aggressive"] as const;
@@ -23,9 +23,13 @@ export default function ContinuousTablePage() {
   const [error, setError] = useState<string | null>(null);
   const [insights, setInsights] = useState<TableInsightsResponse["insights"] | null>(null);
   const [review, setReview] = useState<TableReviewResponse["review"] | null>(null);
+  const [solver, setSolver] = useState<TableSolverResponse["solver"] | null>(null);
+  const [solverLoading, setSolverLoading] = useState(false);
   const insightRequest = useRef(0);
   const reviewRequest = useRef(0);
   const reviewIdentity = useRef<string | null>(null);
+  const solverRequest = useRef(0);
+  const solverIdentity = useRef<string | null>(null);
 
   function loadInsights(next: ContinuousTable) {
     const request = ++insightRequest.current;
@@ -44,13 +48,26 @@ export default function ContinuousTablePage() {
       .then((response) => { if (request === reviewRequest.current && identity === reviewIdentity.current) setReview(response.review ?? null); })
       .catch(() => { if (request === reviewRequest.current && identity === reviewIdentity.current) setReview(null); });
   }
+  function loadSolver(next: ContinuousTable) {
+    const request = ++solverRequest.current;
+    const identity = next.handId && !next.handComplete && next.currentActor === next.heroSeat
+      ? `${next.sessionId}:${next.handId}:${next.fingerprint}` : null;
+    solverIdentity.current = identity;
+    setSolver(null);
+    setSolverLoading(Boolean(identity));
+    if (!identity || !next.handId) return;
+    continuousTableApi.solver(next.sessionId, { handId: next.handId, decisionFingerprint: next.fingerprint })
+      .then((response) => { if (request === solverRequest.current && identity === solverIdentity.current) setSolver(response.solver); })
+      .catch(() => { if (request === solverRequest.current && identity === solverIdentity.current) setSolver(null); })
+      .finally(() => { if (request === solverRequest.current && identity === solverIdentity.current) setSolverLoading(false); });
+  }
 
   useEffect(() => {
     const sessionId = window.localStorage.getItem("riverline-continuous-table-session");
     if (!sessionId) return;
     setBusy(true);
     continuousTableApi.get(sessionId)
-      .then((response) => { setTable(response.table); loadInsights(response.table); loadReview(response.table); })
+      .then((response) => { setTable(response.table); loadInsights(response.table); loadSolver(response.table); loadReview(response.table); })
       .catch((cause) => {
         window.localStorage.removeItem("riverline-continuous-table-session");
         setError(cause instanceof Error ? cause.message : "无法重连牌桌");
@@ -62,7 +79,7 @@ export default function ContinuousTablePage() {
     setBusy(true); setError(null);
     try {
       const response = await continuousTableApi.create({ commandId: commandId("create"), botProfile: profile });
-      setTable(response.table); loadInsights(response.table); loadReview(response.table);
+      setTable(response.table); loadInsights(response.table); loadSolver(response.table); loadReview(response.table);
       window.localStorage.setItem("riverline-continuous-table-session", response.table.sessionId);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "创建牌桌失败");
@@ -79,7 +96,7 @@ export default function ContinuousTablePage() {
         action: legal.action, amountSemantics: legal.amountSemantics,
         ...(legal.minAmount != null ? { amount: Number(amount || legal.minAmount) } : {}),
       });
-      setTable(response.table); loadInsights(response.table); loadReview(response.table);
+      setTable(response.table); loadInsights(response.table); loadSolver(response.table); loadReview(response.table);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "行动未被接受"); }
     finally { setBusy(false); }
   }
@@ -89,7 +106,7 @@ export default function ContinuousTablePage() {
     setBusy(true); setError(null);
     try {
       const response = await continuousTableApi.nextHand(table.sessionId, { commandId: commandId("next"), expectedRevision: table.revision });
-      setTable(response.table); loadInsights(response.table); loadReview(response.table);
+      setTable(response.table); loadInsights(response.table); loadSolver(response.table); loadReview(response.table);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "无法开始下一手"); }
     finally { setBusy(false); }
   }
@@ -138,7 +155,7 @@ export default function ContinuousTablePage() {
             <section><h3>Advisor</h3><p>{insights.advisor?.available ? `${insights.advisor.result?.recommendedAction?.action ?? "无建议"} · ${insights.advisor.result?.source ?? "来源未提供"}` : insights.advisor?.unavailableReason ?? "当前不可用"}</p><p className="muted small">公式/启发式建议，不是 Solver 或 GTO 结果。</p></section>
             <section><h3>Range</h3>{insights.seatBeliefs?.length ? <ul>{insights.seatBeliefs.map((belief) => <li key={belief.seatId}>Seat {belief.seatId}：{belief.available ? <>{belief.currentMass != null ? `mass ${belief.currentMass} · ` : ""}{belief.provenance?.provider ?? "provider 未提供"} · {belief.provenance?.version ?? "version 未提供"} · {belief.provenance?.trustLevel ?? "trust 未提供"}</> : belief.unavailableReason ?? "不可用"}</li>)}</ul> : <p>当前未返回座位 Range Belief。</p>}<p className="muted small">独立座位边际；不含对手私牌。</p></section>
             <section><h3>Stats</h3><p>{insights.stats?.available ? insights.stats.bySeat.map((stat) => `Seat ${stat.seatId} VPIP ${(stat.vpip * 100).toFixed(0)}% PFR ${(stat.pfr * 100).toFixed(0)}% 3B ${(stat.threeBet * 100).toFixed(0)}%`).join(" · ") : insights.stats?.unavailableReason ?? "当前不可用"}</p></section>
-            <section><h3>Solver</h3><p>当前未连接/不可用。</p><p className="muted small">本桌 API 未返回真实 Solver 结果。</p></section>
+            <section><h3>Fast EV Solver L1</h3>{solverLoading ? <p>Solver 计算中；L0 Advisor 仍可用。</p> : solver?.status === "ready" || solver?.status === "degraded" ? <><p>{solver.status === "degraded" ? "近似 EV 求解（降级）" : "近似 EV 求解"}：推荐 {solver.recommendedAction?.action ?? "无建议"}{solver.recommendedAction?.amount != null ? ` ${solver.recommendedAction.amount}` : ""}</p><ul>{solver.candidates.map((candidate) => <li key={candidate.action}> {candidate.action}{candidate.amount != null ? ` ${candidate.amount}` : ""} · EV {candidate.approximateEvChips}</li>)}</ul><p className="muted small">{solver.source} · {solver.version} · {solver.iterations} samples。近似 EV 求解，不是 GTO 或 Nash。</p></> : <p>{solver?.unavailableReason ?? "当前不可用"}</p>}<p className="muted small">只评估当前合法行动；不含对手私牌或未来发牌样本。</p></section>
           </div>}
         </aside>
       </div>}

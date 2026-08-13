@@ -26,6 +26,7 @@ from .bot_runtime import BotRuntime
 from .auto_review import AutomaticReviewProjectionService
 from .contracts import ActionTakenPayloadV1, HandCompletedPayloadV1, HoleCardsRecordedPayloadV1
 from .event_store import ExpectedSequenceConflict, HandEventStore
+from .fast_solver import FastSolver
 from .observation import build_observation
 from .orchestrator import GameCommandError, GameOrchestrator, OpenHandCommandV1, PlayerActionCommandV1
 from .replay import replay_hand, scenario_from_events
@@ -71,6 +72,7 @@ class ContinuousTableService:
         self._seed_source = seed_source or (lambda: secrets.randbits(62))
         self._review_store = SQLiteReviewProjectionStore(self.path)
         self._review_service = AutomaticReviewProjectionService(event_store, self._review_store)
+        self._fast_solver = FastSolver()
         self._lock = RLock()
         self._connection = sqlite3.connect(self.path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
@@ -180,6 +182,42 @@ class ContinuousTableService:
                 return {"schemaVersion": 1, "available": False, "unavailableReason": "hand_not_ready"}
             events = tuple(item.event for item in self.event_store.read(active.hand_id))
             return build_table_insights(events=events, session_id=session_id, hero_seat=int(metadata["hero_seat"]), database_path=self.path)
+
+    def solver(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
+        """Take a safe decision snapshot, then solve outside the table lock.
+
+        This separate read-only seam keeps L0 insights/action flow independent
+        of bounded L1 sampling and rejects a request for an older decision.
+        """
+
+        hand_id = request.get("handId")
+        fingerprint = request.get("decisionFingerprint")
+        if not isinstance(hand_id, str) or not isinstance(fingerprint, str):
+            raise ContinuousTableError("invalid_solver_request", "handId and decisionFingerprint are required strings")
+        with self._lock:
+            stored = self._recover(session_id)
+            metadata = self._metadata(session_id)
+            active = stored.session.active_hand
+            if active is None or active.hand_id != hand_id:
+                raise ContinuousTableError("stale_decision", "solver request is not for the current hand", conflict=True)
+            current = self._projection(stored, metadata)
+            if current["fingerprint"] != fingerprint:
+                raise ContinuousTableError("stale_decision", "solver request does not match the current decision", conflict=True)
+            hero = int(metadata["hero_seat"])
+            events = tuple(item.event for item in self.event_store.read(active.hand_id))
+            state = replay_hand(events).state
+            if self._actor(events) != hero:
+                observation = None
+            else:
+                observation = build_observation(events, observer_seat=hero, after_sequence=events[-1].sequence)
+        if observation is None:
+            return self._fast_solver.not_ready(
+                decision_fingerprint=fingerprint,
+                hand_id=hand_id,
+                sequence=events[-1].sequence,
+                street=state.street,
+            ).to_dict()
+        return self._fast_solver.solve(observation, decision_fingerprint=fingerprint).to_dict()
 
     def reviews(self, session_id: str, hand_id: str | None = None) -> dict[str, object]:
         with self._lock:

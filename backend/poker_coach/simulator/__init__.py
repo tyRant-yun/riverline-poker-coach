@@ -32,6 +32,12 @@ from .formula_advisor import (
     FormulaRecommendationV1,
     LegalActionBoundV1,
 )
+from .fast_solver import (
+    FastSolver,
+    FastSolverResultV1,
+    SolverCandidateV1,
+    SolverDecisionIdentityV1,
+)
 from .bot_runtime import (
     BotDecisionProvider,
     BotRuntime,
@@ -142,6 +148,10 @@ __all__ = [
     "FormulaLatencyV1",
     "FormulaRecommendationV1",
     "LegalActionBoundV1",
+    "FastSolver",
+    "FastSolverResultV1",
+    "SolverCandidateV1",
+    "SolverDecisionIdentityV1",
     "BotDecisionProvider",
     "BotRuntime",
     "FixedPolicyProvider",

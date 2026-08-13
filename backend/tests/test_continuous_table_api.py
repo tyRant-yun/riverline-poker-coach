@@ -360,6 +360,29 @@ def test_table_insights_are_read_only_and_never_expose_opponent_cards(tmp_path):
     service.close()
 
 
+def test_table_fast_solver_is_independent_and_rejects_a_stale_decision(tmp_path):
+    client, service = _client(tmp_path)
+    table = _create(client)
+
+    ready = client.post(
+        f"/v1/tables/{table['sessionId']}/solver",
+        json={"handId": table["handId"], "decisionFingerprint": table["fingerprint"]},
+    )
+    assert ready.status_code == 200, ready.text
+    result = ready.json()["solver"]
+    assert result["status"] in {"ready", "degraded"}
+    assert "holeCards" not in str(result)
+    assert result["decision"]["fingerprint"] == table["fingerprint"]
+
+    stale = client.post(
+        f"/v1/tables/{table['sessionId']}/solver",
+        json={"handId": table["handId"], "decisionFingerprint": "old-decision"},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["error"]["code"] == "stale_decision"
+    service.close()
+
+
 def test_completed_table_materializes_one_safe_review_and_reconnects(tmp_path):
     client, service = _client(tmp_path)
     table = _create(client)

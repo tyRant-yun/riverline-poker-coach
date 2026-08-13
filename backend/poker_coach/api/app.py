@@ -389,6 +389,13 @@ def create_app(
     async def get_table_insights(request: Request, session_id: str):
         return {"schemaVersion": 1, "requestId": request.state.request_id, "insights": table_service.insights(session_id)}
 
+    @app.post("/v1/tables/{session_id}/solver")
+    async def solve_table_decision(request: Request, session_id: str):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_payload", "solver request payload must be an object")
+        return {"schemaVersion": 1, "requestId": request.state.request_id, "solver": table_service.solver(session_id, payload)}
+
     @app.get("/v1/tables/{session_id}/reviews")
     async def list_table_reviews(request: Request, session_id: str):
         return {"schemaVersion": 1, "requestId": request.state.request_id, **table_service.reviews(session_id)}

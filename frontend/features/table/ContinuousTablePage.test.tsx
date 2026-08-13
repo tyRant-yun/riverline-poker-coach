@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ContinuousTablePage from "./ContinuousTablePage";
 
 const api = vi.hoisted(() => ({
-  create: vi.fn(), get: vi.fn(), action: vi.fn(), nextHand: vi.fn(), insights: vi.fn(), reviews: vi.fn(),
+  create: vi.fn(), get: vi.fn(), action: vi.fn(), nextHand: vi.fn(), insights: vi.fn(), solver: vi.fn(), reviews: vi.fn(),
 }));
 vi.mock("../../lib/api/client", () => ({ continuousTableApi: api }));
 
@@ -16,6 +16,7 @@ const table = {
   actionHistory: [{ sequence: 8, street: "flop", actorSeat: 1, action: "bet", amount: 100 }],
   handComplete: false, result: null,
   botDecisionProvenance: [{ sequence: 8, actorSeat: 1, profileId: "balanced", provider: "lightweight-blueprint", degraded: false, fallbackReason: null }],
+  fingerprint: "decision-a",
 };
 
 describe("ContinuousTablePage", () => {
@@ -23,6 +24,7 @@ describe("ContinuousTablePage", () => {
     window.localStorage.clear(); vi.clearAllMocks();
     api.create.mockResolvedValue({ table }); api.action.mockResolvedValue({ table }); api.nextHand.mockResolvedValue({ table: { ...table, handSequence: 4 } });
     api.insights.mockResolvedValue({ insights: { available: true, advisor: { available: true, result: { recommendedAction: { action: "check", reason: "free" }, source: "deterministic_formula", version: "formula-advisor/v1" } }, seatBeliefs: [{ seatId: 1, available: true, provenance: { version: "heuristic_likelihood_v1" } }], stats: { available: false, unavailableReason: "stats_not_ready", bySeat: [] } } });
+    api.solver.mockResolvedValue({ solver: { status: "ready", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "fold", approximateEvChips: "0" }, { action: "call", amount: 100, approximateEvChips: "12.5" }], equity: "0.42", iterations: 80, source: "monte_carlo_uniform_opponents", version: "fast-ev-solver/v1", limitations: ["uniform opponents"] } });
     api.reviews.mockResolvedValue({ available: true, review: { handId: table.handId, heroSeat: 0, completionSequence: 12, heroDecisions: [], references: {} } });
   });
 
@@ -36,8 +38,29 @@ describe("ContinuousTablePage", () => {
     expect(screen.getAllByLabelText("card back")).toHaveLength(10);
     expect(screen.getByTestId("table-insights")).toHaveTextContent("deterministic_formula");
     expect(screen.getByTestId("table-insights")).toHaveTextContent("公式/启发式建议，不是 Solver 或 GTO 结果");
-    expect(screen.getByTestId("table-insights")).toHaveTextContent("当前未连接/不可用");
+    expect(screen.getByTestId("table-insights")).toHaveTextContent("Fast EV Solver L1");
     expect(screen.getByTestId("table-insights")).toHaveTextContent("独立座位边际；不含对手私牌");
+  });
+
+  it("keeps L0 visible while L1 loads and ignores an old solver response after a new decision", async () => {
+    let resolveA: (value: unknown) => void;
+    let resolveB: (value: unknown) => void;
+    api.solver
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveA = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveB = resolve; }));
+    api.action.mockResolvedValueOnce({ table: { ...table, revision: 19, board: ["As", "Kd", "7c", "2h"] } });
+    render(<ContinuousTablePage />);
+    fireEvent.click(screen.getByTestId("create-continuous-table"));
+    await waitFor(() => expect(api.solver).toHaveBeenCalledWith("table-1", expect.objectContaining({ handId: table.handId, decisionFingerprint: expect.any(String) })));
+    expect(screen.getByTestId("table-insights")).toHaveTextContent("deterministic_formula");
+    fireEvent.click(screen.getByTestId("hero-action-call"));
+    await waitFor(() => expect(api.solver).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("table-insights")).toHaveTextContent("Solver 计算中");
+
+    resolveB!({ solver: { status: "degraded", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "call", amount: 100, approximateEvChips: "4" }], equity: "0.4", iterations: 20, source: "monte_carlo_uniform_opponents", version: "fast-ev-solver/v1", limitations: ["partial"] } });
+    await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("近似 EV 求解（降级）"));
+    resolveA!({ solver: { status: "ready", recommendedAction: { action: "fold" }, candidates: [{ action: "fold", approximateEvChips: "0" }], equity: "0.1", iterations: 80, source: "monte_carlo_uniform_opponents", version: "fast-ev-solver/v1", limitations: [] } });
+    await waitFor(() => expect(screen.getByTestId("table-insights")).not.toHaveTextContent("推荐 fold"));
   });
 
   it("reconnects, submits only a backend legal action, and starts the next hand", async () => {
