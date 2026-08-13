@@ -56,11 +56,11 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R6-01 Table Visual System + Playback | `019ff9e2-b2bb-7501-bcaa-071b1ae28fe5` | `completed` | `merged` | `codex/r6-01-table-visual-system` | `6524fd6` | `02d4ecc` | [R6-01 handoff](handoffs/R6-01.md) | Vitest 5 passed; tsc; build; Playwright geometry/screenshots at four resolutions | R6-03 integration | Integrated `872e66d..dcbf7ab`; new-file-only V2 components, no current page/API overlap |
 | R6-03 V2 Visual Integration | `019ff9e2-b2bb-7501-bcaa-071b1ae28fe5` | `completed` | `blocked` | `codex/r6-03-visual-integration` | `85baa9a` | — | — | only uncommitted red test | R6-03B | Invalid execution: two turns returned idle without implementation, commit, handoff or smoke; superseded rather than retried again |
 | R6-03B V2 Visual Integration | `019ff9fe-49f7-7080-90d8-c5efcd61b954` | `completed` | `merged` | `codex/r6-03b-visual-integration` | `3970fba` | `e5ca657` | [R6-03B handoff](handoffs/R6-03B.md) | Vitest 11 passed; reviewer repeated 11 passed; tsc; build; Playwright 2; four-resolution screenshots; real SQLite smoke | R6-02 | Integrated `27c7023..3d8b15c`; reveal/playback/async P0/P1 review PASS |
-| R6-02 Range Data + Heatmap | `019ffa15-575d-7ce2-a7fd-a1b4ab0f67a5` | `in_progress` | `in_progress` | `codex/r6-02-range-data` | `5a86242` | — | — | — | visible privacy review; release gate | Confirmed visible and active; stack buckets, public-action belief updates, additive 169-cell DTO and V2 Range heatmap |
+| R6-02 Range Data + Heatmap | `019ffa15-575d-7ce2-a7fd-a1b4ab0f67a5` | `completed` | `merged` | `codex/r6-02-range-data` | `73eb846` | `997535a` | [R6-02 handoff](handoffs/R6-02.md) | Backend 17 passed; frontend 4 passed; tsc/compileall; visible reviewer 17 passed | release gate | Integrated `ef31175..496cc25`; visible privacy review PASS; 6-max median 41.440ms remains non-blocking performance backlog |
 
 ## 下一入口
 
-`R6-02 Range Data`：V2 正式接线已集成。当前使用侧边栏可见任务修复 stack bucket、公开行动 belief、169-cell DTO 与 heatmap；完成后独立隐私审查也必须创建可见 Codex 任务，再恢复发布门。
+`R6 Release Gate`：V2、Fast Solver、Range heatmap、随机发牌/摊牌、Bot/补码均已集成。下一步使用侧边栏可见发布任务修复 5 个旧入口测试并运行一次完整 backend/frontend/E2E/source-license 门；全绿后按授权更新 PR 并合并 main。
 
 ## MVP 执行策略
 
