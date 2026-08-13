@@ -46,12 +46,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | License Provenance Closure | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `merged` | `codex/license-provenance-closure` | `0f4badd` | `b78c68e6f2aa959108022056b5a7e4934e800bf0` | [License closure handoff](handoffs/LICENSE-CLOSURE.md) | 296-component deterministic SBOM/NOTICE; focused 3/3; generator --check; source gate PASS | GitHub source merge | Integrated `3c56618..774e5b9`; bundled binary/container gate remains FAIL |
 | PR2 CI Compatibility Fix | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `merged` | `codex/pr2-ci-fix` | `cc37fbc` | `c8e373540cb36ae47fdf93a977ae3efc096ee6b9` | [PR2 CI fix handoff](handoffs/PR2-CI-FIX.md) | Provenance 5 passed; Node contract 1 passed; claim/lease 6 passed; diff check | PR #2 checks | Integrated `e5d9044..8c46c8b`; live PG and exact Node 24.15 await GitHub CI |
 | PR2 CI Recheck | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `merged` | `codex/pr2-ci-fix` | `8cb77c9` | `f6a03dcdf4cf57987cc634eb95f4401e532d4e2a` | [PR2 CI recheck handoff](handoffs/PR2-CI-RECHECK.md) | LF/CRLF regression 1 passed; license focused 6 passed; generator check PASS | PR #2 merge | Integrated `db593a5..4d536d0`; Node 24/unit/build/live-PG green in GitHub, multiseat Playwright remains separately isolated |
-| R5-01 MVP Frontend Shell | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `in_progress` | `in_progress` | `codex/r5-01-mvp-frontend-shell` | `8cb77c9` | — | — | — | R5-02/R5-03 | Reuse table Worker; table + reviews only, real health, no legacy deletion or backend changes |
+| R5-01 MVP Frontend Shell | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/r5-01-mvp-frontend-shell` | `8cb77c9` | `6f6a3ec79c7f9694c69c584be36c91cf7a516049` | [R5-01 handoff](handoffs/R5-01.md) | Vitest 3 files/6 tests; tsc; build; Playwright shell 1 passed | R5-02/R5-03 | Integrated `af96c2c..9a954ee`; honest Advisor/Range/Stats/Solver surfaces, actual health, legacy files retained but no longer in product entry |
 | R5-02 Bot Variety + Auto Rebuy | `019ff4e4-9f9c-7730-b987-80d498144ebc` | `in_progress` | `in_progress` | `codex/r5-02-bot-rebuy` | `4d536d0` | — | — | — | R5-03/independent money-recovery review | Reuse original Bot Worker; deterministic legal action diversity plus durable <1BB to 100BB cash-game refill; backend only |
 
 ## 下一入口
 
-`R5-01 + R5-02`：并行交付专业牌桌工作台与 Bot/自动补码纵向切片，文件所有权前后端分离。R5-01 只展示真实 Advisor/Range/Solver 状态；R5-02 修复策略退化并在 next hand 前持久化补码。完成后仅对 R5-02 金额/恢复 diff 做独立窄审查，再处理本地启动可靠性和剩余 multiseat E2E。
+`R5-02`：前端专业牌桌工作台已集成；当前只推进 Bot 策略退化与 next-hand 持久化自动补码。完成后仅对金额/恢复 diff 做独立窄审查，再处理本地启动可靠性和剩余 multiseat E2E。
 
 ## MVP 执行策略
 
