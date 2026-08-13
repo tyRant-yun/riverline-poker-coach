@@ -77,7 +77,7 @@ if (-not (Test-TcpPortAvailable $ApiPort)) { throw "Port $ApiPort is already in 
 if (-not (Test-TcpPortAvailable $WebPort)) { throw "Port $WebPort is already in use. Stop the existing web server or choose -WebPort; run-local.ps1 will not replace it." }
 
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
-$childEnvironment = @{ NEXT_PUBLIC_API_BASE_URL = $apiUrl }
+$childEnvironment = @{ NEXT_PUBLIC_API_BASE_URL = $apiUrl; POKER_COACH_CORS_ORIGINS = $webUrl }
 if (-not $UseExternalServices) {
     # Empty process variables take precedence over .env without changing that file.
     $childEnvironment["POKER_COACH_DATABASE_URL"] = ""

@@ -2,7 +2,7 @@
 
 当前状态：已完成一个可本地运行的 HU NLHE MVP 核心切片，并已接入整手逐决策复盘工作台；同时已集成可观察 6-max 持续牌桌的 MVP 基础（权威 session、事件恢复、Bot、连续牌桌 API 与轮询 UI）。当前覆盖事件重放、合法动作、牌力与牌面分析、精确/模拟 Equity、证据汇总、策略目录匹配、FastAPI、SQLite 场景/修订/分析历史、验证练习和 Next.js 场景编辑器；教学层支持证据约束、三档解释深度和合法动作边界，外部模型 Agent、Redis 多进程任务、翻后 Solver，以及按行动更新范围、按节点求解和整手教学均已有实现。自适应训练仍在后续迭代。
 
-持续牌桌目前是基础切片：已支持创建、断线重连、合法操作和下一手；Advisor、Range Belief、Stats 的 UI 接线与自动复盘尚未完成。当前阶段和验证证据见 [`PROJECT_STATE.md`](PROJECT_STATE.md) 与 [`docs/orchestration/ledger.md`](docs/orchestration/ledger.md)。
+持续牌桌当前支持创建、断线重连、合法操作、下一手、Advisor 摘要、Range Belief、Fast Solver 与完成手牌复盘入口；Stats 与自动复盘闭环仍是后续范围。当前阶段和验证证据见 [`PROJECT_STATE.md`](PROJECT_STATE.md) 与 [`docs/orchestration/ledger.md`](docs/orchestration/ledger.md)。
 
 ## 本地验证
 
