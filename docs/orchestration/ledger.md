@@ -38,13 +38,13 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | F2-06 Minimal Polling Table UI | `019ff505-db5d-7323-b396-a75ade283897` | `completed` | `merged` | `codex/f2-04-continuous-table-api` | `1391405` | `6d34e7a0b17edb564e423f43fcd1c29827803aa5` | [F2-06 handoff](handoffs/F2-06.md) | Worker: 11 focused tests；tsc；Next production build | Table browser smoke | Reuse Worker for one Playwright smoke only |
 | F3-02 Public-event Belief Consumer | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-01-seat-priors` | `0f5b1e4` | `b0fefbfe5091a78f9f28f8012535328ebf1ff6ae` | [F3-02 handoff](handoffs/F3-02.md) | Worker: 72 focused passed；compileall/diff check；private events rejected | F3-06 | Defer API/UI insight wiring to next budget |
 | F2-06S Browser Smoke | `019ff505-db5d-7323-b396-a75ade283897` | `completed` | `merged` | `codex/f2-04-continuous-table-api` | `a4acea3` | `ad781f1af0189f636bbe18936120dfbd14adf07e` | [F2-06S handoff](handoffs/F2-06S.md) | Worker: Playwright 1 passed in 5.0s | F3-06/F4 review wiring | Integrated as `c75c294` through corrected handoff `f00ccd1`; unrelated generated `frontend/next-env.d.ts` preserved in Worker worktree |
-| Release Cleanup/GitHub Draft PR | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `in_progress` | `in_progress` | release worktree from `codex/simulator-rebuild` | `1a5c576` | — | — | — | — | Safe worktree audit, final smoke intake if ready, push integration branch, open Draft PR |
-| F3-06 Table Insights Vertical Slice | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `in_progress` | `in_progress` | `codex/f3-06-table-insights` | `49b9471` | — | — | — | F4-04/release gate | Reuse Range worker; read-only honest L0 advice + seat beliefs + stats API/UI, no L1/L2 solver |
-| F4-03 Automatic Review Projection | `019ff508-1e0f-7ec2-a536-ff90eab7836a` | `in_progress` | `in_progress` | `codex/f4-03-auto-review` | `2ebc46e` | — | — | — | F4-04 API/UI wiring | Reuse stats worker from fetched integration tip; backend-only event-backed completed-hand review projection, no shared API/frontend files |
+| Release Cleanup/GitHub Draft PR | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `blocked` | release worktree from `codex/simulator-rebuild` | `1a5c576` | `2ebc46e6466863cc4846a11e3407892ef574a2e8` | release handoff | Branch push succeeded; Draft PR failed with GitHub connector 403 and gh usage limit | Manual Draft PR or later retry | No worktree deletion/main merge/release; branch needs another incremental push after F3-06/F4-03 integration |
+| F3-06 Table Insights Vertical Slice | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/f3-06-table-insights` | `49b9471` | `a80504547f2a205bcfeafd91ca5592e61b8bad5e` | [F3-06 handoff](handoffs/F3-06.md) | Backend 17 passed; frontend 3 passed; compileall; TypeScript; independent P1 re-review PASS | F4-04/release gate | Integrated `b6ed09d` through handoff `2c449c9`; stale insight P1 fixed before merge |
+| F4-03 Automatic Review Projection | `019ff508-1e0f-7ec2-a536-ff90eab7836a` | `completed` | `merged` | `codex/f4-03-auto-review` | `2ebc46e` | `051e98fee37a0d96872cb8c5a16ac2887afcc534` | [F4-03 handoff](handoffs/F4-03.md) | Focused backend 22 passed; compileall; independent terminal/future/idempotency review PASS | F4-04 API/UI wiring | Integrated as `6369b22` with handoff `4e24f3f`; no API/frontend/rules changes |
 
 ## 下一入口
 
-`F3-06 + F4 review wiring`：从最新集成基线并行推进两个文件所有权不重叠的 MVP 纵向任务——桌面洞察接线，以及牌局完成后的事件驱动自动复盘后端闭环；只做 focused tests，暂不扩大到 L1/L2 solver 或 SaaS 基础设施。
+`F4-04 + release gate`：把已持久化的自动复盘以权限安全的只读 API/UI 接入持续牌桌与 Hand Lab；随后运行一次发布前完整 backend/frontend/build/E2E/license/smoke 门。通过即形成可体验 MVP 候选，不扩大到 L1/L2 solver 或 SaaS 基础设施。
 
 ## MVP 执行策略
 
@@ -95,6 +95,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-13：F2-06S handoff/Git 与 Playwright 1 passed 证据一致，交付及纠正后的 handoff 以 `c75c294` 至 `f00ccd1` 集成；不重复测试。下一入口切换到 F3-06 桌面洞察与 F4 自动复盘接线。
 - 2026-08-13：从集成基线 `49b9471` 受控并行复用 Range 与 Stats 两个原任务进程：F3-06 独占桌面洞察 API/UI 文件，F4-03 独占自动复盘 projection/service 文件；禁止交叉修改，均仅运行 focused tests。
 - 2026-08-13：F4-03 旧 Codex worktree 的浅化对象库无法解析 `49b9471`，单次 fetch 后仅 `FETCH_HEAD`/远端 tip 可用；不重启进程，将任务基线等价提升为包含原基线且仅多治理提交的 `2ebc46e`，从已获取 tip 续跑。
+- 2026-08-13：F3-06 初审发现异步旧响应覆盖新决策建议的 P1，原 Worker 修复后 frontend 3 passed 且独立复审 PASS；F4-03 terminal/future/idempotency focused 22 passed 且独立窄审查 PASS。两项分别以 `b6ed09d..2c449c9`、`6369b22..4e24f3f` 集成，解锁 F4-04 与发布门。
 
 ## 主控更新规则
 
