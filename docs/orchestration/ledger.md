@@ -49,11 +49,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R5-01 MVP Frontend Shell | `019ff514-afc8-7513-89c0-c0c4bbd6f7fa` | `completed` | `merged` | `codex/r5-01-mvp-frontend-shell` | `8cb77c9` | `6f6a3ec79c7f9694c69c584be36c91cf7a516049` | [R5-01 handoff](handoffs/R5-01.md) | Vitest 3 files/6 tests; tsc; build; Playwright shell 1 passed | R5-02/R5-03 | Integrated `af96c2c..9a954ee`; honest Advisor/Range/Stats/Solver surfaces, actual health, legacy files retained but no longer in product entry |
 | R5-02 Bot Variety + Auto Rebuy | `019ff4e4-9f9c-7730-b987-80d498144ebc` | `completed` | `merged` | `codex/r5-02-bot-rebuy` | `057ec96` | `2f76d65` | [R5-02 handoff](handoffs/R5-02.md) | Worker focused 68 passed + SQLite recovery 1 passed; reviewer independently repeated both | R5-03 | Integrated `0cd7e33..c70de26`; independent amount/recovery/private-info P0/P1 review PASS |
 | R5-03 Local Experience | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `merged` | `codex/r5-03-local-experience` | `a85784c` | `773bfe0fdef3684e46f183d0ea1d68e8ff408b88` | [R5-03 handoff](handoffs/R5-03.md) | launcher health/create/3 actions/Web 200; Playwright 3 passed; tsc; build | stage release gate | Integrated `47a0788..674db80`; default launch isolates dead external DB/Redis config and cleans only owned process trees |
-| R5-04 MVP Experience Release Gate | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `in_progress` | `in_progress` | `codex/r5-04-experience-gate` | `ce3620e` | — | — | — | PR #2/main merge | One stage-exit backend/frontend/E2E/source-license gate; no default implementation review |
+| R5-04 MVP Experience Release Gate | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `blocked` | `codex/r5-04-experience-gate` | `ce3620e` | `bc4aa427af48962f17359db6457a6a7e86f8ef23` | [R5-04 handoff](handoffs/R5-04.md) | Backend 541 passed/10 skipped/1 failed; remaining gates measured false | R5-02F | Old post-bust sparse-seat fixture conflicts with approved auto-rebuy re-entry semantics; gate stopped before expansion |
+| R5-02F Sparse-seat Re-entry Fix | `019ff4e4-9f9c-7730-b987-80d498144ebc` | `in_progress` | `in_progress` | `codex/r5-02f-sparse-reentry` | `f7df3cc` | — | — | — | R5-04 rerun/review | Preserve auto-rebuy re-entry; make PHH regression explicitly cover 100BB re-entry and authoritative hand sequence |
 
 ## 下一入口
 
-`R5-04 Release Gate`：R5-01/R5-02/R5-03 已集成；只运行一次阶段完整 backend/frontend/E2E/source-license 门并核对当前 PR head。全绿后按用户授权合并远端 main，再交付体验说明；失败只处理阻塞 MVP 的 P0/P1。
+`R5-02F → R5-04 resume`：产品决定为 busted seat 自动补至 100BB 并于下一手重新入桌；只修复与旧 sparse-seat PHH fixture 的冲突并做独立 P0/P1 复审。通过后仅续跑 R5-04 尚未完成的门与精确 backend 回归，不重复已绿的 541 项。
 
 ## MVP 执行策略
 
