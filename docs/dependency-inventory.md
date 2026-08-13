@@ -2,7 +2,7 @@
 
 更新时间：2026-08-12
 
-> 当前权威台账为根目录 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)。本文件保留早期依赖盘点；许可治理以 ADR-0008 为准。
+> 当前权威台账为根目录 [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)。可重复的 resolved inventory 是 [`provenance/sbom.json`](provenance/sbom.json)，人类可读报告是 [`provenance/THIRD_PARTY_NOTICES.md`](provenance/THIRD_PARTY_NOTICES.md)；许可治理以 ADR-0008 为准。
 
 ## 当前盘点
 
@@ -58,6 +58,13 @@
 - `postflop-solver` 等 AGPL solver 不进入主依赖图，只能作为有完整源码、构建、修改与 artifact provenance 的可选研究 producer；任何发布/网络使用另行审查。
 - OpenSpiel、RLCard、PettingZoo 不进入在线规则依赖；研究验证使用隔离环境和独立锁定。
 - 上游版本升级必须重新跑金标牌谱、属性/差分测试和许可证检查。
+
+## 发布范围与复核
+
+在仓库根目录运行 `py -3.13 tools/generate_license_provenance.py --check`。它不联网、不安装包，并从 `backend/pyproject.toml`、`backend/requirements.lock`、受控 Python distribution metadata 和 `frontend/package-lock.json` 生成确定性 SBOM/NOTICE 报告。
+
+- `source_repository_release`：适用于只提交 Git 源码和锁文件的 GitHub 分支/PR 合并。要求准确版本、license 与 source/provenance；lockfile 中已有的 npm integrity 会被记录；未知 license/source、禁止的 GPL/AGPL runtime 依赖和无人工决定的 copyleft 条目均 fail-closed。
+- `bundled_binary_container_release`：适用于 Docker image、wheel、安装包或其他携带二进制的制品。除 source gate 外，还要求实际 artifact hash 与制品的 NOTICE/source 义务。当前为 FAIL：Python lock 未固定 artifact hashes，且 sharp/libvips 二进制的实际分发义务尚未逐制品核验。
 
 ## 待办
 

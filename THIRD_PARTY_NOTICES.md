@@ -31,7 +31,9 @@ Versions below are the repository-pinned versions in `backend/pyproject.toml`, `
 | [Playwright](https://github.com/microsoft/playwright) | `1.62.1` | Browser E2E | Apache-2.0 | Direct development | Adopted | npm integrity, browser binary version, license/NOTICE |
 | Testing Library packages | versions in `frontend/package-lock.json` | Component tests | MIT | Direct development | Adopted | Resolved versions, npm integrity, licenses |
 
-The lockfiles contain additional transitive packages. A release is not provenance-complete until CI exports the fully resolved Python and npm dependency graph, licenses, integrity hashes, and required NOTICE texts; this F0 ledger does not claim that automation is already complete.
+The deterministic offline source-repository inventory is checked in at [`docs/provenance/sbom.json`](docs/provenance/sbom.json), with a human-readable companion at [`docs/provenance/THIRD_PARTY_NOTICES.md`](docs/provenance/THIRD_PARTY_NOTICES.md). Run `py -3.13 tools/generate_license_provenance.py --check` to fail closed for an unknown license/source, a prohibited GPL/AGPL runtime dependency, or a copyleft package without an explicit decision record.
+
+The inventory distinguishes a source-only GitHub branch/PR merge from a bundled binary/container release. The former conveys neither `node_modules`, Python wheels, nor libvips binaries and currently passes its provenance gate. The latter remains blocked until artifact hashes and distribution-specific NOTICE/source obligations are verified. In particular, `@img/sharp-win32-x64` / libvips is recorded as `Apache-2.0 AND LGPL-3.0-or-later`; retain the applicable notice and provide or point to its corresponding LGPL source/license material whenever that binary is actually distributed. This is an engineering record, not legal advice, and non-commercial use is not an exemption.
 
 ## Standards, candidates, and research-only components
 
