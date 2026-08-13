@@ -97,7 +97,11 @@ export default function ContinuousTablePage() {
   const seats: SeatViewModel[] = table?.seats.map((seat) => ({
     seatId: seat.seatId, position: positions[seat.seatId] ?? "seat", label: `Seat ${seat.seatId}`,
     stack: seat.stack, bet: seat.committed,
-    cards: seat.seatId === table.heroSeat ? cardsToViewModels(table.heroHoleCards) : [],
+    cards: cardsToViewModels(
+      seat.seatId === table.heroSeat
+        ? table.heroHoleCards
+        : seat.status === "folded" ? [] : (seat.revealedHoleCards ?? []),
+    ),
     isHero: seat.seatId === table.heroSeat, isDealer: seat.seatId === table.buttonSeat,
     isActor: seat.seatId === table.currentActor, isFolded: seat.status === "folded",
     isAllIn: false, isActive: seat.status === "active",

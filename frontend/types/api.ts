@@ -35,7 +35,7 @@ export type ContinuousTable = {
   board: string[];
   pot: number;
   street: string | null;
-  seats: { seatId: number; stack: number; status: string; committed: number }[];
+  seats: { seatId: number; stack: number; status: string; committed: number; revealedHoleCards?: string[] }[];
   heroHoleCards: string[];
   currentActor: number | null;
   heroLegalActions: { action: string; amountSemantics: string; minAmount?: number; maxAmount?: number }[];

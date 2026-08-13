@@ -53,6 +53,39 @@ describe("ContinuousTablePage", () => {
     await waitFor(() => expect(api.nextHand).toHaveBeenCalledWith("table-1", expect.objectContaining({ expectedRevision: 18 })));
   });
 
+  it("shows terminal opponent reveals and clears them for the next hand", async () => {
+    const completed = {
+      ...table,
+      handComplete: true,
+      currentActor: null,
+      seats: table.seats.map((seat) => seat.seatId === 1
+        ? { ...seat, status: "complete", revealedHoleCards: ["Ah", "Kh"] }
+        : { ...seat, status: seat.seatId === 3 ? "folded" : "complete" }),
+    };
+    const next = {
+      ...table,
+      handId: "table-1:hand:4",
+      handSequence: 4,
+      revision: 19,
+      heroHoleCards: ["2c", "3d"],
+    };
+    api.action.mockResolvedValueOnce({ table: completed });
+    api.nextHand.mockResolvedValueOnce({ table: next });
+
+    render(<ContinuousTablePage />);
+    fireEvent.click(screen.getByTestId("create-continuous-table"));
+    fireEvent.click(await screen.findByTestId("hero-action-call"));
+
+    expect(await screen.findByLabelText("A♥")).toBeInTheDocument();
+    expect(screen.getByLabelText("K♥")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("card back")).toHaveLength(8);
+
+    fireEvent.click(screen.getByTestId("next-hand"));
+    await screen.findByLabelText("2♣");
+    expect(screen.queryByLabelText("A♥")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("card back")).toHaveLength(10);
+  });
+
   it("clears old insights and ignores an out-of-order response after a table transition", async () => {
     let resolveA: (value: unknown) => void;
     let resolveB: (value: unknown) => void;

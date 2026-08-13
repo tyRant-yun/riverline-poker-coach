@@ -7,29 +7,109 @@ from fastapi.testclient import TestClient
 from poker_coach.api import AppConfig, create_app
 from poker_coach.persistence import SQLiteHandEventStore, SQLiteGameSessionStore
 from poker_coach.simulator.continuous_table import ContinuousTableService
+from poker_coach.simulator.contracts import (
+    BotDecisionV1,
+    HandStartedPayloadV1,
+    HoleCardsRecordedPayloadV1,
+    SimulatorActionV1,
+)
 
 
-def _client(tmp_path):
+class _ShowdownBotRuntime:
+    async def decide(self, provider, observation, *, time_budget_ms, rng_seed):
+        del provider, time_budget_ms, rng_seed
+        priority = (
+            (SimulatorActionV1.FOLD,) if observation.observer_seat == 3 else ()
+        ) + (
+            SimulatorActionV1.CHECK,
+            SimulatorActionV1.CALL,
+            SimulatorActionV1.FOLD,
+        )
+        legal_by_action = {item.action: item for item in observation.legal_actions}
+        legal = next(legal_by_action[action] for action in priority if action in legal_by_action)
+        return BotDecisionV1(
+            action=legal.action,
+            amount=legal.min_amount,
+            amount_semantics=legal.amount_semantics,
+            provider="test-showdown",
+            provider_version="1",
+            latency_ms=0,
+        )
+
+
+class _FoldBotRuntime:
+    async def decide(self, provider, observation, *, time_budget_ms, rng_seed):
+        del provider, time_budget_ms, rng_seed
+        legal_by_action = {item.action: item for item in observation.legal_actions}
+        legal = next(
+            legal_by_action[action]
+            for action in (SimulatorActionV1.FOLD, SimulatorActionV1.CHECK, SimulatorActionV1.CALL)
+            if action in legal_by_action
+        )
+        return BotDecisionV1(
+            action=legal.action,
+            amount=legal.min_amount,
+            amount_semantics=legal.amount_semantics,
+            provider="test-fold",
+            provider_version="1",
+            latency_ms=0,
+        )
+
+
+def _client(tmp_path, *, seed_source=None, bot_runtime=None):
     path = tmp_path / "continuous-table.sqlite3"
     service = ContinuousTableService(
         session_store=SQLiteGameSessionStore(path),
         event_store=SQLiteHandEventStore(path),
         metadata_path=path,
+        seed_source=seed_source,
+        bot_runtime=bot_runtime,
     )
     return TestClient(create_app(config=AppConfig(rate_limit_per_minute=0), table_service=service)), service
 
 
-def _create(client, *, command_id="create-1", profile="balanced"):
+def _create(client, *, command_id="create-1", profile="balanced", seed=24680):
+    payload = {"schemaVersion": 1, "commandId": command_id, "botProfile": profile}
+    if seed is not None:
+        payload["seed"] = seed
     response = client.post(
         "/v1/tables",
-        json={"schemaVersion": 1, "commandId": command_id, "seed": 24680, "botProfile": profile},
+        json=payload,
     )
     assert response.status_code == 200, response.text
     return response.json()["table"]
 
 
+def _opening_identity(service, hand_id):
+    events = tuple(item.event for item in service.event_store.read(hand_id))
+    started = events[0].payload
+    assert isinstance(started, HandStartedPayloadV1)
+    hole_cards = tuple(
+        (event.payload.seat_id, event.payload.cards)
+        for event in events
+        if isinstance(event.payload, HoleCardsRecordedPayloadV1)
+    )
+    return started.rng_seed, hole_cards
+
+
 def _hero_action(client, table, command_id):
     legal = table["heroLegalActions"][0]
+    payload = {
+        "schemaVersion": 1,
+        "commandId": command_id,
+        "handId": table["handId"],
+        "expectedRevision": table["revision"],
+        "action": legal["action"],
+        "amountSemantics": legal["amountSemantics"],
+    }
+    if legal.get("minAmount") is not None:
+        payload["amount"] = legal["minAmount"]
+    return client.post(f"/v1/tables/{table['sessionId']}/actions", json=payload)
+
+
+def _passive_hero_action(client, table, command_id):
+    legal_by_action = {item["action"]: item for item in table["heroLegalActions"]}
+    legal = next(legal_by_action[action] for action in ("check", "call", "fold") if action in legal_by_action)
     payload = {
         "schemaVersion": 1,
         "commandId": command_id,
@@ -71,6 +151,92 @@ def test_create_bots_advance_hero_action_complete_and_next_hand(tmp_path):
     next_table = response.json()["table"]
     assert next_table["handSequence"] == 2
     assert next_table["buttonSeat"] == 1
+    service.close()
+
+
+def test_default_consecutive_hands_use_fresh_entropy_and_explicit_seed_replays(tmp_path):
+    entropy_calls = 0
+
+    def seed_source():
+        nonlocal entropy_calls
+        entropy_calls += 1
+        return 700_000
+
+    client, service = _client(tmp_path, seed_source=seed_source)
+    table = _create(client, seed=None)
+    first_seed, first_holes = _opening_identity(service, table["handId"])
+
+    for turn in range(30):
+        if table["handComplete"]:
+            break
+        response = _hero_action(client, table, f"fresh-{turn}")
+        assert response.status_code == 200, response.text
+        table = response.json()["table"]
+    response = client.post(
+        f"/v1/tables/{table['sessionId']}/hands",
+        json={"schemaVersion": 1, "commandId": "fresh-next", "expectedRevision": table["revision"]},
+    )
+    assert response.status_code == 200, response.text
+    next_table = response.json()["table"]
+    second_seed, second_holes = _opening_identity(service, next_table["handId"])
+
+    assert entropy_calls == 1
+    assert (first_seed, second_seed) == (700_000, 700_001)
+    assert first_holes != second_holes
+
+    explicit_a = _create(client, command_id="explicit-a", seed=24680)
+    explicit_b = _create(client, command_id="explicit-b", seed=24680)
+    assert _opening_identity(service, explicit_a["handId"])[1] == _opening_identity(
+        service, explicit_b["handId"]
+    )[1]
+    assert entropy_calls == 1
+    service.close()
+
+
+def test_terminal_showdown_reveals_only_live_contenders(tmp_path):
+    client, service = _client(tmp_path, bot_runtime=_ShowdownBotRuntime())
+    table = _create(client)
+    assert all("revealedHoleCards" not in seat for seat in table["seats"])
+
+    for turn in range(30):
+        if table["handComplete"]:
+            break
+        response = _passive_hero_action(client, table, f"showdown-{turn}")
+        assert response.status_code == 200, response.text
+        table = response.json()["table"]
+
+    assert table["handComplete"] is True
+    assert len(table["board"]) == 5
+    recorded = dict(_opening_identity(service, table["handId"])[1])
+    folded_seats = {seat["seatId"] for seat in table["seats"] if seat["status"] == "folded"}
+    assert folded_seats == {3}
+    assert {
+        seat["seatId"]: tuple(seat["revealedHoleCards"])
+        for seat in table["seats"]
+        if "revealedHoleCards" in seat
+    } == {seat_id: cards for seat_id, cards in recorded.items() if seat_id not in folded_seats}
+    service.close()
+
+
+def test_terminal_uncontested_hand_never_reveals_opponent_cards(tmp_path):
+    client, service = _client(tmp_path, bot_runtime=_FoldBotRuntime())
+    table = _create(client)
+    response = client.post(
+        f"/v1/tables/{table['sessionId']}/actions",
+        json={
+            "schemaVersion": 1,
+            "commandId": "hero-fold",
+            "handId": table["handId"],
+            "expectedRevision": table["revision"],
+            "action": "fold",
+            "amountSemantics": "none",
+        },
+    )
+    assert response.status_code == 200, response.text
+    completed = response.json()["table"]
+    assert completed["handComplete"] is True
+    assert sum(seat["status"] != "folded" for seat in completed["seats"]) == 1
+    assert all("revealedHoleCards" not in seat for seat in completed["seats"])
     service.close()
 
 

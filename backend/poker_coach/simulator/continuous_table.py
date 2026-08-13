@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import secrets
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from threading import RLock
 from uuid import uuid4
@@ -59,12 +61,14 @@ class ContinuousTableService:
         event_store: HandEventStore,
         metadata_path: str | Path,
         bot_runtime: BotRuntime | None = None,
+        seed_source: Callable[[], int] | None = None,
     ):
         self.session_store = session_store
         self.event_store = event_store
         self.path = str(metadata_path)
         self._orchestrator = GameOrchestrator(event_store)
         self._bot_runtime = bot_runtime or BotRuntime()
+        self._seed_source = seed_source or (lambda: secrets.randbits(62))
         self._review_store = SQLiteReviewProjectionStore(self.path)
         self._review_service = AutomaticReviewProjectionService(event_store, self._review_store)
         self._lock = RLock()
@@ -118,7 +122,9 @@ class ContinuousTableService:
 
     async def create(self, request: dict[str, object]) -> tuple[dict[str, object], bool]:
         command_id = _required_text(request, "commandId")
-        seed = _non_negative_int(request.get("seed", 0), "seed")
+        seed = _non_negative_int(
+            request["seed"] if "seed" in request else self._seed_source(), "seed"
+        )
         hero_seat = _seat(request.get("heroSeat", 0), "heroSeat")
         profile = request.get("botProfile", "balanced")
         if profile not in BLUEPRINT_PROFILE_IDS:
@@ -323,12 +329,29 @@ class ContinuousTableService:
         replayed = None if not events else replay_hand(events)
         hero = int(metadata["hero_seat"])
         state = None if replayed is None else replayed.state
-        hero_cards = next((event.payload.cards for event in events if isinstance(event.payload, HoleCardsRecordedPayloadV1) and event.payload.seat_id == hero), ())
+        hole_cards_by_seat = {
+            event.payload.seat_id: event.payload.cards
+            for event in events
+            if isinstance(event.payload, HoleCardsRecordedPayloadV1)
+        }
+        hero_cards = hole_cards_by_seat.get(hero, ())
         actor = None if not events or state is None or not state.hand_in_progress else self._actor(events)
         legal = ()
         if actor == hero:
             legal = build_observation(events, observer_seat=hero, after_sequence=state.applied_sequence).legal_actions
         folded = set(() if state is None else state.folded_seats)
+        live_contenders = set(hole_cards_by_seat) - folded
+        revealed_hole_cards = (
+            {
+                seat_id: cards
+                for seat_id, cards in hole_cards_by_seat.items()
+                if seat_id in live_contenders
+            }
+            if state is not None
+            and not state.hand_in_progress
+            and len(live_contenders) >= 2
+            else {}
+        )
         actions = [
             {"sequence": event.sequence, "street": event.payload.street.value, "actorSeat": event.payload.actor_seat,
              "action": event.payload.action.value, "amount": event.payload.amount,
@@ -346,10 +369,20 @@ class ContinuousTableService:
             "heroSeat": hero, "revision": revision,
             "board": [] if state is None else list(state.board), "pot": 0 if state is None else state.pot,
             "street": None if state is None else state.street.value,
-            "seats": [{"seatId": seat.seat_id,
-                       "stack": (seat.stack if state is None else state.stacks[seat.seat_id]),
-                       "status": "folded" if seat.seat_id in folded else ("active" if session.active_hand else "complete"),
-                       "committed": 0 if state is None else state.street_commitments.get(seat.seat_id, 0)} for seat in session.topology.seats],
+            "seats": [
+                {
+                    "seatId": seat.seat_id,
+                    "stack": (seat.stack if state is None else state.stacks[seat.seat_id]),
+                    "status": "folded" if seat.seat_id in folded else ("active" if session.active_hand else "complete"),
+                    "committed": 0 if state is None else state.street_commitments.get(seat.seat_id, 0),
+                    **(
+                        {"revealedHoleCards": list(revealed_hole_cards[seat.seat_id])}
+                        if seat.seat_id in revealed_hole_cards
+                        else {}
+                    ),
+                }
+                for seat in session.topology.seats
+            ],
             "heroHoleCards": list(hero_cards), "currentActor": actor,
             "heroLegalActions": [item.to_dict() for item in legal], "actionHistory": actions,
             "handComplete": bool(state is not None and not state.hand_in_progress),
