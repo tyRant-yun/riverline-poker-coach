@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import secrets
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from threading import RLock
 from uuid import uuid4
 
 from poker_coach.persistence.hand_event_store import SQLiteHandEventStore
+from poker_coach.persistence.review_projection_store import SQLiteReviewProjectionStore
 from poker_coach.persistence.session_store import (
     GameSessionStoreError,
     SessionRevisionConflict,
@@ -20,12 +23,17 @@ from poker_coach.persistence.session_store import (
 
 from .bot_providers import BLUEPRINT_PROFILE_IDS, build_bot_provider
 from .bot_runtime import BotRuntime
+from .auto_review import AutomaticReviewProjectionService
 from .contracts import ActionTakenPayloadV1, HandCompletedPayloadV1, HoleCardsRecordedPayloadV1
 from .event_store import ExpectedSequenceConflict, HandEventStore
+from .fast_solver import FastSolver
+from .formula_advisor import FormulaAdvisorFactory
 from .observation import build_observation
 from .orchestrator import GameCommandError, GameOrchestrator, OpenHandCommandV1, PlayerActionCommandV1
 from .replay import replay_hand, scenario_from_events
 from .session import GameSession, SessionLifecycleError, SessionSeatV1
+from .table_insights import build_table_insights
+from .table_reviews import TableReviewReader, public_review
 
 
 class ContinuousTableError(ValueError):
@@ -55,12 +63,17 @@ class ContinuousTableService:
         event_store: HandEventStore,
         metadata_path: str | Path,
         bot_runtime: BotRuntime | None = None,
+        seed_source: Callable[[], int] | None = None,
     ):
         self.session_store = session_store
         self.event_store = event_store
         self.path = str(metadata_path)
         self._orchestrator = GameOrchestrator(event_store)
         self._bot_runtime = bot_runtime or BotRuntime()
+        self._seed_source = seed_source or (lambda: secrets.randbits(62))
+        self._review_store = SQLiteReviewProjectionStore(self.path)
+        self._review_service = AutomaticReviewProjectionService(event_store, self._review_store)
+        self._fast_solver = FastSolver()
         self._lock = RLock()
         self._connection = sqlite3.connect(self.path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
@@ -103,6 +116,7 @@ class ContinuousTableService:
         )
 
     def close(self) -> None:
+        self._review_store.close()
         self._connection.close()
         self.session_store.close()
         close = getattr(self.event_store, "close", None)
@@ -111,7 +125,9 @@ class ContinuousTableService:
 
     async def create(self, request: dict[str, object]) -> tuple[dict[str, object], bool]:
         command_id = _required_text(request, "commandId")
-        seed = _non_negative_int(request.get("seed", 0), "seed")
+        seed = _non_negative_int(
+            request["seed"] if "seed" in request else self._seed_source(), "seed"
+        )
         hero_seat = _seat(request.get("heroSeat", 0), "heroSeat")
         profile = request.get("botProfile", "balanced")
         if profile not in BLUEPRINT_PROFILE_IDS:
@@ -157,6 +173,117 @@ class ContinuousTableService:
             stored = self._recover(session_id)
             metadata = self._metadata(session_id)
             return self._projection(stored, metadata)
+
+    def insights(self, session_id: str) -> dict[str, object]:
+        with self._lock:
+            stored = self._recover(session_id)
+            metadata = self._metadata(session_id)
+            current = self._projection(stored, metadata)
+            hand_id = current["handId"]
+            if not isinstance(hand_id, str):
+                return {"schemaVersion": 1, "available": False, "unavailableReason": "hand_not_ready"}
+            events = tuple(item.event for item in self.event_store.read(hand_id))
+            return build_table_insights(
+                events=events, session_id=session_id, hero_seat=int(metadata["hero_seat"]),
+                database_path=self.path, decision_fingerprint=str(current["fingerprint"]),
+            )
+
+    def advisor(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
+        """Return the independent L0 result only after matching the current decision."""
+
+        hand_id = request.get("handId")
+        fingerprint = request.get("decisionFingerprint")
+        if not isinstance(hand_id, str) or not isinstance(fingerprint, str):
+            raise ContinuousTableError("invalid_advisor_request", "handId and decisionFingerprint are required strings")
+        with self._lock:
+            stored = self._recover(session_id)
+            metadata = self._metadata(session_id)
+            current = self._projection(stored, metadata)
+            if current["handId"] != hand_id:
+                raise ContinuousTableError("stale_decision", "advisor request is not for the current hand", conflict=True)
+            if current["fingerprint"] != fingerprint:
+                raise ContinuousTableError("stale_decision", "advisor request does not match the current decision", conflict=True)
+            hero = int(metadata["hero_seat"])
+            events = tuple(item.event for item in self.event_store.read(hand_id))
+            state = replay_hand(events).state
+            if not state.hand_in_progress or self._actor(events) != hero:
+                return {
+                    "status": "not_ready", "recommendedAction": None,
+                    "source": "deterministic_formula", "version": "formula-advisor/v1",
+                    "confidence": "unavailable", "explanationKey": "advisor.not_ready.not_hero_decision",
+                    "limitations": ["L0 Advisor is only applicable to an active Hero decision."],
+                    "decision": {"fingerprint": fingerprint, "handId": hand_id,
+                                 "sequence": events[-1].sequence, "street": state.street.value},
+                }
+            try:
+                observation = build_observation(
+                    events, observer_seat=hero, after_sequence=events[-1].sequence
+                )
+            except Exception:
+                return _advisor_projection_fallback(
+                    current=current, hand_id=hand_id, fingerprint=fingerprint,
+                    sequence=events[-1].sequence, street=state.street.value,
+                )
+        return FormulaAdvisorFactory().create().evaluate(
+            observation, decision_fingerprint=fingerprint
+        ).to_dict()
+
+    def solver(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
+        """Take a safe decision snapshot, then solve outside the table lock.
+
+        This separate read-only seam keeps L0 insights/action flow independent
+        of bounded L1 sampling and rejects a request for an older decision.
+        """
+
+        hand_id = request.get("handId")
+        fingerprint = request.get("decisionFingerprint")
+        if not isinstance(hand_id, str) or not isinstance(fingerprint, str):
+            raise ContinuousTableError("invalid_solver_request", "handId and decisionFingerprint are required strings")
+        with self._lock:
+            stored = self._recover(session_id)
+            metadata = self._metadata(session_id)
+            active = stored.session.active_hand
+            if active is None or active.hand_id != hand_id:
+                raise ContinuousTableError("stale_decision", "solver request is not for the current hand", conflict=True)
+            current = self._projection(stored, metadata)
+            if current["fingerprint"] != fingerprint:
+                raise ContinuousTableError("stale_decision", "solver request does not match the current decision", conflict=True)
+            hero = int(metadata["hero_seat"])
+            events = tuple(item.event for item in self.event_store.read(active.hand_id))
+            state = replay_hand(events).state
+            if self._actor(events) != hero:
+                observation = None
+            else:
+                observation = build_observation(events, observer_seat=hero, after_sequence=events[-1].sequence)
+        if observation is None:
+            return self._fast_solver.not_ready(
+                decision_fingerprint=fingerprint,
+                hand_id=hand_id,
+                sequence=events[-1].sequence,
+                street=state.street,
+            ).to_dict()
+        return self._fast_solver.solve(observation, decision_fingerprint=fingerprint).to_dict()
+
+    def reviews(self, session_id: str, hand_id: str | None = None) -> dict[str, object]:
+        with self._lock:
+            metadata = self._metadata(session_id)
+            hero = int(metadata["hero_seat"])
+            self._materialize_completed(session_id)
+            reader = TableReviewReader(self.path)
+            try:
+                if hand_id is not None:
+                    review = reader.get(session_id, hand_id, hero)
+                    return {"available": review is not None, "unavailableReason": None if review else "review_not_ready", "review": None if review is None else public_review(review)}
+                reviews = reader.list(session_id, hero)
+                return {"available": bool(reviews), "unavailableReason": None if reviews else "review_not_ready", "reviews": [public_review(review) for review in reviews]}
+            finally:
+                reader.close()
+
+    def _materialize_completed(self, session_id: str) -> None:
+        stored = self._recover(session_id)
+        hero = int(self._metadata(session_id)["hero_seat"])
+        for hand_id in stored.session.completed_hand_ids:
+            self._review_service.apply_hand(session_id=session_id, hand_id=hand_id, hero_seat=hero)
 
     async def submit_hero_action(
         self, session_id: str, request: dict[str, object]
@@ -251,6 +378,7 @@ class ContinuousTableService:
                     stored.session.complete_active_hand(hand_id=active.hand_id, ending_stacks=replayed.state.stacks),
                     expected_revision=stored.revision,
                 )
+                self._review_service.apply_hand(session_id=stored.session.session_id, hand_id=active.hand_id, hero_seat=int(metadata["hero_seat"]))
                 return
             actor = self._actor(events)
             if actor is None or actor == int(metadata["hero_seat"]):
@@ -284,12 +412,29 @@ class ContinuousTableService:
         replayed = None if not events else replay_hand(events)
         hero = int(metadata["hero_seat"])
         state = None if replayed is None else replayed.state
-        hero_cards = next((event.payload.cards for event in events if isinstance(event.payload, HoleCardsRecordedPayloadV1) and event.payload.seat_id == hero), ())
+        hole_cards_by_seat = {
+            event.payload.seat_id: event.payload.cards
+            for event in events
+            if isinstance(event.payload, HoleCardsRecordedPayloadV1)
+        }
+        hero_cards = hole_cards_by_seat.get(hero, ())
         actor = None if not events or state is None or not state.hand_in_progress else self._actor(events)
         legal = ()
         if actor == hero:
             legal = build_observation(events, observer_seat=hero, after_sequence=state.applied_sequence).legal_actions
         folded = set(() if state is None else state.folded_seats)
+        live_contenders = set(hole_cards_by_seat) - folded
+        revealed_hole_cards = (
+            {
+                seat_id: cards
+                for seat_id, cards in hole_cards_by_seat.items()
+                if seat_id in live_contenders
+            }
+            if state is not None
+            and not state.hand_in_progress
+            and len(live_contenders) >= 2
+            else {}
+        )
         actions = [
             {"sequence": event.sequence, "street": event.payload.street.value, "actorSeat": event.payload.actor_seat,
              "action": event.payload.action.value, "amount": event.payload.amount,
@@ -307,10 +452,20 @@ class ContinuousTableService:
             "heroSeat": hero, "revision": revision,
             "board": [] if state is None else list(state.board), "pot": 0 if state is None else state.pot,
             "street": None if state is None else state.street.value,
-            "seats": [{"seatId": seat.seat_id,
-                       "stack": (seat.stack if state is None else state.stacks[seat.seat_id]),
-                       "status": "folded" if seat.seat_id in folded else ("active" if session.active_hand else "complete"),
-                       "committed": 0 if state is None else state.street_commitments.get(seat.seat_id, 0)} for seat in session.topology.seats],
+            "seats": [
+                {
+                    "seatId": seat.seat_id,
+                    "stack": (seat.stack if state is None else state.stacks[seat.seat_id]),
+                    "status": "folded" if seat.seat_id in folded else ("active" if session.active_hand else "complete"),
+                    "committed": 0 if state is None else state.street_commitments.get(seat.seat_id, 0),
+                    **(
+                        {"revealedHoleCards": list(revealed_hole_cards[seat.seat_id])}
+                        if seat.seat_id in revealed_hole_cards
+                        else {}
+                    ),
+                }
+                for seat in session.topology.seats
+            ],
             "heroHoleCards": list(hero_cards), "currentActor": actor,
             "heroLegalActions": [item.to_dict() for item in legal], "actionHistory": actions,
             "handComplete": bool(state is not None and not state.hand_in_progress),
@@ -374,6 +529,34 @@ class ContinuousTableService:
     def _require_revision(request: dict[str, object], projection: dict[str, object]) -> None:
         if request.get("expectedRevision") != projection["revision"]:
             raise ContinuousTableError("revision_conflict", "expectedRevision does not match the authoritative table revision", conflict=True)
+
+
+def _advisor_projection_fallback(
+    *, current: dict[str, object], hand_id: str, fingerprint: str, sequence: int, street: str
+) -> dict[str, object]:
+    """Last-resort L0 envelope derived exclusively from the projected legal actions."""
+
+    legal = current["heroLegalActions"]
+    assert isinstance(legal, list)
+    preferred = next(
+        (item for item in legal if isinstance(item, dict) and item.get("action") == "check"),
+        next((item for item in legal if isinstance(item, dict) and item.get("action") == "call"), legal[0]),
+    )
+    assert isinstance(preferred, dict)
+    amount = preferred.get("minAmount")
+    semantics = preferred["amountSemantics"]
+    return {
+        "status": "degraded",
+        "recommendedAction": {
+            "action": preferred["action"], "amountSemantics": semantics,
+            "amount": None if semantics == "none" else amount,
+            "reason": "a safe legal fallback was selected from the current authoritative action set",
+        },
+        "source": "safe_legal_fallback", "version": "formula-advisor/v1",
+        "confidence": "limited", "explanationKey": "advisor.degraded.safe_legal_action",
+        "limitations": ["L0 fallback uses only current public facts, Hero visibility, and legal actions."],
+        "decision": {"fingerprint": fingerprint, "handId": hand_id, "sequence": sequence, "street": street},
+    }
 
 
 def _required_text(request: dict[str, object], name: str) -> str:

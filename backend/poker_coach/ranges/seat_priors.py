@@ -14,17 +14,16 @@ from decimal import Decimal
 
 from pydantic import Field, model_validator
 
-from poker_coach.analysis.cards import deck
+from poker_coach.analysis.cards import RANK_VALUE, deck
 from poker_coach.domain.models import Card, DomainModel, SeatPosition, Street, positions_for_table
 
 from .belief import PolicySource, RangeBeliefCombo, RangeBeliefSnapshot, RangeUpdateMetadata, combo_key, snapshot_id_for
 
 
-_VERSION = "heuristic_seed_v1"
-_PROVIDER = "riverline.heuristic_seed"
-_FINGERPRINT = sha256(b"riverline/seat-prior/heuristic_seed_v1/uniform-independent-marginal").hexdigest()
-_STACK_LOW_BB = Decimal("80")
-_STACK_HIGH_BB = Decimal("120")
+_VERSION = "heuristic_seed_v2"
+_PROVIDER = "riverline.position_stack_heuristic"
+_FINGERPRINT = sha256(b"riverline/seat-prior/heuristic_seed_v2/position-stack-independent-marginal").hexdigest()
+_STACK_BUCKETS = (Decimal("20"), Decimal("40"), Decimal("60"), Decimal("80"), Decimal("100"), Decimal("150"), Decimal("200"))
 
 
 class SeatPriorUnavailableReason(str, Enum):
@@ -78,6 +77,8 @@ class SeatPriorCoverageV1(DomainModel):
     rake_signature: str
     street: Street
     node: str
+    approximate: bool = False
+    approximation_reason: str | None = None
     independent_marginal_only: bool = True
 
 
@@ -120,23 +121,12 @@ class SeatPriorProvider:
                 seat_id=seat_id, position=position, available=False, coverage=coverage,
                 unavailable_reason=unavailable,
             )
-        combos = _uniform_combos(query.visible_blockers)
-        total = Decimal(len(combos))
-        probabilities = _normalized_uniform_probabilities(combos)
-        snapshot = RangeBeliefSnapshot(
-            snapshot_id=snapshot_id_for(seat_id, Street.PREFLOP, 0), seat_id=seat_id,
-            street=Street.PREFLOP, after_sequence=0, source=PolicySource.HEURISTIC,
-            confidence="heuristic", prior_mass=total, retained_mass=total,
-            combos={key: RangeBeliefCombo(combo=key, reach=Decimal("1"), probability=probabilities[key]) for key in combos},
-            update=RangeUpdateMetadata(action_type="prior", action_label="unopened", node=coverage.node,
-                policy_source=PolicySource.HEURISTIC, policy_version=_VERSION,
-                assumptions=("6-max NLHE cash", "80-120BB effective", "no ante / no rake", "unopened preflop", "independent marginal; not a joint opponent distribution")),
-        )
+        snapshot = _snapshot(seat_id, position, query.visible_blockers)
         return SeatPriorResultV1(
             seat_id=seat_id, position=position, available=True, coverage=coverage, snapshot=snapshot,
             provenance=SeatPriorProvenanceV1(provider=_PROVIDER, version=_VERSION,
                 artifact_fingerprint=_FINGERPRINT, trust_level="heuristic", confidence=Decimal("0.25"),
-                source_description="First-party uniform independent-marginal heuristic seed; not solver, GTO, or verified strategy data."),
+                source_description="First-party position/stack independent-marginal heuristic seed; not solver, GTO, or verified strategy data."),
         )
 
 
@@ -153,9 +143,13 @@ def _position_for(query: SeatPriorQueryV1, seat_id: int) -> SeatPosition | None:
 
 
 def _coverage(query: SeatPriorQueryV1) -> SeatPriorCoverageV1:
-    return SeatPriorCoverageV1(table_size=len(query.active_seat_ids), effective_stack_bucket="80-120bb",
+    effective = min(Decimal(query.starting_stacks[seat]) / query.big_blind for seat in query.active_seat_ids)
+    bucket = min(_STACK_BUCKETS, key=lambda candidate: (abs(candidate - effective), candidate))
+    exact = effective == bucket
+    return SeatPriorCoverageV1(table_size=len(query.active_seat_ids), effective_stack_bucket=f"{bucket}bb",
         ante_signature=f"ante:{query.ante}", rake_signature=f"rake_bps:{query.rake_bps}",
-        street=query.street, node="preflop/unopened")
+        street=query.street, node="preflop/unopened", approximate=not exact,
+        approximation_reason=None if exact else f"nearest_stack_bucket:{bucket}bb")
 
 
 def _unavailable_reason(query: SeatPriorQueryV1, seat_id: int) -> SeatPriorUnavailableReason | None:
@@ -167,20 +161,55 @@ def _unavailable_reason(query: SeatPriorQueryV1, seat_id: int) -> SeatPriorUnava
         return SeatPriorUnavailableReason.ANTE_UNSUPPORTED
     if query.rake_bps:
         return SeatPriorUnavailableReason.RAKE_UNSUPPORTED
-    if any(not (_STACK_LOW_BB <= Decimal(stack) / query.big_blind <= _STACK_HIGH_BB) for stack in query.starting_stacks.values()):
-        return SeatPriorUnavailableReason.STACK_BUCKET_UNSUPPORTED
     if query.street is not Street.PREFLOP or query.after_sequence != 0:
         return SeatPriorUnavailableReason.NODE_UNSUPPORTED
     return None
 
 
-def _uniform_combos(visible_blockers: tuple[Card, ...]) -> tuple[str, ...]:
-    return tuple(sorted(combo_key(cards) for cards in combinations(deck(visible_blockers), 2)))
+def _position_weighted_combos(visible_blockers: tuple[Card, ...], position: SeatPosition | None) -> dict[str, Decimal]:
+    """Deterministic first-party seed; all 1326 legal combos remain represented.
+
+    Earlier positions modestly concentrate mass on stronger starts.  This is a
+    disclosed usability heuristic, not a strategy chart or a GTO claim.
+    """
+    position_tilt = {
+        SeatPosition.UTG: 2, SeatPosition.MP: 1, SeatPosition.HJ: 0,
+        SeatPosition.CUTOFF: -1, SeatPosition.BUTTON: -2,
+        SeatPosition.SMALL_BLIND: 1, SeatPosition.BIG_BLIND: 0,
+    }.get(position, 0)
+    result: dict[str, Decimal] = {}
+    for cards in combinations(deck(visible_blockers), 2):
+        key = combo_key(cards)
+        first, second = cards
+        score = RANK_VALUE[first[0]] + RANK_VALUE[second[0]]
+        if first[0] == second[0]:
+            score += 8
+        elif first[1] == second[1]:
+            score += 2
+        # Values stay safely inside RangeBeliefCombo reach's [0, 1] contract.
+        result[key] = Decimal(18 + score + position_tilt * (score - 14) / 5) / Decimal("50")
+    return {key: max(Decimal("0.02"), min(Decimal("0.98"), weight)) for key, weight in result.items()}
 
 
-def _normalized_uniform_probabilities(combos: tuple[str, ...]) -> dict[str, Decimal]:
-    """Produce deterministic uniform weights whose Decimal sum is exactly one."""
-    base = Decimal("1") / Decimal(len(combos))
-    probabilities = {combo: base for combo in combos[:-1]}
+def _snapshot(seat_id: int, position: SeatPosition | None, visible_blockers: tuple[Card, ...]) -> RangeBeliefSnapshot:
+    weights = _position_weighted_combos(visible_blockers, position)
+    total = sum(weights.values(), Decimal("0"))
+    probabilities = _normalized_probabilities(weights)
+    return RangeBeliefSnapshot(
+        snapshot_id=snapshot_id_for(seat_id, Street.PREFLOP, 0), seat_id=seat_id,
+        street=Street.PREFLOP, after_sequence=0, source=PolicySource.HEURISTIC,
+        confidence="heuristic", prior_mass=total, retained_mass=total,
+        combos={key: RangeBeliefCombo(combo=key, reach=weights[key], probability=probabilities[key]) for key in weights},
+        update=RangeUpdateMetadata(action_type="prior", action_label="unopened", node="preflop/unopened",
+            policy_source=PolicySource.HEURISTIC, policy_version=_VERSION,
+            assumptions=("6-max NLHE cash", "first-party position/stack heuristic", "no ante / no rake", "unopened preflop", "independent marginal; not a joint opponent distribution")),
+    )
+
+
+def _normalized_probabilities(weights: dict[str, Decimal]) -> dict[str, Decimal]:
+    """Produce deterministic probabilities whose Decimal sum is exactly one."""
+    combos = tuple(sorted(weights))
+    total = sum(weights.values(), Decimal("0"))
+    probabilities = {combo: weights[combo] / total for combo in combos[:-1]}
     probabilities[combos[-1]] = Decimal("1") - sum(probabilities.values(), Decimal("0"))
     return probabilities

@@ -5,6 +5,7 @@ from .postgres_store import PostgresStore, PostgresUnavailable
 from .sqlite_store import SQLiteStore
 from .hand_event_store import PostgresHandEventStore, SQLiteHandEventStore
 from .projection_store import PostgresProjectionStore, SQLiteProjectionStore
+from .review_projection_store import SQLiteReviewProjectionStore
 from .session_store import (
     GameSessionStoreError,
     SessionRevisionConflict,
@@ -21,6 +22,7 @@ __all__ = [
     "PostgresHandEventStore",
     "SQLiteProjectionStore",
     "PostgresProjectionStore",
+    "SQLiteReviewProjectionStore",
     "GameSessionStoreError",
     "SessionRevisionConflict",
     "SQLiteGameSessionStore",

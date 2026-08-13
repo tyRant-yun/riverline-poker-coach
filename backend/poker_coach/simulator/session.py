@@ -48,6 +48,23 @@ class SessionSeatV1(DomainModel):
     sitting_out: bool = False
 
 
+class CashRebuyV1(DomainModel):
+    """An auditable automatic cash-game refill scheduled for one next hand."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hand_sequence: Annotated[StrictInt, Field(ge=1)]
+    seat_id: SeatNumber
+    stack_before: ChipAmount
+    amount: PositiveChipAmount
+
+    @model_validator(mode="after")
+    def validate_cash_rebuy(self) -> CashRebuyV1:
+        if self.stack_before >= DEFAULT_BIG_BLIND:
+            raise ValueError("auto rebuy requires a stack below one big blind")
+        return self
+
+
 class SeatTopologyV1(DomainModel):
     """Validate the 2--8-seat domain topology without publishing table modes."""
 
@@ -136,6 +153,7 @@ class GameSession(DomainModel):
     hand_sequence: HandSequence = 0
     completed_hand_ids: tuple[HandId, ...] = ()
     active_hand: ActiveHandV1 | None = None
+    cash_rebuys: tuple[CashRebuyV1, ...] = ()
 
     @model_validator(mode="after")
     def validate_session_ownership(self) -> GameSession:
@@ -164,6 +182,11 @@ class GameSession(DomainModel):
                 raise ValueError("active hand ID does not belong to this session")
             if self.active_hand.button_seat != self.button_seat:
                 raise ValueError("active hand button must match the session button")
+        rebuy_keys = tuple((rebuy.hand_sequence, rebuy.seat_id) for rebuy in self.cash_rebuys)
+        if len(rebuy_keys) != len(set(rebuy_keys)):
+            raise ValueError("cash rebuys must not repeat a seat for one hand")
+        if any(rebuy.hand_sequence > self.hand_sequence + 1 for rebuy in self.cash_rebuys):
+            raise ValueError("cash rebuy cannot target a future hand")
         return self
 
     @classmethod
@@ -188,13 +211,14 @@ class GameSession(DomainModel):
         )
 
     def start_next_hand(self) -> GameSession:
-        """Open exactly one new hand from current stacks without changing them."""
+        """Auto-refill eligible short stacks, then open exactly one new hand."""
 
         if self.active_hand is not None:
             raise SessionLifecycleError(
                 "hand_in_progress", "cannot start a hand while another hand is active"
             )
-        participating = self.topology.participating_seats
+        topology, cash_rebuys = self._apply_auto_rebuys(self.topology)
+        participating = topology.participating_seats
         if len(participating) < 2:
             raise SessionLifecycleError(
                 "insufficient_funded_seats",
@@ -211,7 +235,12 @@ class GameSession(DomainModel):
                 for seat in participating
             ),
         )
-        return self._replace(hand_sequence=sequence, active_hand=active_hand)
+        return self._replace(
+            topology=topology,
+            cash_rebuys=cash_rebuys,
+            hand_sequence=sequence,
+            active_hand=active_hand,
+        )
 
     def complete_active_hand(
         self,
@@ -261,12 +290,43 @@ class GameSession(DomainModel):
                     for seat in self.topology.seats
                 )
             )
+        topology, cash_rebuys = self._apply_auto_rebuys(topology)
         return self._replace(
             button_seat=self._next_participating_button(topology),
             completed_hand_ids=(*self.completed_hand_ids, self.active_hand.hand_id),
             active_hand=None,
             topology=topology,
+            cash_rebuys=cash_rebuys,
         )
+
+    def _apply_auto_rebuys(
+        self, topology: SeatTopologyV1
+    ) -> tuple[SeatTopologyV1, tuple[CashRebuyV1, ...]]:
+        """Refill active seats below 1BB to exactly the configured 100BB stack."""
+        target_sequence = self.hand_sequence + 1
+        rebuys = list(self.cash_rebuys)
+        replacement_seats: list[SessionSeatV1] = []
+        for seat in topology.seats:
+            if seat.sitting_out or seat.stack >= self.configuration.big_blind:
+                replacement_seats.append(seat)
+                continue
+            amount = self.configuration.starting_stack - seat.stack
+            rebuys.append(
+                CashRebuyV1(
+                    hand_sequence=target_sequence,
+                    seat_id=seat.seat_id,
+                    stack_before=seat.stack,
+                    amount=amount,
+                )
+            )
+            replacement_seats.append(
+                SessionSeatV1(
+                    seat_id=seat.seat_id,
+                    stack=self.configuration.starting_stack,
+                    sitting_out=False,
+                )
+            )
+        return SeatTopologyV1(seats=tuple(replacement_seats)), tuple(rebuys)
 
     def _hand_id_for(self, sequence: int) -> str:
         return f"{self.session_id}:hand:{sequence}"

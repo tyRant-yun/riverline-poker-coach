@@ -41,10 +41,10 @@ def test_six_max_unopened_prior_covers_every_position_and_is_normalized():
         assert result.position is position
         assert result.snapshot is not None
         assert len(result.snapshot.combos) == 1326
-        assert sum(combo.probability for combo in result.snapshot.combos.values()) == Decimal("1")
+        assert abs(sum(combo.probability for combo in result.snapshot.combos.values()) - Decimal("1")) < Decimal("1e-24")
         assert result.provenance is not None
-        assert result.provenance.provider == "riverline.heuristic_seed"
-        assert result.provenance.version == "heuristic_seed_v1"
+        assert result.provenance.provider == "riverline.position_stack_heuristic"
+        assert result.provenance.version == "heuristic_seed_v2"
         assert result.provenance.trust_level == "heuristic"
 
 
@@ -103,12 +103,20 @@ def test_deterministic_fingerprint_and_no_private_or_future_input_surface():
     [
         ({"ante": 1}, SeatPriorUnavailableReason.ANTE_UNSUPPORTED),
         ({"rake_bps": 1}, SeatPriorUnavailableReason.RAKE_UNSUPPORTED),
-        ({"starting_stacks": {seat: 5_000 for seat in range(6)}}, SeatPriorUnavailableReason.STACK_BUCKET_UNSUPPORTED),
+        ({"starting_stacks": {seat: 5_000 for seat in range(6)}}, None),
         ({"after_sequence": 1}, SeatPriorUnavailableReason.NODE_UNSUPPORTED),
     ],
 )
-def test_coverage_boundary_is_structured_and_explicit(overrides: dict[str, object], reason: SeatPriorUnavailableReason):
+def test_coverage_boundary_is_structured_and_explicit(overrides: dict[str, object], reason: SeatPriorUnavailableReason | None):
     result = default_seat_prior_provider().get_prior(_query(**overrides), 0)
+    if reason is None:
+        assert result.available is True
+        assert result.unavailable_reason is None
+        assert result.snapshot is not None
+        assert result.coverage.effective_stack_bucket == "40bb"
+        assert result.coverage.approximate is True
+        assert result.coverage.approximation_reason == "nearest_stack_bucket:40bb"
+        return
     assert result.available is False
     assert result.unavailable_reason is reason
     assert result.snapshot is None

@@ -385,6 +385,32 @@ def create_app(
             "table": table_service.projection(session_id),
         }
 
+    @app.get("/v1/tables/{session_id}/insights")
+    async def get_table_insights(request: Request, session_id: str):
+        return {"schemaVersion": 1, "requestId": request.state.request_id, "insights": table_service.insights(session_id)}
+
+    @app.post("/v1/tables/{session_id}/advisor")
+    async def advise_table_decision(request: Request, session_id: str):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_payload", "advisor request payload must be an object")
+        return {"schemaVersion": 1, "requestId": request.state.request_id, "advisor": table_service.advisor(session_id, payload)}
+
+    @app.post("/v1/tables/{session_id}/solver")
+    async def solve_table_decision(request: Request, session_id: str):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_payload", "solver request payload must be an object")
+        return {"schemaVersion": 1, "requestId": request.state.request_id, "solver": table_service.solver(session_id, payload)}
+
+    @app.get("/v1/tables/{session_id}/reviews")
+    async def list_table_reviews(request: Request, session_id: str):
+        return {"schemaVersion": 1, "requestId": request.state.request_id, **table_service.reviews(session_id)}
+
+    @app.get("/v1/tables/{session_id}/reviews/{hand_id}")
+    async def get_table_review(request: Request, session_id: str, hand_id: str):
+        return {"schemaVersion": 1, "requestId": request.state.request_id, **table_service.reviews(session_id, hand_id)}
+
     @app.post("/v1/tables/{session_id}/actions")
     async def submit_continuous_table_action(request: Request, session_id: str):
         payload = await request.json()

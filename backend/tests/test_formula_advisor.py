@@ -5,6 +5,8 @@ from __future__ import annotations
 from decimal import Decimal
 from time import perf_counter_ns
 
+import pytest
+
 from poker_coach.simulator import (
     FormulaAdvisor,
     FormulaAdvisorFactory,
@@ -96,8 +98,11 @@ def test_formula_advisor_preserves_bet_by_and_short_stack_all_in_endpoints():
         ("fold", "none", None, None, False),
         ("bet", "by", 50, 120, True),
     ]
-    assert result.recommended_action is None
-    assert result.recommendation_unavailable_reason == "no_check_or_low_cost_call_heuristic"
+    assert result.status == "degraded"
+    assert result.recommended_action is not None
+    assert result.recommended_action.action.value == "fold"
+    assert result.recommended_action.amount is None
+    assert result.recommendation_unavailable_reason is None
 
 
 def test_formula_advisor_returns_structured_unavailable_for_no_actionable_input():
@@ -106,6 +111,68 @@ def test_formula_advisor_returns_structured_unavailable_for_no_actionable_input(
     assert result.legal_action_bounds == ()
     assert result.recommended_action is None
     assert result.recommendation_unavailable_reason == "no_legal_actions"
+    assert result.status == "not_ready"
+
+
+@pytest.mark.parametrize(
+    ("street", "board"),
+    [
+        ("preflop", ()),
+        ("flop", ("7c", "6d", "2h")),
+        ("turn", ("7c", "6d", "2h", "Ts")),
+        ("river", ("7c", "6d", "2h", "Ts", "Jh")),
+    ],
+)
+def test_formula_advisor_is_always_ready_or_degraded_for_every_hero_street(street, board):
+    result = FormulaAdvisor().evaluate(
+        _observation(street=street).model_copy(update={"board": board})
+    )
+
+    assert result.status in {"ready", "degraded"}
+    assert result.recommended_action is not None
+    assert result.recommended_action.action.value == "check"
+    assert result.recommended_action.amount is None
+    assert result.explanation_key == "advisor.formula.check"
+    assert result.decision.hand_id == "formula-hand"
+
+
+def test_formula_advisor_degrades_to_a_legal_public_only_action_when_formula_raises(monkeypatch):
+    actions = (
+        LegalActionV1(action="fold", amountSemantics="none"),
+        LegalActionV1(action="call", amountSemantics="cost", minAmount=200, maxAmount=200),
+        LegalActionV1(action="raise", amountSemantics="to", minAmount=500, maxAmount=900),
+    )
+    monkeypatch.setattr(FormulaAdvisor, "_recommend", lambda *_: (_ for _ in ()).throw(RuntimeError("poison")))
+
+    result = FormulaAdvisor().evaluate(_observation(pot=300), legal_actions=actions)
+
+    assert result.status == "degraded"
+    assert result.source == "safe_legal_fallback"
+    assert result.explanation_key == "advisor.degraded.safe_legal_action"
+    assert result.recommended_action is not None
+    legal = {item.action: item for item in actions}
+    recommendation = result.recommended_action
+    assert legal[recommendation.action].accepts(action=recommendation.action, amount=recommendation.amount)
+    assert "poison" not in str(result.to_dict())
+
+
+def test_formula_advisor_facing_bet_uses_legal_amount_and_ignores_private_poison_inputs():
+    actions = (
+        LegalActionV1(action="fold", amountSemantics="none"),
+        LegalActionV1(action="call", amountSemantics="cost", minAmount=100, maxAmount=100),
+        LegalActionV1(action="raise", amountSemantics="to", minAmount=300, maxAmount=900),
+    )
+    observation = _observation()
+    first = FormulaAdvisor().evaluate(observation, legal_actions=actions)
+    # Observation deliberately has no opponent hole cards, RNG, terminal reveal, or Solver field.
+    second = FormulaAdvisor().evaluate(observation, legal_actions=actions)
+
+    assert first.status == "ready"
+    assert first.recommended_action is not None
+    assert first.recommended_action.action.value == "call"
+    assert first.recommended_action.amount == 100
+    assert first.decision.fingerprint == second.decision.fingerprint
+    assert first.model_dump(exclude={"latency"}) == second.model_dump(exclude={"latency"})
 
 
 def test_formula_advisor_factory_and_results_are_deterministic_and_fast():

@@ -35,7 +35,7 @@ export type ContinuousTable = {
   board: string[];
   pot: number;
   street: string | null;
-  seats: { seatId: number; stack: number; status: string; committed: number }[];
+  seats: { seatId: number; stack: number; status: string; committed: number; revealedHoleCards?: string[] }[];
   heroHoleCards: string[];
   currentActor: number | null;
   heroLegalActions: { action: string; amountSemantics: string; minAmount?: number; maxAmount?: number }[];
@@ -43,9 +43,21 @@ export type ContinuousTable = {
   handComplete: boolean;
   result: { winnerSeats: number[]; payouts: Record<string, number> } | null;
   botDecisionProvenance: { sequence: number; actorSeat: number; profileId: string; provider: string; degraded: boolean; fallbackReason: string | null }[];
+  fingerprint: string;
 };
 
 export type ContinuousTableResponse = { schemaVersion: number; idempotent?: boolean; table: ContinuousTable };
+export type AdvisorResult = { status: "ready" | "degraded" | "not_ready" | "not_applicable"; recommendedAction?: { action: string; amountSemantics: string; amount?: number | null; reason: string } | null; source: string; version: string; potOdds?: string; equityThreshold?: string | null; confidence: string; explanationKey: string; limitations: string[]; decision: { fingerprint: string; handId: string; sequence: number; street: string } };
+export type TableInsightsResponse = { schemaVersion: number; insights: { available: boolean; unavailableReason?: string; advisor?: { available: boolean; status?: AdvisorResult["status"]; unavailableReason?: string; result?: AdvisorResult; provenance?: { source: string; version: string; degraded: boolean } }; seatBeliefs?: { seatId: number; available: boolean; unavailableReason?: string; inactive?: boolean; rangeWidthPct?: number; confidence?: string; source?: string; version?: string; approximate?: boolean; approximationReason?: string | null; changeReason?: string; limitations?: string[]; decision?: { handId: string; afterSequence: number }; matrix169?: Record<string, { probabilityMass: string; comboCount: number }>; topClasses?: { hand: string; probabilityMass: string }[] }[]; stats?: { available: boolean; unavailableReason?: string; bySeat: { seatId: number; vpip: number; pfr: number; threeBet: number }[] } } };
+export type TableAdvisorResponse = { schemaVersion: number; advisor: AdvisorResult };
+export type TableReviewResponse = { schemaVersion: number; available: boolean; unavailableReason?: string | null; review?: { handId: string; heroSeat: number; completionSequence: number; heroDecisions: { actionSequence: number; street: string; action: string }[]; references: Record<string, { status: string; unavailableReason?: string | null }> } | null; reviews?: { handId: string }[] };
+export type TableSolverResponse = { schemaVersion: number; solver: {
+  status: "ready" | "degraded" | "unavailable" | "not_ready";
+  recommendedAction?: { action: string; amount?: number | null } | null;
+  candidates: { action: string; amount?: number | null; approximateEvChips: string }[];
+  equity?: string | null; iterations: number; source: string; version: string;
+  limitations: string[]; unavailableReason?: string | null;
+} };
 
 export type AnalysisResponse = {
   analysis: {

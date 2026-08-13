@@ -152,9 +152,10 @@ def _assert_completed_hand_invariants(opened, result, durable):
     assert replayed.state.payouts == durable[-1].payload.payouts
     opening_total = sum(seat.starting_stack for seat in opened.active_hand.seats)
     assert sum(replayed.state.stacks.values()) == opening_total
+    new_rebuys = result.session.cash_rebuys[len(opened.cash_rebuys) :]
     assert sum(seat.stack for seat in result.session.topology.seats) == sum(
         seat.stack for seat in opened.topology.seats
-    )
+    ) + sum(rebuy.amount for rebuy in new_rebuys)
 
 
 def test_recover_does_not_settle_without_durable_hand_completed_terminal_event(
@@ -318,6 +319,64 @@ def test_real_sqlite_restart_recovers_mid_hand_and_cross_hand_session_progressio
     final_events.close()
 
 
+def test_sqlite_recovery_persists_auto_rebuy_after_terminal_append(tmp_path):
+    path = tmp_path / "auto-rebuy-recovery.sqlite3"
+    sessions = SQLiteGameSessionStore(path)
+    events = SQLiteHandEventStore(path)
+    initial = sessions.save(
+        GameSession.model_validate(
+            {
+                "sessionId": "session-auto-rebuy",
+                "topology": {
+                    "seats": [
+                        {"seatId": seat_id, "stack": 100 if seat_id == 1 else 10_000}
+                        for seat_id in range(6)
+                    ]
+                },
+                "buttonSeat": 0,
+            }
+        ),
+        expected_revision=0,
+    )
+    opened = sessions.save(initial.session.start_next_hand(), expected_revision=initial.revision)
+    assert opened.session.active_hand is not None
+    hand_id = opened.session.active_hand.hand_id
+    result = GameOrchestrator(events).open_hand(
+        opened.session,
+        OpenHandCommandV1(
+            session_id=opened.session.session_id,
+            hand_id=hand_id,
+            command_id="auto-rebuy-open",
+            expected_sequence=0,
+            rng_seed=20260813,
+        ),
+    )
+    for index, actor in enumerate((3, 4, 5, 0, 1), start=1):
+        result = GameOrchestrator(events).execute(
+            opened.session,
+            PlayerActionCommandV1(
+                session_id=opened.session.session_id,
+                hand_id=hand_id,
+                command_id=f"auto-rebuy-fold-{index}",
+                expected_sequence=result.replayed_hand.state.applied_sequence,
+                actor_seat=actor,
+                action="fold",
+                amount_semantics="none",
+            ),
+        )
+    assert result.session.active_hand is None
+    assert result.session.cash_rebuys
+    recovered = sessions.recover("session-auto-rebuy", event_store=events)
+    assert recovered.session == result.session
+    assert recovered.session.cash_rebuys == result.session.cash_rebuys
+    assert sessions.load("session-auto-rebuy") == recovered
+    next_hand = recovered.session.start_next_hand()
+    assert next_hand.active_hand is not None
+    assert next_hand.active_hand.sequence == 2
+    sessions.close()
+    events.close()
+
+
 def test_projection_outbox_and_backup_restore_keep_authoritative_fingerprint(tmp_path):
     source_path = tmp_path / "rebuild-source.sqlite3"
     backup_path = tmp_path / "rebuild-backup.sqlite3"
@@ -445,7 +504,7 @@ def test_fixed_seed_six_max_one_thousand_hand_soak_covers_f1_exit_invariants():
         fold_completions += 1
     assert continuous.hand_sequence == 997
     assert len(continuous.completed_hand_ids) == 997
-    assert sum(seat.stack for seat in continuous.topology.seats) == 60_000
+    assert sum(seat.stack for seat in continuous.topology.seats) >= 60_000
 
     opened, result, durable, actions = _play_policy_hand(
         store,
@@ -518,7 +577,7 @@ def test_fixed_seed_six_max_one_thousand_hand_soak_covers_f1_exit_invariants():
     assert len(side_pot_result.replayed_hand.state.board) == 5
     assert side_pot_result.replayed_hand.state.payouts
     assert sum(side_pot_result.replayed_hand.state.payouts.values()) == 8_000
-    assert any(seat.stack == 0 for seat in side_pot_result.session.topology.seats)
+    assert any(rebuy.stack_before == 0 for rebuy in side_pot_result.session.cash_rebuys)
     hand_count += 1
     legal_action_count += len(side_pot_actions)
 
@@ -529,10 +588,8 @@ def test_fixed_seed_six_max_one_thousand_hand_soak_covers_f1_exit_invariants():
         policy="fold",
     )
     assert sparse_opened.active_hand is not None
-    assert 2 <= len(sparse_opened.active_hand.seats) < 6
-    assert tuple(seat.seat_id for seat in sparse_opened.active_hand.seats) != tuple(
-        range(len(sparse_opened.active_hand.seats))
-    )
+    assert len(sparse_opened.active_hand.seats) == 6
+    assert tuple(seat.seat_id for seat in sparse_opened.active_hand.seats) == tuple(range(6))
     _assert_completed_hand_invariants(sparse_opened, sparse_result, sparse_durable)
     hand_count += 1
     legal_action_count += actions

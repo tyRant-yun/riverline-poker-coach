@@ -1,5 +1,6 @@
 import pytest
 from pydantic import ValidationError
+from pokerkit import Deck
 
 from poker_coach.domain.models import ActionType, ScenarioSpec, positions_for_table
 from poker_coach.rules import PokerKitAdapter, ReplayError, SeededDealV1
@@ -42,6 +43,23 @@ def test_seeded_deal_v1_is_a_frozen_versioned_project_contract():
 
     with pytest.raises(ValidationError):
         SeededDealV1.model_validate({**deal.to_dict(), "schemaVersion": 2})
+
+
+def test_seeded_deal_replays_from_one_unique_52_card_deck():
+    adapter = PokerKitAdapter()
+    first = adapter.deal_seeded(scenario_with_history(), rng_seed=20260812)
+    replayed = adapter.deal_seeded(scenario_with_history(), rng_seed=20260812)
+    all_dealt = [
+        card
+        for hole_cards in first.hole_cards_by_seat.values()
+        for card in hole_cards
+    ] + list(first.board)
+    standard_deck = {repr(card) for card in Deck.STANDARD}
+
+    assert first == replayed
+    assert len(Deck.STANDARD) == len(standard_deck) == 52
+    assert len(all_dealt) == len(set(all_dealt))
+    assert set(all_dealt).issubset(standard_deck)
 
 
 def test_seeded_deal_keeps_sparse_table_seat_ids_outside_pokerkit():

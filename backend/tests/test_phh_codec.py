@@ -45,7 +45,7 @@ def _events(tmp_path, *, stacks=(10_000,) * 6, sitting_out=(), actions=()):
         ))
     events = tuple(item.event for item in store.read(session.active_hand.hand_id))
     store.close()
-    return events, result.replayed_hand.state
+    return events, result.replayed_hand.state, session
 
 
 @pytest.mark.parametrize(
@@ -59,7 +59,7 @@ def _events(tmp_path, *, stacks=(10_000,) * 6, sitting_out=(), actions=()):
             (1, "check", None, "none"), (2, "check", None, "none"), (0, "check", None, "none"),
         )),
         ((0, 20_000, 10_000, 10_000, 10_000, 10_000), (), (
-            (4, "fold", None, "none"), (5, "fold", None, "none"), (1, "fold", None, "none"), (2, "fold", None, "none"),
+            (4, "fold", None, "none"), (5, "fold", None, "none"), (0, "fold", None, "none"), (1, "fold", None, "none"), (2, "fold", None, "none"),
         )),
         ((3_000, 2_000, 5_000, 10_000, 10_000, 10_000), (), (
             (3, "fold", None, "none"), (4, "fold", None, "none"), (5, "fold", None, "none"),
@@ -72,7 +72,7 @@ def _events(tmp_path, *, stacks=(10_000,) * 6, sitting_out=(), actions=()):
     ids=["standard-6max", "post-bust-sparse", "all-in-side-pot", "fold-completion"],
 )
 def test_authoritative_events_phh_round_trip_preserves_public_replay_facts(tmp_path, stacks, sitting_out, actions):
-    events, expected = _events(tmp_path, stacks=stacks, sitting_out=sitting_out, actions=actions)
+    events, expected, session = _events(tmp_path, stacks=stacks, sitting_out=sitting_out, actions=actions)
     codec = HandHistoryCodec()
     text = codec.export(events, visibility="authoritative_archive")
     imported = codec.import_phh(text, imported_at=datetime(2026, 8, 12, tzinfo=timezone.utc))
@@ -85,10 +85,22 @@ def test_authoritative_events_phh_round_trip_preserves_public_replay_facts(tmp_p
     assert actual.payouts == expected.payouts
     assert actual.fingerprint == expected.fingerprint
     assert [event.source for event in imported.events] == [event.source for event in events]
+    if stacks[0] == 0:
+        assert session.hand_sequence == 1
+        assert session.button_seat == 1
+        assert session.active_hand is not None
+        assert tuple(seat.seat_id for seat in session.active_hand.seats) == tuple(range(6))
+        assert session.topology.seats[0].stack == 10_000
+        assert [(rebuy.hand_sequence, rebuy.seat_id, rebuy.stack_before, rebuy.amount) for rebuy in session.cash_rebuys] == [
+            (1, 0, 0, 10_000)
+        ]
+        started = imported.events[0].payload
+        assert started.active_seat_ids == tuple(range(6))
+        assert started.starting_stacks[0] == 10_000
 
 
 def test_default_export_redacts_private_hole_cards_but_archive_is_explicit(tmp_path):
-    events, _ = _events(
+    events, _, _ = _events(
         tmp_path,
         actions=((3, "fold", None, "none"), (4, "fold", None, "none"), (5, "fold", None, "none"), (0, "fold", None, "none"), (1, "fold", None, "none")),
     )
@@ -102,7 +114,7 @@ def test_default_export_redacts_private_hole_cards_but_archive_is_explicit(tmp_p
 
 
 def test_import_rejects_settlement_mismatch_or_potential_rake(tmp_path):
-    events, _ = _events(
+    events, _, _ = _events(
         tmp_path,
         actions=((3, "fold", None, "none"), (4, "fold", None, "none"), (5, "fold", None, "none"), (0, "fold", None, "none"), (1, "fold", None, "none")),
     )

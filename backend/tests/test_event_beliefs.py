@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from poker_coach.ranges.event_beliefs import PublicEventBeliefConsumer
+from poker_coach.ranges.seat_priors import SeatPriorQueryV1, default_seat_prior_provider
+from poker_coach.simulator.table_insights import _public_stream
 from poker_coach.simulator.contracts import (ActionTakenPayloadV1, AmountSemanticsV1, BoardDealtPayloadV1, ContractProvenanceV1, EventSourceV1, HandEventV1, HandStartedPayloadV1, HoleCardsRecordedPayloadV1, SimulatorActionV1)
 from poker_coach.domain.models import Street
 
@@ -10,8 +12,8 @@ def _event(sequence, payload):
     return HandEventV1(event_id=f"e{sequence}", hand_id="h", sequence=sequence, timestamp=datetime.now(timezone.utc), source=EventSourceV1.FIXTURE, provenance=ContractProvenanceV1(producer="test", producer_version="1", correlation_id="c"), payload=payload)
 
 
-def _stream(*payloads, active=(0, 1, 2, 3, 4, 5), button=0, table_size=6):
-    started = HandStartedPayloadV1(table_size=table_size, button_seat=button, small_blind=50, big_blind=100, starting_stacks={i: 10000 for i in range(table_size)}, active_seat_ids=active, rng_seed=1)
+def _stream(*payloads, active=(0, 1, 2, 3, 4, 5), button=0, table_size=6, stack=10000):
+    started = HandStartedPayloadV1(table_size=table_size, button_seat=button, small_blind=50, big_blind=100, starting_stacks={i: stack for i in range(table_size)}, active_seat_ids=active, rng_seed=1)
     return tuple(_event(i + 1, payload) for i, payload in enumerate((started, *payloads)))
 
 
@@ -56,3 +58,40 @@ def test_fold_call_raise_check_are_supported_and_sparse_seats_work():
     sparse = _stream(active=(0, 2, 3, 5, 6, 7), button=5, table_size=8)
     unavailable = PublicEventBeliefConsumer().beliefs_at(sparse)
     assert all(belief.unavailable_reason.startswith("prior_unavailable:table_size_unsupported") for belief in unavailable.values())
+
+
+def test_common_stack_buckets_are_available_and_nearest_bucket_is_explicit():
+    provider = default_seat_prior_provider()
+    for stack in (2000, 4000, 6000, 8000, 10000, 15000, 20000):
+        result = provider.get_prior(
+            SeatPriorQueryV1(table_size=6, active_seat_ids=(0, 1, 2, 3, 4, 5), button_seat=0,
+                small_blind=50, big_blind=100, starting_stacks={seat: stack for seat in range(6)}),
+            3,
+        )
+        assert result.available
+        assert result.coverage.effective_stack_bucket.endswith("bb")
+        assert len(result.snapshot.combos) == 1326
+        assert abs(sum(combo.probability for combo in result.snapshot.combos.values()) - Decimal("1")) < Decimal("1e-24")
+    approximate = PublicEventBeliefConsumer().beliefs_at(_stream(stack=11000))
+    assert all(belief.approximate and belief.approximation_reason == "nearest_stack_bucket:100bb" for belief in approximate.values())
+
+
+def test_position_weighted_prior_and_public_actions_are_normalized_and_fold_inactive():
+    events = _stream(_action(3, SimulatorActionV1.RAISE), _action(4, SimulatorActionV1.FOLD))
+    beliefs = PublicEventBeliefConsumer().beliefs_at(events)
+    assert beliefs[0].prior.combos["AsAh"].probability != beliefs[3].prior.combos["AsAh"].probability
+    assert beliefs[3].current.update.action_type == "raise"
+    assert beliefs[3].current.update.action_label == "公开行动启发式更新"
+    assert sum(combo.probability for combo in beliefs[3].current.combos.values()) == Decimal("1")
+    assert beliefs[4].inactive is True
+    assert beliefs[4].current.update.action_type == "fold"
+
+
+def test_public_prefix_is_not_poisoned_by_opponent_true_cards():
+    public = _stream(_action(3, SimulatorActionV1.RAISE))
+    consumer = PublicEventBeliefConsumer()
+    baseline = consumer.beliefs_at(public, observer_visible_cards=("Ah", "Kd"))
+    poisoned_events = (*public, _event(3, HoleCardsRecordedPayloadV1(seat_id=3, cards=("Qs", "Qc"))))
+    # Authoritative opponent cards are deliberately removed before this seam.
+    poisoned = consumer.beliefs_at(_public_stream(poisoned_events), observer_visible_cards=("Ah", "Kd"))
+    assert baseline[3].current.to_json() == poisoned[3].current.to_json()

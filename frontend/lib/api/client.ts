@@ -20,6 +20,9 @@ import type {
   SolverSpotPayload,
   StateResponse,
   ContinuousTableResponse,
+  TableInsightsResponse,
+  TableReviewResponse,
+  TableSolverResponse,
   TeachingResponse,
 } from "../../types/api";
 import type { RangeBeliefTraceResponse, RangeBeliefView } from "../../types/rangeBelief";
@@ -160,4 +163,13 @@ export const continuousTableApi = {
     request<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/actions`, { schemaVersion: 1, ...payload }),
   nextHand: (sessionId: string, payload: { commandId: string; expectedRevision: number }) =>
     request<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/hands`, { schemaVersion: 1, ...payload }),
+  insights: (sessionId: string) => requestGet<TableInsightsResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/insights`),
+  solver: (sessionId: string, payload: { handId: string; decisionFingerprint: string }) =>
+    request<TableSolverResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/solver`, { schemaVersion: 1, ...payload }),
+  reviews: (sessionId: string, handId?: string) => requestGet<TableReviewResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/reviews${handId ? `/${encodeURIComponent(handId)}` : ""}`),
+};
+
+/** Lightweight availability probe for the local Riverline backend. */
+export const systemApi = {
+  health: () => requestGet<{ status: string; requestId: string; appVersion: string }>("/health"),
 };

@@ -165,7 +165,7 @@ def test_session_seam_never_silently_changes_session_or_hand_stack_ownership():
     assert snapshot_stacks == original_stacks
 
 
-def test_busted_seat_remains_in_session_but_is_excluded_from_the_next_hand():
+def test_next_hand_auto_rebuys_one_under_one_big_blind_seat_to_exactly_100bb():
     opened = _session().start_next_hand()
     assert opened.active_hand is not None
 
@@ -175,32 +175,75 @@ def test_busted_seat_remains_in_session_but_is_excluded_from_the_next_hand():
     )
     next_hand = settled.start_next_hand()
 
-    assert settled.topology.seats[0].stack == 0
+    assert settled.topology.seats[0].stack == DEFAULT_STARTING_STACK
+    assert settled.cash_rebuys[-1].seat_id == 0
+    assert settled.cash_rebuys[-1].stack_before == 0
+    assert settled.cash_rebuys[-1].amount == DEFAULT_STARTING_STACK
     assert next_hand.active_hand is not None
-    assert tuple(seat.seat_id for seat in next_hand.active_hand.seats) == (1, 2, 3, 4, 5)
+    assert tuple(seat.seat_id for seat in next_hand.active_hand.seats) == tuple(range(6))
 
 
-def test_button_rotation_skips_a_zero_stack_seat():
+def test_auto_rebuy_preserves_big_stacks_and_rebuys_every_active_short_stack_once():
     opened = _session().start_next_hand()
     assert opened.active_hand is not None
 
     settled = opened.complete_active_hand(
         hand_id=opened.active_hand.hand_id,
-        ending_stacks={0: 20_000, 1: 0, 2: 10_000, 3: 10_000, 4: 10_000, 5: 10_000},
+        ending_stacks={0: 20_000, 1: 99, 2: 0, 3: 10_000, 4: 10_000, 5: 19_901},
     )
 
-    assert settled.button_seat == 2
+    assert settled.button_seat == 1
+    assert tuple(seat.stack for seat in settled.topology.seats) == (
+        20_000,
+        DEFAULT_STARTING_STACK,
+        DEFAULT_STARTING_STACK,
+        10_000,
+        10_000,
+        19_901,
+    )
+    assert [(item.seat_id, item.stack_before, item.amount) for item in settled.cash_rebuys] == [
+        (1, 99, DEFAULT_STARTING_STACK - 99),
+        (2, 0, DEFAULT_STARTING_STACK),
+    ]
+    assert settled.start_next_hand().cash_rebuys == settled.cash_rebuys
 
 
-def test_session_with_fewer_than_two_funded_seats_cannot_start_another_hand():
-    opened = _session().start_next_hand()
+def test_auto_rebuy_does_not_change_a_sitting_out_short_stack():
+    session = GameSession.model_validate(
+        {
+            "sessionId": "session-sitting-out",
+            "topology": {
+                "seats": [
+                    {"seatId": seat_id, "stack": 0 if seat_id == 5 else 10_000, "sittingOut": seat_id == 5}
+                    for seat_id in range(6)
+                ]
+            },
+            "buttonSeat": 0,
+        }
+    )
+    opened = session.start_next_hand()
     assert opened.active_hand is not None
     settled = opened.complete_active_hand(
         hand_id=opened.active_hand.hand_id,
-        ending_stacks={0: 60_000, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0},
+        ending_stacks={0: 0, 1: 20_000, 2: 10_000, 3: 10_000, 4: 10_000},
     )
 
-    with pytest.raises(SessionLifecycleError) as caught:
-        settled.start_next_hand()
+    assert settled.topology.seats[0].stack == DEFAULT_STARTING_STACK
+    assert settled.topology.seats[5].stack == 0
+    assert [rebuy.seat_id for rebuy in settled.cash_rebuys] == [0]
 
-    assert caught.value.code == "insufficient_funded_seats"
+
+def test_next_hand_rebuys_all_active_sub_one_big_blind_stacks_and_keeps_sequence_stable():
+    session = GameSession.model_validate(
+        {
+            "sessionId": "session-low-stacks",
+            "topology": {"seats": [{"seatId": seat_id, "stack": 1} for seat_id in range(6)]},
+            "buttonSeat": 0,
+        }
+    )
+    next_hand = session.start_next_hand()
+    assert next_hand.button_seat == 0
+    assert tuple(seat.stack for seat in next_hand.topology.seats) == (DEFAULT_STARTING_STACK,) * 6
+    assert len(next_hand.cash_rebuys) == 6
+    assert next_hand.active_hand is not None
+    assert next_hand.active_hand.sequence == 1

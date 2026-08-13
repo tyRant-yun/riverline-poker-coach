@@ -3,23 +3,24 @@
 
 import type { ReactNode } from "react";
 
-export type WorkspaceView = "handlab" | "table" | "solver" | "train" | "library";
+export type WorkspaceView = "table" | "reviews";
 
 const VIEWS: { id: WorkspaceView; label: string }[] = [
-  { id: "handlab", label: "Hand Lab" },
-  { id: "table", label: "持续牌桌" },
-  { id: "solver", label: "Solver" },
-  { id: "train", label: "Train" },
-  { id: "library", label: "Library" },
+  { id: "table", label: "牌桌" },
+  { id: "reviews", label: "复盘" },
 ];
+
+export type HealthStatus = "loading" | "online" | "offline";
 
 type Props = {
   activeView: WorkspaceView;
   onViewChange: (view: WorkspaceView) => void;
+  healthStatus: HealthStatus;
+  onRetryHealth: () => void;
   children: ReactNode;
 };
 
-export default function AppShell({ activeView, onViewChange, children }: Props) {
+export default function AppShell({ activeView, onViewChange, healthStatus, onRetryHealth, children }: Props) {
   return (
     <div className="app">
       <header className="app-header">
@@ -41,9 +42,10 @@ export default function AppShell({ activeView, onViewChange, children }: Props) 
             </button>
           ))}
         </nav>
-        <div className="status-pill">
+        <div className={`status-pill status-pill--${healthStatus}`} data-testid="health-status">
           <span className="pulse" />
-          本地规则核心在线
+          {healthStatus === "loading" ? "服务状态：检查中" : healthStatus === "online" ? "服务状态：在线" : "服务状态：离线"}
+          {healthStatus === "offline" && <button type="button" className="status-pill__retry" onClick={onRetryHealth}>重试</button>}
         </div>
       </header>
       <main className="shell">{children}</main>
