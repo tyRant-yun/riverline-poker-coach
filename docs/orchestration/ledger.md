@@ -57,6 +57,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R6-03 V2 Visual Integration | `019ff9e2-b2bb-7501-bcaa-071b1ae28fe5` | `completed` | `blocked` | `codex/r6-03-visual-integration` | `85baa9a` | — | — | only uncommitted red test | R6-03B | Invalid execution: two turns returned idle without implementation, commit, handoff or smoke; superseded rather than retried again |
 | R6-03B V2 Visual Integration | `019ff9fe-49f7-7080-90d8-c5efcd61b954` | `completed` | `merged` | `codex/r6-03b-visual-integration` | `3970fba` | `e5ca657` | [R6-03B handoff](handoffs/R6-03B.md) | Vitest 11 passed; reviewer repeated 11 passed; tsc; build; Playwright 2; four-resolution screenshots; real SQLite smoke | R6-02 | Integrated `27c7023..3d8b15c`; reveal/playback/async P0/P1 review PASS |
 | R6-02 Range Data + Heatmap | `019ffa15-575d-7ce2-a7fd-a1b4ab0f67a5` | `completed` | `merged` | `codex/r6-02-range-data` | `73eb846` | `997535a` | [R6-02 handoff](handoffs/R6-02.md) | Backend 17 passed; frontend 4 passed; tsc/compileall; visible reviewer 17 passed | release gate | Integrated `ef31175..496cc25`; visible privacy review PASS; 6-max median 41.440ms remains non-blocking performance backlog |
+| R6 MVP Release Gate | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `in_progress` | `in_progress` | `codex/r6-release-gate` | `8fac229` | — | — | — | PR #2/main merge | Visible release task: align five stale entry tests, run one full backend/frontend/Playwright/source-license gate and real browser smoke |
 
 ## 下一入口
 
