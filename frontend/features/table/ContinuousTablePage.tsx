@@ -24,6 +24,8 @@ export default function ContinuousTablePage() {
   const [insights, setInsights] = useState<TableInsightsResponse["insights"] | null>(null);
   const [review, setReview] = useState<TableReviewResponse["review"] | null>(null);
   const insightRequest = useRef(0);
+  const reviewRequest = useRef(0);
+  const reviewIdentity = useRef<string | null>(null);
 
   function loadInsights(next: ContinuousTable) {
     const request = ++insightRequest.current;
@@ -32,7 +34,16 @@ export default function ContinuousTablePage() {
       .then((response) => { if (request === insightRequest.current) setInsights(response.insights); })
       .catch(() => { if (request === insightRequest.current) setInsights(null); });
   }
-  function loadReview(next: ContinuousTable) { if (next.handComplete && next.handId) continuousTableApi.reviews(next.sessionId, next.handId).then((response) => setReview(response.review ?? null)).catch(() => setReview(null)); }
+  function loadReview(next: ContinuousTable) {
+    const request = ++reviewRequest.current;
+    const identity = next.handComplete && next.handId ? `${next.sessionId}:${next.handId}` : null;
+    reviewIdentity.current = identity;
+    setReview(null);
+    if (!identity || !next.handId) return;
+    continuousTableApi.reviews(next.sessionId, next.handId)
+      .then((response) => { if (request === reviewRequest.current && identity === reviewIdentity.current) setReview(response.review ?? null); })
+      .catch(() => { if (request === reviewRequest.current && identity === reviewIdentity.current) setReview(null); });
+  }
 
   useEffect(() => {
     const sessionId = window.localStorage.getItem("riverline-continuous-table-session");

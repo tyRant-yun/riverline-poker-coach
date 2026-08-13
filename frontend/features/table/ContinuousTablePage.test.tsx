@@ -69,4 +69,30 @@ describe("ContinuousTablePage", () => {
     resolveA!({ insights: { available: true, advisor: { available: true, result: { recommendedAction: { action: "check", reason: "A" }, source: "deterministic_formula", version: "formula-advisor/v1" } }, seatBeliefs: [], stats: { available: false, unavailableReason: "stats_not_ready", bySeat: [] } } });
     await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("call · deterministic_formula"));
   });
+
+  it("clears the prior hand review and ignores an out-of-order terminal review", async () => {
+    let resolveA: (value: unknown) => void;
+    let resolveB: (value: unknown) => void;
+    const completedA = { ...table, handComplete: true, currentActor: null };
+    const activeB = { ...table, handId: "table-1:hand:4", handSequence: 4, revision: 19 };
+    const completedB = { ...activeB, handComplete: true, currentActor: null, revision: 20 };
+    api.action.mockResolvedValueOnce({ table: completedA }).mockResolvedValueOnce({ table: completedB });
+    api.nextHand.mockResolvedValueOnce({ table: activeB });
+    api.reviews
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveA = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveB = resolve; }));
+    render(<ContinuousTablePage />);
+    fireEvent.click(screen.getByTestId("create-continuous-table"));
+    fireEvent.click(await screen.findByTestId("hero-action-call"));
+    await waitFor(() => expect(api.reviews).toHaveBeenCalledWith("table-1", "table-1:hand:3"));
+    fireEvent.click(screen.getByTestId("next-hand"));
+    await screen.findByTestId("hero-action-call");
+    fireEvent.click(screen.getByTestId("hero-action-call"));
+    await waitFor(() => expect(api.reviews).toHaveBeenCalledWith("table-1", "table-1:hand:4"));
+    expect(screen.getByTestId("table-review-status")).toHaveTextContent("复盘未就绪");
+    resolveB!({ available: true, review: { handId: "table-1:hand:4", heroSeat: 0, completionSequence: 20, heroDecisions: [], references: {} } });
+    await waitFor(() => expect(screen.getByTestId("table-review-status")).toHaveTextContent("复盘可用"));
+    resolveA!({ available: true, review: { handId: "table-1:hand:3", heroSeat: 0, completionSequence: 18, heroDecisions: [], references: {} } });
+    await waitFor(() => expect(screen.getByTestId("table-review-status")).toHaveTextContent("复盘可用"));
+  });
 });
