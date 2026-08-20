@@ -2,7 +2,7 @@
 
 ## 发布结论
 
-R7 源码 MVP 的功能验收已达到标准：用户可在持续六人桌连续完成牌局，Hero 决策控件不会在 Bot 过渡后锁死；终局展示、复盘/统计与下一手状态切换可用；Advisor、Range V2 与 Fast Solver L1.5 在同一决策视图中同时提供信息。PR #4 已证明前端 CI 完整通过，backend 的 live PostgreSQL/Redis 与 Range V2 也全部通过；唯一失败是慢 runner 上 Solver 首轮冷启动在 soft budget 后、硬上限前以零样本返回 unavailable。该窄修复已通过 focused suite，但仍需原 Solver reviewer 的独立窄审和 GitHub CI 复跑；完成前本修订不作为最终源码发布结论。
+R7 源码 MVP 的功能验收与发布门已达到标准：用户可在持续六人桌连续完成牌局，Hero 决策控件不会在 Bot 过渡后锁死；终局展示、复盘/统计与下一手状态切换可用；Advisor、Range V2 与 Fast Solver L1.5 在同一决策视图中同时提供信息。PR #4 head `0c2f0a7` 的 GitHub Actions run `32362755546` 已全绿：Backend Python 3.13（含 live PostgreSQL/Redis）PASS，Frontend Next.js build + Playwright E2E PASS。R7 源码 MVP 因此可发布，无已知 P0/P1。
 
 本结论只覆盖 GitHub 源码候选。它不创建 GitHub Release、Docker image、wheel、安装包或包含 `node_modules` 的二进制制品。
 
@@ -18,8 +18,8 @@ R7 源码 MVP 的功能验收已达到标准：用户可在持续六人桌连续
 
 发布门基线：`adcf2eb65eefc3ed3627bde1b2101fb64b78b303`，分支：`codex/r7-08-release`。
 
-- Backend：本地发布门的 `compileall` 与 `pip check` 通过。PR #4 的 GitHub CI 为 600 passed / 1 failed；live PostgreSQL、Redis、Range V2 全部通过，唯一失败为 Solver 冷启动零样本。
-- Frontend：PR #4 GitHub CI 完整 PASS（用时 1m43s）；本地 32 files / 167 tests、`npx tsc --noEmit`、标准 Next.js 16 Turbopack `npm run build` 亦已通过。
+- Backend：本地发布门的 `compileall` 与 `pip check` 通过。PR #4 head `0c2f0a7` / run `32362755546` 的 Backend tests Python 3.13 PASS（`1m51s`），包含 live PostgreSQL/Redis、Range V2 和 Solver 冷启动修复。
+- Frontend：同一 run 的 Frontend Next.js build + Playwright E2E PASS（`1m44s`）；本地 32 files / 167 tests、`npx tsc --noEmit`、标准 Next.js 16 Turbopack `npm run build` 亦已通过。
 - License：`py -3.13 tools/generate_license_provenance.py --check` 通过。
 - Browser：当前产品表面的完整 Playwright 门为 5 项，`5 passed (7.6s)`；覆盖持续桌、本地体验、唯一 Hero 私牌/同屏洞察、双手黄金旅程与桌面几何。
 - Local runtime：`scripts/run-local.ps1` 在 SQLite/no-Redis 默认模式启动成功；同一专用端口停止后重启成功，API `/health` 返回 `ok`，Web 返回 HTTP 200。
@@ -41,6 +41,8 @@ PR #3 的 Frontend CI 已通过 unit、TypeScript 与 production build，但当�
 PR #4 在 GitHub runner 上的第一轮 full-1326、6-way flop standard solve 返回 `unavailable / solver_budget_exhausted / sample_count=0`。实现原先在生成首样本前就按 150ms soft deadline 退出，因此 runner 调度或冷路径只要跨过 soft budget，即使仍在已声明的 300ms hard window 内也会得到零证据。
 
 修复不提高任何预算：已有样本时仍以 soft deadline 停止；尚无样本时，只在 hard deadline 已耗尽才返回 unavailable，否则用现有 hard window 完成一个真实 range-weighted 样本并诚实降级。确定性慢时钟回归修复前为 unavailable，修复后为 `degraded / sample_count=1 / range_weighted_public_beliefs`；完全耗尽 hard budget 的零样本 unavailable 契约仍通过。FastSolver focused suite `16 passed`，standard full-1326 本机 p50 `33.917ms`、p95 `35.435ms`，river oracle MAE `0.000000pp`。
+
+修复后的 PR #4 head `0c2f0a7` 在 GitHub Actions run `32362755546` 全绿，证明该冷启动契约在 Linux runner 的完整 backend 门中通过。
 
 ## 本地体验
 
@@ -64,5 +66,5 @@ PR #4 在 GitHub runner 上的第一轮 full-1326、6-way flop standard solve �
 - Range V2 是第一方公开事件启发式独立边际 belief，不是校准人群模型、玩家画像或联合对手范围。
 - R7-06 HU River CFR/L2 已延期，不阻塞本次 MVP。
 - 源码仓库 provenance gate 已通过；包含原生依赖的 binary/container 仍需单独核验 LGPL 工件义务，本次未发布此类制品。
-- Live PostgreSQL/Redis 已由 PR #4 GitHub CI 实测通过；本地 SQLite/no-Redis 纵向路径仍独立通过。Solver 冷启动修复提交后的完整 CI 复跑尚未执行，不能继承为通过。
+- Live PostgreSQL/Redis 与 Solver 冷启动修复已由 PR #4 / run `32362755546` 完整实测通过；本地 SQLite/no-Redis 纵向路径亦独立通过。
 - 仓库声明 Node.js `24.15.0`，本机实测为 `24.18.0`；测试与构建均通过，该补丁版本差异记录为非阻塞环境偏差。
