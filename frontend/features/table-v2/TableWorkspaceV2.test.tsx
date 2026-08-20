@@ -55,6 +55,13 @@ describe("Table V2 visual contracts", () => {
     expect(screen.getByLabelText("Decision Summary")).toHaveTextContent("Advisor：暂不可用");
     expect(screen.getByLabelText("Solver Action Ladder")).toHaveTextContent("跟注 100");
   });
+  it("renders backend-calibrated ΔEV, uncertainty, close, and extreme sizing facts without declaring GTO", () => {
+    render(<InsightRailV2 solver={{ status: "ready", recommendedAction: { action: "bet", amount: 300 }, candidates: [{ action: "bet", amount: 300, approximateEvChips: "12.5", potPercentage: "66.666", deltaEvChips: "0", deltaEvConfidenceInterval95: { lower: "-0.2", upper: "0.2" }, uncertaintyStatus: "available", recommendationTier: "close", sizingClass: "standard" }, { action: "all_in", amount: 1_000, approximateEvChips: "11.1", potPercentage: "222.2", deltaEvChips: "-1.4", uncertaintyStatus: "not_available", recommendationTier: "not_recommended", sizingClass: "jam" }], equity: "0.42", iterations: 80, source: "range_weighted_public_beliefs", version: "fast-ev-solver/v1", sizingRobustness: "close", recommendationReasonCodes: ["close_conservative_tiebreak"], limitations: ["not GTO"] }} />);
+    const ladder = screen.getByLabelText("Solver Action Ladder");
+    expect(ladder).toHaveTextContent("66.7% pot"); expect(ladder).toHaveTextContent("ΔEV CI -0.2–+0.2");
+    expect(ladder).toHaveTextContent("接近最优"); expect(ladder).toHaveTextContent("极端尺度：全压"); expect(ladder).toHaveTextContent("不确定性不可用");
+    expect(screen.getByLabelText("Solver 结果")).toHaveTextContent("不是 GTO、Nash 或最终行动裁决");
+  });
   it("opens an accessible 13×13 Explorer with topology filters, cell details, and an honest delta baseline", () => {
     render(<InsightRailV2 table={{ sessionId: "s", handId: "h", fingerprint: "a", street: "flop", pot: 100 } as never} insights={{ available: true, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, rangeWidthCombos: 214, confidence: "low", source: "riverline.heuristic_seed", matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 }, AKs: { probabilityMass: "0.05", comboCount: 4 }, AKo: { probabilityMass: "0", comboCount: 0 } } }] }} />);
     fireEvent.click(screen.getByRole("button", { name: "展开矩阵" }));

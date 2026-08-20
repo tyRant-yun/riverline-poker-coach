@@ -22,6 +22,7 @@ import type {
   ContinuousTableResponse,
   TableInsightsResponse,
   TableReviewResponse,
+  TableReconciliationResponse,
   TableSolverResponse,
   TeachingResponse,
 } from "../../types/api";
@@ -166,6 +167,8 @@ export const continuousTableApi = {
   insights: (sessionId: string) => requestGet<TableInsightsResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/insights`),
   solver: (sessionId: string, payload: { handId: string; decisionFingerprint: string; budgetTier?: "quick" | "standard" | "deep" }) =>
     request<TableSolverResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/solver`, { schemaVersion: 1, ...payload }),
+  reconciliation: (sessionId: string, payload: { handId: string; decisionFingerprint: string; budgetTier?: "quick" | "standard" | "deep" }) =>
+    request<TableReconciliationResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/reconciliation`, { schemaVersion: 1, ...payload }),
   reviews: (sessionId: string, handId?: string) => requestGet<TableReviewResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/reviews${handId ? `/${encodeURIComponent(handId)}` : ""}`),
 };
 

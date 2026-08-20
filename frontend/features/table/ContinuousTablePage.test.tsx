@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ContinuousTablePage from "./ContinuousTablePage";
 
 const api = vi.hoisted(() => ({
-  create: vi.fn(), get: vi.fn(), action: vi.fn(), nextHand: vi.fn(), insights: vi.fn(), solver: vi.fn(), reviews: vi.fn(),
+  create: vi.fn(), get: vi.fn(), action: vi.fn(), nextHand: vi.fn(), insights: vi.fn(), solver: vi.fn(), reconciliation: vi.fn(), reviews: vi.fn(),
 }));
 vi.mock("../../lib/api/client", () => ({ continuousTableApi: api }));
 
@@ -25,6 +25,7 @@ describe("ContinuousTablePage", () => {
     api.create.mockResolvedValue({ table }); api.action.mockResolvedValue({ table }); api.nextHand.mockResolvedValue({ table: { ...table, handSequence: 4 } });
     api.insights.mockResolvedValue({ insights: { available: true, advisor: { available: true, result: { recommendedAction: { action: "check", reason: "free" }, source: "deterministic_formula", version: "formula-advisor/v1" } }, seatBeliefs: [{ seatId: 1, available: true, provenance: { version: "heuristic_likelihood_v1" } }], stats: { available: false, unavailableReason: "stats_not_ready", bySeat: [] } } });
     api.solver.mockResolvedValue({ solver: { status: "ready", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "fold", approximateEvChips: "0" }, { action: "call", amount: 100, approximateEvChips: "12.5" }], equity: "0.42", iterations: 80, source: "monte_carlo_uniform_opponents", version: "fast-ev-solver/v1", limitations: ["uniform opponents"] } });
+    api.reconciliation.mockResolvedValue({ reconciliation: { status: "ready", decision: { fingerprint: "decision-a", handId: "table-1:hand:3", sequence: 8, street: "flop" }, ruleBaseline: { role: "rule_baseline", status: "ready", action: { action: "check", amountSemantics: "none" }, provenance: {}, limitations: [] }, simulationEstimate: { role: "simulation_estimate", status: "ready", action: { action: "call", amountSemantics: "cost", amountChips: 100, potPct: "22.2" }, provenance: {}, limitations: [] }, agreement: { kind: "different_action", reasonCodes: ["model_limitations"], confidenceInterval: { status: "available", overlap: false }, sizingRobustness: "robust" } } });
     api.reviews.mockResolvedValue({ available: true, review: { handId: table.handId, heroSeat: 0, completionSequence: 12, heroDecisions: [], references: {} } });
   });
 
@@ -70,6 +71,24 @@ describe("ContinuousTablePage", () => {
     await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("近似 EV 求解（降级）"));
     resolveA!({ solver: { status: "ready", recommendedAction: { action: "fold" }, candidates: [{ action: "fold", approximateEvChips: "0" }], equity: "0.1", iterations: 80, source: "monte_carlo_uniform_opponents", version: "fast-ev-solver/v1", limitations: [] } });
     await waitFor(() => expect(screen.getByTestId("table-insights")).not.toHaveTextContent("推荐 fold"));
+  });
+
+  it("uses the reconciliation endpoint as the comparison source and ignores its old response", async () => {
+    let resolveA: (value: unknown) => void;
+    let resolveB: (value: unknown) => void;
+    api.reconciliation
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveA = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveB = resolve; }));
+    api.action.mockResolvedValueOnce({ table: { ...table, revision: 19, fingerprint: "decision-b", board: ["As", "Kd", "7c", "2h"] } });
+    render(<ContinuousTablePage />);
+    fireEvent.click(screen.getByTestId("create-continuous-table"));
+    await waitFor(() => expect(api.reconciliation).toHaveBeenCalledWith("table-1", expect.objectContaining({ handId: table.handId, decisionFingerprint: "decision-a", budgetTier: "standard" })));
+    fireEvent.click(await screen.findByTestId("hero-action-call"));
+    await waitFor(() => expect(api.reconciliation).toHaveBeenCalledTimes(2));
+    resolveB!({ reconciliation: { status: "ready", decision: { fingerprint: "decision-b", handId: table.handId, sequence: 9, street: "turn" }, ruleBaseline: { role: "rule_baseline", status: "ready", action: { action: "call", amountSemantics: "cost", amountChips: 100 }, provenance: {}, limitations: [] }, simulationEstimate: { role: "simulation_estimate", status: "ready", action: { action: "call", amountSemantics: "cost", amountChips: 100 }, provenance: {}, limitations: [] }, agreement: { kind: "exact_action", reasonCodes: [], confidenceInterval: { status: "available", overlap: false }, sizingRobustness: "robust" } } });
+    await waitFor(() => expect(screen.getByLabelText("Decision Summary")).toHaveTextContent("动作与尺度一致"));
+    resolveA!({ reconciliation: { status: "ready", decision: { fingerprint: "decision-a", handId: table.handId, sequence: 8, street: "flop" }, ruleBaseline: { role: "rule_baseline", status: "ready", action: { action: "fold", amountSemantics: "none" }, provenance: {}, limitations: [] }, simulationEstimate: { role: "simulation_estimate", status: "ready", action: { action: "call", amountSemantics: "cost", amountChips: 100 }, provenance: {}, limitations: [] }, agreement: { kind: "different_action", reasonCodes: ["unexplained"], confidenceInterval: { status: "available", overlap: false }, sizingRobustness: "close" } } });
+    await waitFor(() => expect(screen.getByLabelText("Decision Summary")).not.toHaveTextContent("尚无可验证原因"));
   });
 
   it("releases Hero controls when the latest bot-transition snapshot returns the turn to Hero", async () => {
