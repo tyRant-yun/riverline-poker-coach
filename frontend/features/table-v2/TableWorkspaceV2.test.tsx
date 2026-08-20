@@ -41,4 +41,11 @@ describe("Table V2 visual contracts", () => {
     fireEvent.click(screen.getByRole("button", { name: /座位 2/ })); expect(screen.getByLabelText("座位 2 Range 热图")).toBeInTheDocument(); expect(screen.getByTitle(/AA：概率质量 8.00%/)).toBeInTheDocument();
     expect(screen.getByText(/不是 GTO 或 Nash/)).toBeInTheDocument(); expect(screen.getByText(/耗时 24ms/)).toBeInTheDocument();
   });
+  it("shows the additive Range V2 and Solver L1.5 provenance without requiring new fields from old responses", () => {
+    render(<InsightRailV2 insights={{ available: true, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, rangeWidthCombos: 214, confidenceScore: 0.8, dataVersion: "range-v2.1", changeReason: "公开行动：加注", approximate: true, approximationReason: "nearest_stack_bucket:100bb", matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 } } }] }} solver={{ status: "ready", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "call", amount: 100, approximateEvChips: "12.5", showdownEquity: "0.42", foldEquity: "0", sampleCount: 80, effectiveSampleSize: "80", confidenceInterval95: { lower: "8", upper: "17" }, responseMix: { fold: "0", call: "1", raise: "0" } }], equity: "0.42", iterations: 80, sampleCount: 80, effectiveSampleSize: "80", budgetTier: "standard", budgetMs: 150, confidence: "coarse", source: "range_weighted_public_beliefs", rangeStatus: "ready", version: "fast-ev-solver/v1", modelVersion: "fast-ev-solver/v1.5", limitations: ["not GTO"] }} />);
+    expect(screen.getByText(/214 combos · 置信度 80%/)).toBeInTheDocument();
+    expect(screen.getByText(/数据 range-v2.1/)).toBeInTheDocument();
+    expect(screen.getByText(/推荐：跟注 100 · 预算 standard \/ 150ms/)).toBeInTheDocument();
+    expect(screen.getByText(/CI 8–17 · 权益 42.0%/)).toBeInTheDocument();
+  });
 });

@@ -60,11 +60,11 @@ describe("ContinuousTablePage", () => {
     api.action.mockResolvedValueOnce({ table: { ...table, revision: 19, board: ["As", "Kd", "7c", "2h"] } });
     render(<ContinuousTablePage />);
     fireEvent.click(screen.getByTestId("create-continuous-table"));
-    await waitFor(() => expect(api.solver).toHaveBeenCalledWith("table-1", expect.objectContaining({ handId: table.handId, decisionFingerprint: expect.any(String) })));
+    await waitFor(() => expect(api.solver).toHaveBeenCalledWith("table-1", expect.objectContaining({ handId: table.handId, decisionFingerprint: expect.any(String), budgetTier: "standard" })));
     expect(await screen.findByLabelText("Advisor 摘要")).toHaveTextContent("建议：过牌");
     fireEvent.click(screen.getByTestId("hero-action-call"));
     await waitFor(() => expect(api.solver).toHaveBeenCalledTimes(2));
-    expect(screen.getByLabelText("Solver 结果")).toHaveTextContent("Fast Solver 计算中");
+    expect(screen.getByLabelText("Solver 结果")).toHaveTextContent("Fast Solver（standard）计算中");
 
     resolveB!({ solver: { status: "degraded", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "call", amount: 100, approximateEvChips: "4" }], equity: "0.4", iterations: 20, source: "monte_carlo_uniform_opponents", version: "fast-ev-solver/v1", limitations: ["partial"] } });
     await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("近似 EV 求解（降级）"));
