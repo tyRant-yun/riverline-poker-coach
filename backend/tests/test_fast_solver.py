@@ -64,6 +64,40 @@ def test_range_only_sampling_applies_blockers_and_multiway_card_removal():
     assert {"As", "Kd", "7c", "6d", "2h", "Qc", "Qd", "Jh", "Jd"}.issubset(sample)
 
 
+def test_joint_sampler_backtracks_from_dead_end_without_uniform_fallback():
+    observation = _observation()
+    ranges = _ranges(
+        _belief(1, {"QcQd": "0.5", "JhJd": "0.5"}),
+        _belief(2, {"QcQs": "1"}),
+    )
+    solver = FastSolver(iteration_cap=1, clock=lambda: 0)
+
+    first = solver.solve(
+        observation, decision_fingerprint="joint", seed=0, range_beliefs=ranges
+    )
+    second = solver.solve(
+        observation, decision_fingerprint="joint", seed=0, range_beliefs=ranges
+    )
+
+    assert first.to_dict() == second.to_dict()
+    assert first.status == "ready"
+    assert first.source == "range_weighted_public_beliefs"
+    assert first.range_status == "ready"
+
+    unsupported = solver.solve(
+        observation,
+        decision_fingerprint="no-joint-support",
+        seed=0,
+        range_beliefs=_ranges(
+            _belief(1, {"QcQd": "1"}),
+            _belief(2, {"QcQs": "1"}),
+        ),
+    )
+    assert unsupported.status == "degraded"
+    assert unsupported.source == "monte_carlo_uniform_opponents"
+    assert unsupported.range_status == "unavailable_fallback_uniform"
+
+
 def test_private_poison_does_not_change_range_aware_result():
     observation = _observation(active_seats=(0, 1))
     clean = _belief(1, {"QcQd": "1"})
@@ -109,6 +143,36 @@ def test_all_product_sizings_are_legal_and_preserve_cost_by_to_semantics():
     ]
 
 
+def test_raise_to_continuation_uses_asymmetric_opponent_call_increment():
+    observation = ObservationV1(
+        handId="raise-to-ev", sequence=1, observerSeat=0, tableSize=2,
+        buttonSeat=0, street="river", ownHoleCards=("As", "Ad"),
+        board=("2c", "3d", "7h", "8s", "9c"), pot=300,
+        stacks={0: 950, 1: 900}, streetCommitments={0: 50, 1: 100},
+        activeSeats=(0, 1), legalActions=(
+            LegalActionV1(
+                action="raise", amountSemantics="to", minAmount=300, maxAmount=300
+            ),
+        ),
+    )
+    result = FastSolver(clock=lambda: 0).solve(
+        observation, decision_fingerprint="raise-to-ev",
+        range_beliefs=_ranges(_belief(1, {"KcKd": "1"})),
+    )
+    candidate = result.candidates[0]
+    expected = (
+        candidate.response_mix.fold * Decimal(300)
+        + candidate.response_mix.call * Decimal(500)
+        + candidate.response_mix.raise_ * Decimal(-250)
+    )
+
+    assert candidate.incremental_cost == 250
+    assert candidate.opponent_call_total == 200
+    assert candidate.call_continuation_pot == 750
+    assert candidate.raise_response_assumption == "hero_folds_no_further_cost"
+    assert candidate.approximate_ev_chips == expected
+
+
 def test_response_mix_metrics_and_provenance_are_truthful_and_deterministic():
     solver = FastSolver(iteration_cap=60, clock=lambda: 0)
     ranges = _ranges(_belief(1, {"QcQd": "0.6", "JhJd": "0.4"}))
@@ -127,6 +191,36 @@ def test_response_mix_metrics_and_provenance_are_truthful_and_deterministic():
         assert candidate.response_mix.fold + candidate.response_mix.call + candidate.response_mix.raise_ == Decimal("1")
     disclosure = " ".join(first.limitations).lower()
     assert "heuristic" in disclosure and "gto" in disclosure and "profile" in disclosure
+
+
+def test_response_mix_uses_blocker_conditioned_probability_mass_not_support_count():
+    observation = _observation(active_seats=(0, 1)).model_copy(update={
+        "street_commitments": {0: 0, 1: 0},
+        "legal_actions": (
+            LegalActionV1(action="bet", amountSemantics="by", minAmount=200, maxAmount=200),
+        ),
+    })
+    solver = FastSolver(iteration_cap=20, clock=lambda: 0)
+    diffuse = solver.solve(
+        observation, decision_fingerprint="mass", seed=1,
+        range_beliefs=_ranges(_belief(1, {"QcQd": "0.5", "JhJd": "0.5"})),
+    ).candidates[0]
+    concentrated = solver.solve(
+        observation, decision_fingerprint="mass", seed=1,
+        range_beliefs=_ranges(_belief(1, {"QcQd": "0.99", "JhJd": "0.01"})),
+    ).candidates[0]
+    blocker_conditioned = solver.solve(
+        observation, decision_fingerprint="mass", seed=1,
+        range_beliefs=_ranges(_belief(1, {
+            "AsAc": "0.99", "QcQd": "0.005", "JhJd": "0.005"
+        })),
+    ).candidates[0]
+
+    assert concentrated.response_mix != diffuse.response_mix
+    assert concentrated.response_mix.fold < diffuse.response_mix.fold
+    assert concentrated.response_mix.raise_ > diffuse.response_mix.raise_
+    assert concentrated.approximate_ev_chips != diffuse.approximate_ev_chips
+    assert blocker_conditioned.response_mix == diffuse.response_mix
 
 
 def test_nested_budget_ci_width_does_not_increase():

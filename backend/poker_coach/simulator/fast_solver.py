@@ -10,6 +10,7 @@ import hashlib
 import math
 import random
 import time
+from bisect import bisect_left
 from collections.abc import Mapping
 from decimal import Decimal
 from typing import Callable, Literal
@@ -30,7 +31,15 @@ _BUDGETS: dict[str, tuple[int, int, int]] = {
 _ZERO = Decimal("0")
 _ONE = Decimal("1")
 _RangeEntries = tuple[tuple[str, str, Decimal], ...]
-_RangeSampler = tuple[_RangeEntries, Decimal]
+_RangeSampler = tuple[_RangeEntries, tuple[Decimal, ...], Decimal]
+
+
+class _NoJointRangeSupport(RuntimeError):
+    pass
+
+
+class _JointSearchLimit(RuntimeError):
+    pass
 
 
 class _FastSolverContractV1(DomainModel):
@@ -78,6 +87,9 @@ class SolverCandidateV1(_FastSolverContractV1):
     amount_semantics: AmountSemanticsV1
     amount: int | None = Field(default=None, ge=0)
     incremental_cost: int = Field(ge=0)
+    opponent_call_total: int = Field(ge=0)
+    call_continuation_pot: int = Field(ge=0)
+    raise_response_assumption: Literal["hero_folds_no_further_cost"] | None = None
     approximate_ev_chips: Decimal
     showdown_equity: Decimal = Field(ge=0, le=1)
     fold_equity: Decimal = Field(ge=0, le=1)
@@ -201,7 +213,7 @@ class FastSolver:
                     break
                 try:
                     trial = self._sample_trial(observation, rng, range_samplers)
-                except RuntimeError:
+                except _NoJointRangeSupport:
                     # Independent marginals can theoretically have no joint
                     # card-compatible support. Restart deterministically on the
                     # existing uniform L1 path and report the honest fallback.
@@ -211,6 +223,9 @@ class FastSolver:
                     shares.clear()
                     rng = random.Random(sample_seed)
                     trial = self._sample_trial(observation, rng, None)
+                except _JointSearchLimit:
+                    timed_out = True
+                    break
                 shares.append(self._hero_share(observation, trial))
                 if (self._clock() - started) * 1_000 >= hard_ms:
                     timed_out = True
@@ -219,7 +234,7 @@ class FastSolver:
             if sample_count == 0:
                 return self._unavailable(
                     identity, "solver_budget_exhausted", "unavailable", started,
-                    budget_tier, soft_ms, hard_ms,
+                    budget_tier, soft_ms, hard_ms, range_ready=range_ready,
                 )
             equity = sum(shares, _ZERO) / sample_count
             ess = Decimal(sample_count)
@@ -269,7 +284,8 @@ class FastSolver:
             limitations=(
                 "Range-aware Fast EV L1.5 uses independent per-seat public-event combo marginals with strict visible-card and sequential opponent card removal.",
                 "Opponent fold/call/raise is a bounded heuristic using public continuation-range width, position, SPR, street, and sizing; it is not GTO, Nash, or a player/profile model.",
-                "The response tree is one layer only and uses an approximate showdown continuation; no future actions, opponent private cards, RNG/deck state, terminal payout, or future events are consumed.",
+                "The one-layer aggregate call branch stack-caps every active opponent's completion to Hero's target; the raise branch stops with Hero folding and no invented re-raise amount or further Hero cost.",
+                "The response tree uses an approximate showdown continuation; no future actions, opponent private cards, RNG/deck state, terminal payout, or future events are consumed.",
                 (
                     "R7-04 Range V2 was unavailable, so the action remained non-blocking via the deterministic uniform-opponent L1 fallback."
                     if fallback else
@@ -330,52 +346,111 @@ class FastSolver:
             count = (len(observation.active_seats) - 1) * 2
             opponents.extend(rng.sample(deck(tuple(known)), count))
         else:
-            for seat in observation.active_seats:
-                if seat == observation.observer_seat:
-                    continue
-                combo = self._weighted_combo(
-                    range_samplers[seat], set((*known, *opponents)), rng
-                )
-                if combo is None:
-                    raise RuntimeError("validated range unexpectedly has no unblocked combo")
-                opponents.extend(combo)
+            opponent_seats = tuple(
+                seat for seat in observation.active_seats
+                if seat != observation.observer_seat
+            )
+            assignments = self._sample_joint_opponents(
+                range_samplers, opponent_seats, rng
+            )
+            opponents.extend(
+                card for seat in opponent_seats for card in assignments[seat]
+            )
         runout_count = 5 - len(observation.board)
         runout = rng.sample(deck(tuple((*known, *opponents))), runout_count)
         return tuple((*known, *opponents, *runout))
 
-    @staticmethod
-    def _weighted_combo(
-        sampler: _RangeSampler, blocked: set[str], rng: random.Random
-    ) -> tuple[str, str] | None:
-        # Rejection from the base marginal is exact conditional sampling and
-        # avoids rescanning ~1,081 combos on every multiway trial.
-        entries, base_total = sampler
+    @classmethod
+    def _sample_joint_opponents(
+        cls,
+        samplers: Mapping[int, _RangeSampler],
+        seats: tuple[int, ...],
+        rng: random.Random,
+    ) -> dict[int, tuple[str, str]]:
+        # Independent rejection samples the product of seat marginals
+        # conditioned on global card uniqueness. A deterministic weighted DFS
+        # resolves rare dead ends; uniform fallback is reserved for proven
+        # empty joint support.
         for _ in range(24):
-            selected = FastSolver._draw_weighted(entries, base_total, rng)
-            if selected is not None and not blocked.intersection(selected):
-                return selected
-        eligible = tuple(
-            item for item in entries
-            if item[0] not in blocked and item[1] not in blocked
+            assignment = {
+                seat: cls._draw_sampler(samplers[seat], rng)
+                for seat in seats
+            }
+            if all(cards is not None for cards in assignment.values()):
+                flattened = [card for cards in assignment.values() for card in cards]
+                if len(flattened) == len(set(flattened)):
+                    return assignment  # type: ignore[return-value]
+        nodes = [0]
+        result = cls._backtrack_joint(
+            samplers, seats, set(), {}, rng, nodes, node_limit=4096
         )
-        total = sum((item[2] for item in eligible), _ZERO)
-        if total <= 0:
+        if result is None:
+            raise _NoJointRangeSupport("range marginals have no compatible joint support")
+        return result
+
+    @classmethod
+    def _backtrack_joint(
+        cls,
+        samplers: Mapping[int, _RangeSampler],
+        remaining: tuple[int, ...],
+        blocked: set[str],
+        assignment: dict[int, tuple[str, str]],
+        rng: random.Random,
+        nodes: list[int],
+        *,
+        node_limit: int,
+    ) -> dict[int, tuple[str, str]] | None:
+        if not remaining:
+            return dict(assignment)
+        eligible_by_seat = {
+            seat: tuple(
+                item for item in samplers[seat][0]
+                if item[0] not in blocked and item[1] not in blocked
+            )
+            for seat in remaining
+        }
+        seat = min(remaining, key=lambda item: (len(eligible_by_seat[item]), item))
+        eligible = eligible_by_seat[seat]
+        if not eligible:
             return None
-        return FastSolver._draw_weighted(eligible, total, rng)
+        weighted_order = sorted(
+            eligible,
+            key=lambda item: (
+                -math.log(max(rng.random(), 1e-300))
+                / max(float(item[2]), 1e-300),
+                item[0], item[1],
+            ),
+        )
+        next_remaining = tuple(item for item in remaining if item != seat)
+        for first, second, _weight in weighted_order:
+            nodes[0] += 1
+            if nodes[0] > node_limit:
+                raise _JointSearchLimit("bounded joint range search exhausted")
+            assignment[seat] = (first, second)
+            found = cls._backtrack_joint(
+                samplers,
+                next_remaining,
+                blocked | {first, second},
+                assignment,
+                rng,
+                nodes,
+                node_limit=node_limit,
+            )
+            if found is not None:
+                return found
+        assignment.pop(seat, None)
+        return None
 
     @staticmethod
-    def _draw_weighted(
-        entries: _RangeEntries, total: Decimal, rng: random.Random
+    def _draw_sampler(
+        sampler: _RangeSampler, rng: random.Random
     ) -> tuple[str, str] | None:
+        entries, cumulative, total = sampler
         if total <= 0:
             return None
         threshold = Decimal(str(rng.random())) * total
-        cumulative = _ZERO
-        for first, second, weight in entries:
-            cumulative += weight
-            if threshold < cumulative:
-                return first, second
-        return (entries[-1][0], entries[-1][1]) if entries else None
+        index = min(bisect_left(cumulative, threshold), len(entries) - 1)
+        return (entries[index][0], entries[index][1]) if entries else None
 
     @staticmethod
     def _prepare_range_samplers(
@@ -397,7 +472,12 @@ class FastSolver:
                 and key[:2] != key[2:]
                 and Decimal(getattr(combo, "probability", _ZERO)) > 0
             )
-            prepared[seat] = (entries, sum((item[2] for item in entries), _ZERO))
+            running = _ZERO
+            cumulative: list[Decimal] = []
+            for _first, _second, weight in entries:
+                running += weight
+                cumulative.append(running)
+            prepared[seat] = (entries, tuple(cumulative), running)
         return prepared
 
     @staticmethod
@@ -522,6 +602,24 @@ class FastSolver:
         )
         pot = Decimal(observation.pot)
         chip_cost = Decimal(cost)
+        if legal.action in {SimulatorActionV1.BET, SimulatorActionV1.RAISE}:
+            assert amount is not None
+            hero_target = (
+                amount
+                if legal.amount_semantics is AmountSemanticsV1.TO
+                else observation.street_commitments[observation.observer_seat] + amount
+            )
+            opponent_call_total = sum(
+                min(
+                    max(0, hero_target - observation.street_commitments[seat]),
+                    observation.stacks[seat],
+                )
+                for seat in observation.active_seats
+                if seat != observation.observer_seat
+            )
+        else:
+            opponent_call_total = 0
+        continuation_pot = observation.pot + cost + opponent_call_total
         if legal.action is SimulatorActionV1.FOLD:
             ev = _ZERO
         elif legal.action is SimulatorActionV1.CHECK:
@@ -529,19 +627,33 @@ class FastSolver:
         elif legal.action is SimulatorActionV1.CALL:
             ev = equity * (pot + chip_cost) - chip_cost
         else:
-            call_ev = equity * (pot + chip_cost * 2) - chip_cost
-            raise_ev = equity * (pot + chip_cost * 4) - chip_cost * 2
+            call_ev = equity * Decimal(continuation_pot) - chip_cost
+            # The bounded response tree stops at an opponent raise. Hero folds;
+            # there is no invented re-raise TO amount or further Hero cost.
+            raise_ev = -chip_cost
             ev = mix.fold * pot + mix.call * call_ev + mix.raise_ * raise_ev
-        exposure = pot + chip_cost * 4
+        if legal.action is SimulatorActionV1.FOLD:
+            equity_sensitivity = _ZERO
+        elif legal.action in {SimulatorActionV1.CHECK, SimulatorActionV1.CALL}:
+            equity_sensitivity = Decimal(continuation_pot)
+        else:
+            equity_sensitivity = mix.call * Decimal(continuation_pot)
         ev_ci = SolverConfidenceIntervalV1(
-            lower=ev - (equity - equity_ci.lower) * exposure,
-            upper=ev + (equity_ci.upper - equity) * exposure,
+            lower=ev - (equity - equity_ci.lower) * equity_sensitivity,
+            upper=ev + (equity_ci.upper - equity) * equity_sensitivity,
         )
         return SolverCandidateV1(
             action=legal.action,
             amount_semantics=legal.amount_semantics,
             amount=amount,
             incremental_cost=max(0, cost),
+            opponent_call_total=opponent_call_total,
+            call_continuation_pot=continuation_pot,
+            raise_response_assumption=(
+                "hero_folds_no_further_cost"
+                if legal.action in {SimulatorActionV1.BET, SimulatorActionV1.RAISE}
+                else None
+            ),
             approximate_ev_chips=ev,
             showdown_equity=equity,
             fold_equity=mix.fold if legal.action in {SimulatorActionV1.BET, SimulatorActionV1.RAISE} else _ZERO,
@@ -575,17 +687,33 @@ class FastSolver:
         position_factor = Decimal(position_distance) / Decimal(max(1, observation.table_size - 1))
         range_strength = Decimal("0.5")
         if beliefs:
-            widths = []
+            visible = set((*observation.own_hole_cards, *observation.board))
+            feasible_combo_count = math.comb(52 - len(visible), 2)
+            widths: list[Decimal] = []
             for seat in observation.active_seats:
                 if seat == observation.observer_seat:
                     continue
                 combos = getattr(getattr(beliefs[seat], "current", None), "combos", {})
-                widths.append(sum(
-                    1 for combo in combos.values()
-                    if Decimal(getattr(combo, "probability", _ZERO)) > 0
-                ))
+                eligible_weights = tuple(
+                    Decimal(getattr(combo, "probability", _ZERO))
+                    for key, combo in combos.items()
+                    if len(key) == 4
+                    and key[:2] not in visible
+                    and key[2:] not in visible
+                    and Decimal(getattr(combo, "probability", _ZERO)) > 0
+                )
+                mass = sum(eligible_weights, _ZERO)
+                if mass > 0:
+                    squared = sum(
+                        ((weight / mass) ** 2 for weight in eligible_weights),
+                        _ZERO,
+                    )
+                    effective_width = _ONE / squared
+                    widths.append(
+                        min(_ONE, effective_width / Decimal(feasible_combo_count))
+                    )
             if widths:
-                range_strength = _ONE - min(_ONE, Decimal(sum(widths)) / Decimal(len(widths) * 1081))
+                range_strength = _ONE - sum(widths, _ZERO) / Decimal(len(widths))
         fold = (
             Decimal("0.14") + Decimal("0.28") * size_ratio + street_factor
             + Decimal("0.04") * position_factor - Decimal("0.12") * range_strength
@@ -625,6 +753,8 @@ class FastSolver:
         budget_tier: BudgetTier,
         soft_ms: int,
         hard_ms: int,
+        *,
+        range_ready: bool = False,
     ) -> FastSolverResultV1:
         return FastSolverResultV1(
             status=status,
@@ -635,8 +765,11 @@ class FastSolver:
             budget_ms=soft_ms,
             hard_budget_ms=hard_ms,
             budget_tier=budget_tier,
-            source="monte_carlo_uniform_opponents",
-            range_status="unavailable_fallback_uniform",
+            source=(
+                "range_weighted_public_beliefs"
+                if range_ready else "monte_carlo_uniform_opponents"
+            ),
+            range_status="ready" if range_ready else "unavailable_fallback_uniform",
             confidence="unavailable",
             limitations=(
                 "Fast EV Solver L1.5 did not run; L0 Formula Advisor and the action path remain independent.",
