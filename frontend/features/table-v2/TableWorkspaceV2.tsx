@@ -123,15 +123,35 @@ function candidateLabel(candidate: { action: string; amount?: number | null }, p
   const label = actionNames[candidate.action] ?? candidate.action;
   return candidate.amount != null ? `${label}${pot && pot > 0 ? ` ${Math.round(Number(candidate.amount) / pot * 100)}% pot ·` : ""} ${chips(candidate.amount)}` : label;
 }
-function RangeHeatmap({ belief }: { belief: NonNullable<TableInsightsResponse["insights"]["seatBeliefs"]>[number] }) {
+type RangeBelief = NonNullable<TableInsightsResponse["insights"]["seatBeliefs"]>[number];
+type RangeFilter = "all" | "pair" | "suited" | "offsuit" | "top" | "up" | "down" | "blocked";
+function rangeSource(source?: string) { return source?.includes("heuristic") ? "公开行动启发式" : source ? "公开数据估计" : "公开行动启发式"; }
+function rangeChange(reason?: string) { if (!reason) return "当前节点为初始先验"; if (reason.includes("公开行动")) return reason; return "公开行动后范围已更新"; }
+function rangeNumber(value?: string | number | null, digits = 1) { const number = Number(value); return Number.isFinite(number) ? number.toLocaleString("zh-CN", { maximumFractionDigits: digits, minimumFractionDigits: digits }) : "—"; }
+function handKind(hand: string) { return hand.length === 2 ? "pair" : hand.endsWith("s") ? "suited" : "offsuit"; }
+function cellDelta(current: RangeBelief, previous: RangeBelief | undefined, hand: string) {
+  if (!previous?.matrix169 || !current.matrix169) return null;
+  return Number(current.matrix169[hand]?.probabilityMass ?? 0) - Number(previous.matrix169[hand]?.probabilityMass ?? 0);
+}
+function RangeExplorer({ belief, previous, baselineAvailable, onClose }: { belief: RangeBelief; previous?: RangeBelief; baselineAvailable: boolean; onClose: () => void }) {
+  const [mode, setMode] = useState<"weight" | "delta">("weight");
+  const [filter, setFilter] = useState<RangeFilter>("all");
   const matrix = belief.matrix169;
-  if (!matrix) return null;
-  return <div className="tv2-range-heatmap" aria-label={`座位 ${belief.seatId + 1} Range 热图`}>
-    {RANKS.flatMap((_, row) => RANKS.map((__, column) => {
-      const hand = matrixCell(row, column); const cell = matrix[hand]; const mass = Number(cell?.probabilityMass ?? 0);
-      return <button type="button" key={hand} className="tv2-range-cell" style={{ "--range-mass": Math.min(1, mass * 10) } as React.CSSProperties} title={`${hand}：概率质量 ${(mass * 100).toFixed(2)}%，${cell?.comboCount ?? 0} 个合法组合`}>{hand}</button>;
-    }))}
-  </div>;
+  if (!matrix) return <section className="tv2-range-explorer" role="dialog" aria-label="Range Explorer"><button onClick={onClose}>关闭</button><p>当前座位没有可展开的 169 格范围。</p></section>;
+  const cells = RANKS.flatMap((_, row) => RANKS.map((__, column) => {
+    const hand = matrixCell(row, column); const item = matrix[hand]; const mass = Number(item?.probabilityMass ?? 0); const delta = cellDelta(belief, previous, hand); const blocked = item != null && item.comboCount === 0;
+    const kind = handKind(hand); const visible = filter === "all" || (filter === "top" && mass > 0) || (filter === "blocked" && blocked) || (filter === kind) || (filter === "up" && (delta ?? 0) > 0) || (filter === "down" && (delta ?? 0) < 0);
+    const detail = `${hand}；权重 ${rangeNumber(mass * 100, 2)}%；可用组合 ${item?.comboCount ?? "未知"}${delta == null ? "；变化基线不可用" : `；变化 ${delta >= 0 ? "+" : ""}${rangeNumber(delta * 100, 2)}%`}${blocked ? "；已阻断" : ""}`;
+    return <button type="button" key={hand} aria-label={detail} className={`tv2-range-cell ${visible ? "" : "is-filtered"} ${blocked ? "is-blocked" : ""} ${belief.confidence === "low" ? "is-low-confidence" : ""}`} style={{ "--range-mass": Math.min(1, mass * 10), "--range-delta": Math.min(1, Math.abs(delta ?? 0) * 10) } as React.CSSProperties} data-kind={kind} data-testid={`range-cell-${hand}`} title={detail}><span>{hand}</span>{mode === "delta" && delta != null && <em>{delta > 0 ? "↑" : delta < 0 ? "↓" : "—"}</em>}{blocked && <i aria-hidden="true">×</i>}</button>;
+  }));
+  return <section className="tv2-range-explorer" role="dialog" aria-modal="true" aria-label="Range Explorer">
+    <header><div><h2>Range Explorer · 座位 {belief.seatId + 1}</h2><p>对角线：对子 · 右上：同花 · 左下：非同花</p></div><button onClick={onClose}>关闭矩阵</button></header>
+    <div className="tv2-range-controls"><fieldset><legend>显示</legend><button aria-pressed={mode === "weight"} onClick={() => setMode("weight")}>当前权重</button><button aria-pressed={mode === "delta"} onClick={() => setMode("delta")}>相对上一公开行动</button></fieldset><fieldset><legend>筛选</legend>{(["all", "pair", "suited", "offsuit", "top", "up", "down", "blocked"] as RangeFilter[]).map((item) => <button key={item} aria-pressed={filter === item} onClick={() => setFilter(item)}>{({ all: "全部", pair: "对子", suited: "同花", offsuit: "非同花", top: "Top", up: "增加", down: "减少", blocked: "Blocked" })[item]}</button>)}</fieldset></div>
+    {mode === "delta" && !baselineAvailable && <p className="tv2-range-unavailable">变化基线不可用：需同一 session、hand 与座位的上一份已接受结果。</p>}
+    <div className={`tv2-range-grid mode-${mode}`} aria-label={`座位 ${belief.seatId + 1} Range 矩阵`}>{cells}</div>
+    <footer className="tv2-range-legend"><span><b /> 权重低→高</span><span><b className="delta" /> 变化：↑ 增加 / ↓ 减少</span><span><b className="blocked" /> × 已阻断</span><span><b className="low" /> 斜纹：低置信度</span></footer>
+    <p className="tv2-range-unavailable">构成分析尚不可用：当前 DTO 未提供 postflop 手牌、听牌或 equity buckets。</p>
+  </section>;
 }
 function statText(stats: NonNullable<TableInsightsResponse["insights"]["stats"]>) {
   return stats.bySeat.map((stat) => `座位 ${stat.seatId + 1}：入池率 ${(stat.vpip * 100).toFixed(0)}% · 翻前加注率 ${(stat.pfr * 100).toFixed(0)}% · 3Bet ${(stat.threeBet * 100).toFixed(0)}%`).join("；");
@@ -139,16 +159,24 @@ function statText(stats: NonNullable<TableInsightsResponse["insights"]["stats"]>
 
 export function InsightRailV2({ insights, solver, table, solverLoading = false, solverElapsedMs }: { insights?: TableInsightsResponse["insights"] | null; solver?: TableSolverResponse["solver"] | null; table?: ContinuousTable; solverLoading?: boolean; solverElapsedMs?: number | null }) {
   const [rangeSeatId, setRangeSeatId] = useState<number | null>(null);
+  const [explorerOpen, setExplorerOpen] = useState(false);
+  const previousRange = useRef<{ identity: string; handIdentity: string; beliefs: RangeBelief[] } | undefined>(undefined);
+  const rangeIdentity = table ? `${table.sessionId}:${table.handId ?? "none"}:${table.fingerprint}` : "none";
+  const rangeHandIdentity = table ? `${table.sessionId}|${table.handId ?? "none"}` : "none";
   const range = insights?.seatBeliefs ?? [];
   const selectedRange = range.find((belief) => belief.seatId === rangeSeatId) ?? range.find((belief) => belief.available) ?? range[0];
-  const rangeContent = range.length ? <><div className="tv2-range-seats">{range.map((belief) => <button key={belief.seatId} aria-pressed={selectedRange?.seatId === belief.seatId} onClick={() => setRangeSeatId(belief.seatId)}>座位 {belief.seatId + 1}</button>)}</div>{selectedRange?.available ? <><p>范围宽度 {selectedRange.rangeWidthPct?.toFixed(1) ?? "—"}% · {selectedRange.rangeWidthCombos?.toFixed(0) ?? "—"} combos · 置信度 {selectedRange.confidenceScore != null ? `${(selectedRange.confidenceScore * 100).toFixed(0)}%` : selectedRange.confidence === "heuristic" ? "启发式" : selectedRange.confidence ?? "未提供"}</p><p>最近变化：{selectedRange.changeReason ?? "初始先验"}{selectedRange.approximate ? ` · ${approximationLabel(selectedRange.approximationReason)}` : ""}</p><small>{selectedRange.limitations?.join("；") ?? "构成分析将在 Range Explorer 中提供。"}</small></> : <p>{rangeMessage(selectedRange?.unavailableReason)}</p>}</> : <p>{rangeMessage()}</p>;
+  const selectedPosition = selectedRange && table?.seats ? seatViews(table).find((seat) => seat.id === String(selectedRange.seatId))?.position : undefined;
+  const baseline = previousRange.current?.identity !== rangeIdentity && previousRange.current?.handIdentity === rangeHandIdentity ? previousRange.current.beliefs.find((item) => item.seatId === selectedRange?.seatId) : undefined;
+  useEffect(() => { setRangeSeatId(null); setExplorerOpen(false); }, [rangeIdentity]);
+  useEffect(() => { if (insights?.seatBeliefs?.length) previousRange.current = { identity: rangeIdentity, handIdentity: rangeHandIdentity, beliefs: insights.seatBeliefs }; }, [insights, rangeHandIdentity, rangeIdentity]);
+  const rangeContent = range.length ? <><div className="tv2-range-seats" aria-label="Range 座位选择">{range.map((belief) => <button key={belief.seatId} aria-pressed={selectedRange?.seatId === belief.seatId} onClick={() => { setRangeSeatId(belief.seatId); setExplorerOpen(false); }}>座位 {belief.seatId + 1}</button>)}</div>{selectedRange?.available ? <><p>当前对象：座位 {selectedRange.seatId + 1}{selectedPosition ? ` · ${selectedPosition}` : ""}</p><p><strong>范围宽度 {rangeNumber(selectedRange.rangeWidthPct)}%</strong> · 约 {rangeNumber(selectedRange.rangeWidthCombos, 0)} weighted combos</p><p>置信度 {selectedRange.confidenceScore != null ? `${rangeNumber(selectedRange.confidenceScore * 100, 0)}%` : selectedRange.confidence ?? "未提供"} · {rangeSource(selectedRange.source)}</p><p>最近变化：{rangeChange(selectedRange.changeReason)}{selectedRange.approximate ? ` · ${approximationLabel(selectedRange.approximationReason)}` : ""}</p>{selectedRange.topClasses?.length ? <p>主要牌类：{selectedRange.topClasses.slice(0, 3).map((item) => `${item.hand} ${rangeNumber(Number(item.probabilityMass) * 100)}%`).join(" · ")}</p> : null}<button className="tv2-expand-range" onClick={() => setExplorerOpen(true)}>展开矩阵</button></> : <p>{rangeMessage(selectedRange?.unavailableReason)}</p>}</> : <p>{rangeMessage()}</p>;
   const advisor = insights?.advisor;
   const advisorAction = advisor?.result?.recommendedAction;
   const solverAction = solver?.recommendedAction ?? solver?.candidates?.slice().sort((a, b) => Number(b.approximateEvChips) - Number(a.approximateEvChips))[0];
   const disagreement = Boolean(advisorAction && solverAction && advisorAction.action !== solverAction.action);
   const ordered = solver?.candidates.slice().sort((a, b) => Number(b.approximateEvChips) - Number(a.approximateEvChips)) ?? [];
   const solverContent = solverLoading ? <p>模拟估计计算中；规则基线仍可用。</p> : solver?.status === "ready" || solver?.status === "degraded" ? <><div className="tv2-ladder" aria-label="Solver Action Ladder">{ordered.slice(0, 3).map((candidate, index) => { const best = Number(ordered[0]?.approximateEvChips ?? 0); const delta = Number(candidate.approximateEvChips) - best; const extreme = candidate.action === "all_in" || (candidate.amount != null && table?.pot && Number(candidate.amount) / table.pot > 2); return <article key={`${candidate.action}-${candidate.amount ?? ""}`} className="tv2-ladder-row"><strong>{candidateLabel(candidate, table?.pot)}</strong><span>ΔEV {ev(delta)}</span><span>EV {ev(candidate.approximateEvChips)}</span>{candidate.confidenceInterval95 ? <small>CI {ev(candidate.confidenceInterval95.lower)}–{ev(candidate.confidenceInterval95.upper)}</small> : null}{index > 0 && Math.abs(delta) < .3 ? <small>与最佳接近</small> : null}{extreme ? <small className="risk">高风险尺度</small> : null}</article>; })}</div><details><summary>模型详情</summary><p>{solver.status === "degraded" ? "近似 EV 求解（降级）" : "近似 EV 求解"}，不是 GTO 或 Nash。</p><p>权益 {percent(solver.equity)} · 样本 {solver.sampleCount ?? solver.iterations} · ESS {solver.effectiveSampleSize ?? "—"} · 耗时 {solverElapsedMs != null ? `${solverElapsedMs}ms` : solver.elapsedMicroseconds != null ? `${Math.round(solver.elapsedMicroseconds / 1000)}ms` : "未测得"}</p>{ordered[0]?.responseMix ? <p>最佳候选响应 F/C/R {percent(ordered[0].responseMix.fold)}/{percent(ordered[0].responseMix.call)}/{percent(ordered[0].responseMix.raise)}</p> : null}<p>预算 {solver.budgetTier ?? "未提供"} / {solver.budgetMs ?? "—"}ms · 置信度 {solver.confidence ?? "未提供"}</p><p>限制：{solver.limitations.join("；") || "后端未返回限制"}</p></details></> : <p>{solver?.unavailableReason ?? "当前不是 Hero 决策；模拟估计尚未就绪。"}</p>;
-  return <aside className="tv2-rail" data-testid="table-insights" aria-label="决策驾驶舱"><section className="tv2-summary" aria-label="Decision Summary"><p>轮到 Hero · {table?.street ?? "等待开局"} · Pot {chips(table?.pot)}</p><div><span>规则基线</span><strong>Advisor：{advisor?.available && advisorAction ? candidateLabel(advisorAction, table?.pot) : advisor?.unavailableReason ?? "暂不可用"}</strong></div><div><span>模拟估计</span><strong>Solver：{solverAction ? candidateLabel(solverAction, table?.pot) : solverLoading ? "计算中" : "暂不可用"}</strong></div><b className={disagreement ? "disagreement" : "agreement"}>{disagreement ? "存在分歧 · 原因尚未确定" : advisorAction && solverAction ? "结论一致" : "等待可比较结果"}</b></section><section className="tv2-analysis-panel" aria-label="Solver 结果"><h2>模拟估计</h2>{solverContent}</section><section className="tv2-analysis-panel tv2-range-summary" aria-label="Range Belief"><h2>Range 摘要</h2><p>座位独立边际估计，不含对手私牌</p>{rangeContent}</section></aside>;
+  return <><aside className="tv2-rail" data-testid="table-insights" aria-label="决策驾驶舱"><section className="tv2-summary" aria-label="Decision Summary"><p>轮到 Hero · {table?.street ?? "等待开局"} · Pot {chips(table?.pot)}</p><div><span>规则基线</span><strong>Advisor：{advisor?.available && advisorAction ? candidateLabel(advisorAction, table?.pot) : advisor?.unavailableReason ?? "暂不可用"}</strong></div><div><span>模拟估计</span><strong>Solver：{solverAction ? candidateLabel(solverAction, table?.pot) : solverLoading ? "计算中" : "暂不可用"}</strong></div><b className={disagreement ? "disagreement" : "agreement"}>{disagreement ? "存在分歧 · 原因尚未确定" : advisorAction && solverAction ? "结论一致" : "等待可比较结果"}</b></section><section className="tv2-analysis-panel" aria-label="Solver 结果"><h2>模拟估计</h2>{solverContent}</section><section className="tv2-analysis-panel tv2-range-summary" aria-label="Range Belief"><h2>Range 摘要</h2><p>座位独立边际估计，不含对手私牌</p>{rangeContent}</section></aside>{explorerOpen && selectedRange?.available ? <RangeExplorer belief={selectedRange} previous={baseline} baselineAvailable={Boolean(baseline)} onClose={() => setExplorerOpen(false)} /> : null}</>;
 }
 
 export function TableTimelineV2({ table }: { table: ContinuousTable }) {

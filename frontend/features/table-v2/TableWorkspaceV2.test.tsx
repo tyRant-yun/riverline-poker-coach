@@ -50,9 +50,23 @@ describe("Table V2 visual contracts", () => {
   });
   it("shows the additive Range V2 and Solver L1.5 provenance without requiring new fields from old responses", () => {
     render(<InsightRailV2 insights={{ available: true, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, rangeWidthCombos: 214, confidenceScore: 0.8, dataVersion: "range-v2.1", changeReason: "公开行动：加注", approximate: true, approximationReason: "nearest_stack_bucket:100bb", matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 } } }] }} solver={{ status: "ready", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "call", amount: 100, approximateEvChips: "12.5", showdownEquity: "0.42", foldEquity: "0", sampleCount: 80, effectiveSampleSize: "80", confidenceInterval95: { lower: "8", upper: "17" }, responseMix: { fold: "0", call: "1", raise: "0" } }], equity: "0.42", iterations: 80, sampleCount: 80, effectiveSampleSize: "80", budgetTier: "standard", budgetMs: 150, confidence: "coarse", source: "range_weighted_public_beliefs", rangeStatus: "ready", version: "fast-ev-solver/v1", modelVersion: "fast-ev-solver/v1.5", limitations: ["not GTO"] }} />);
-    expect(screen.getByText(/214 combos · 置信度 80%/)).toBeInTheDocument();
+    expect(screen.getByText(/214 weighted combos/)).toBeInTheDocument();
     expect(screen.getByLabelText("Range Belief")).toHaveTextContent("范围宽度 28.5%");
     expect(screen.getByLabelText("Decision Summary")).toHaveTextContent("Advisor：暂不可用");
     expect(screen.getByLabelText("Solver Action Ladder")).toHaveTextContent("跟注 100");
+  });
+  it("opens an accessible 13×13 Explorer with topology filters, cell details, and an honest delta baseline", () => {
+    render(<InsightRailV2 table={{ sessionId: "s", handId: "h", fingerprint: "a", street: "flop", pot: 100 } as never} insights={{ available: true, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, rangeWidthCombos: 214, confidence: "low", source: "riverline.heuristic_seed", matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 }, AKs: { probabilityMass: "0.05", comboCount: 4 }, AKo: { probabilityMass: "0", comboCount: 0 } } }] }} />);
+    fireEvent.click(screen.getByRole("button", { name: "展开矩阵" }));
+    expect(screen.getByRole("dialog", { name: "Range Explorer" })).toBeVisible();
+    expect(screen.getByTestId("range-cell-AA")).toHaveAttribute("data-kind", "pair");
+    expect(screen.getByTestId("range-cell-AKs")).toHaveAttribute("data-kind", "suited");
+    expect(screen.getByTestId("range-cell-AKo")).toHaveAttribute("data-kind", "offsuit");
+    expect(screen.getByTestId("range-cell-AKo")).toHaveAccessibleName(/已阻断/);
+    fireEvent.click(screen.getByRole("button", { name: "相对上一公开行动" }));
+    expect(screen.getByText(/变化基线不可用/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "同花" }));
+    expect(screen.getByTestId("range-cell-AA")).toHaveClass("is-filtered");
+    expect(screen.getByTestId("range-cell-AKs")).not.toHaveClass("is-filtered");
   });
 });

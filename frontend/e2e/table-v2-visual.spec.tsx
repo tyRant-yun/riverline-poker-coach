@@ -40,3 +40,19 @@ test("V2 workspace preserves table, rail, and dock geometry across desktop viewp
     await page.screenshot({ path: path.join(outputDir, `workspace-${width}x${height}.png`), fullPage: false });
   }
 });
+
+test("Range Explorer overlay keeps a 13×13 matrix readable without horizontal page scrolling", async ({ page }) => {
+  const grid = Array.from({ length: 169 }, (_, index) => `<button class="tv2-range-cell">${index % 14 === 0 ? "AA" : "AKs"}</button>`).join("");
+  const explorer = `<section class="tv2-range-explorer" role="dialog" aria-label="Range Explorer"><header><h2>Range Explorer</h2><button>关闭矩阵</button></header><div class="tv2-range-controls"><fieldset><legend>显示</legend><button>当前权重</button></fieldset></div><div class="tv2-range-grid mode-weight" aria-label="座位 2 Range 矩阵">${grid}</div><footer class="tv2-range-legend"><span>权重低→高</span></footer></section>`;
+  await page.setContent(`<style>${css}</style>${explorer}`);
+  for (const [width, height] of [[1366, 768], [1440, 900], [1920, 1080]] as const) {
+    await page.setViewportSize({ width, height });
+    const dialog = await page.getByRole("dialog", { name: "Range Explorer" }).boundingBox();
+    const matrix = await page.getByLabel("座位 2 Range 矩阵").boundingBox();
+    const cell = await page.locator(".tv2-range-cell").first().boundingBox();
+    expect(dialog).not.toBeNull(); expect(matrix).not.toBeNull(); expect(cell).not.toBeNull();
+    expect(matrix!.width).toBeGreaterThanOrEqual(520); expect(cell!.width).toBeGreaterThanOrEqual(28);
+    expect(dialog!.x).toBeGreaterThanOrEqual(0); expect(dialog!.x + dialog!.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  }
+});
