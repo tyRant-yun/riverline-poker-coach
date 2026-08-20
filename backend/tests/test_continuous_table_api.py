@@ -520,13 +520,19 @@ def test_table_fast_solver_is_independent_and_rejects_a_stale_decision(tmp_path)
 
     ready = client.post(
         f"/v1/tables/{table['sessionId']}/solver",
-        json={"handId": table["handId"], "decisionFingerprint": table["fingerprint"]},
+        json={"handId": table["handId"], "decisionFingerprint": table["fingerprint"], "budgetTier": "quick"},
     )
     assert ready.status_code == 200, ready.text
     result = ready.json()["solver"]
     assert result["status"] in {"ready", "degraded"}
     assert "holeCards" not in str(result)
     assert result["decision"]["fingerprint"] == table["fingerprint"]
+    assert result["source"] == "range_weighted_public_beliefs"
+    assert result["rangeStatus"] == "ready"
+    assert result["budgetTier"] == "quick"
+    assert result["modelVersion"] == "fast-ev-solver/v1.5"
+    assert result["sampleCount"] > 0
+    assert result["confidenceInterval95"] is not None
 
     stale = client.post(
         f"/v1/tables/{table['sessionId']}/solver",

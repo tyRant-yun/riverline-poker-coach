@@ -20,6 +20,7 @@ from poker_coach.persistence.session_store import (
     SQLiteGameSessionStore,
     StoredGameSession,
 )
+from poker_coach.ranges.event_beliefs import PublicEventBeliefConsumer
 
 from .bot_providers import BLUEPRINT_PROFILE_IDS, build_bot_provider
 from .bot_runtime import BotRuntime
@@ -32,7 +33,7 @@ from .observation import build_observation
 from .orchestrator import GameCommandError, GameOrchestrator, OpenHandCommandV1, PlayerActionCommandV1
 from .replay import replay_hand, scenario_from_events
 from .session import GameSession, SessionLifecycleError, SessionSeatV1
-from .table_insights import build_table_insights
+from .table_insights import _public_stream, build_table_insights
 from .table_reviews import TableReviewReader, public_review
 
 
@@ -237,8 +238,13 @@ class ContinuousTableService:
 
         hand_id = request.get("handId")
         fingerprint = request.get("decisionFingerprint")
+        budget_tier = request.get("budgetTier", "standard")
         if not isinstance(hand_id, str) or not isinstance(fingerprint, str):
             raise ContinuousTableError("invalid_solver_request", "handId and decisionFingerprint are required strings")
+        if budget_tier not in {"quick", "standard", "deep"}:
+            raise ContinuousTableError(
+                "invalid_solver_request", "budgetTier must be quick, standard, or deep"
+            )
         with self._lock:
             stored = self._recover(session_id)
             metadata = self._metadata(session_id)
@@ -261,8 +267,23 @@ class ContinuousTableService:
                 hand_id=hand_id,
                 sequence=events[-1].sequence,
                 street=state.street,
+                budget_tier=budget_tier,
             ).to_dict()
-        return self._fast_solver.solve(observation, decision_fingerprint=fingerprint).to_dict()
+        try:
+            range_beliefs = PublicEventBeliefConsumer().beliefs_at(
+                _public_stream(events),
+                observer_visible_cards=observation.own_hole_cards,
+            )
+        except Exception:
+            # Range V2 failure is intentionally non-blocking; FastSolver records
+            # the uniform L1 fallback in source/rangeStatus/limitations.
+            range_beliefs = None
+        return self._fast_solver.solve(
+            observation,
+            decision_fingerprint=fingerprint,
+            range_beliefs=range_beliefs,
+            budget_tier=budget_tier,
+        ).to_dict()
 
     def reviews(self, session_id: str, hand_id: str | None = None) -> dict[str, object]:
         with self._lock:

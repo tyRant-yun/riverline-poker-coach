@@ -164,7 +164,7 @@ export const continuousTableApi = {
   nextHand: (sessionId: string, payload: { commandId: string; expectedRevision: number }) =>
     request<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/hands`, { schemaVersion: 1, ...payload }),
   insights: (sessionId: string) => requestGet<TableInsightsResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/insights`),
-  solver: (sessionId: string, payload: { handId: string; decisionFingerprint: string }) =>
+  solver: (sessionId: string, payload: { handId: string; decisionFingerprint: string; budgetTier?: "quick" | "standard" | "deep" }) =>
     request<TableSolverResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/solver`, { schemaVersion: 1, ...payload }),
   reviews: (sessionId: string, handId?: string) => requestGet<TableReviewResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/reviews${handId ? `/${encodeURIComponent(handId)}` : ""}`),
 };

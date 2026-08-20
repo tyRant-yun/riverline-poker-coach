@@ -10,6 +10,7 @@ the SUM of combo probabilities (never an average), so
 from __future__ import annotations
 
 from decimal import Decimal
+from functools import lru_cache
 
 from pydantic import Field
 
@@ -19,6 +20,7 @@ from poker_coach.domain.models import DomainModel
 from .belief import RangeBeliefSnapshot
 
 
+@lru_cache(maxsize=1326)
 def cell_key(combo: str) -> str:
     """Map a concrete combo key to its 169 starting-hand cell.
 
@@ -91,7 +93,7 @@ def aggregate_belief_to_matrix169(
             if prior_probability > 0
             else None
         )
-        cells[cell] = RangeBeliefMatrixCell(
+        cells[cell] = RangeBeliefMatrixCell.model_construct(
             reach_mass=Decimal(entry["reach"]),
             probability_mass=probability,
             combo_count=int(entry["count"]),

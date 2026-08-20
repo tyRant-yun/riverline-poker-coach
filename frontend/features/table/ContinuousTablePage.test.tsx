@@ -60,16 +60,30 @@ describe("ContinuousTablePage", () => {
     api.action.mockResolvedValueOnce({ table: { ...table, revision: 19, board: ["As", "Kd", "7c", "2h"] } });
     render(<ContinuousTablePage />);
     fireEvent.click(screen.getByTestId("create-continuous-table"));
-    await waitFor(() => expect(api.solver).toHaveBeenCalledWith("table-1", expect.objectContaining({ handId: table.handId, decisionFingerprint: expect.any(String) })));
+    await waitFor(() => expect(api.solver).toHaveBeenCalledWith("table-1", expect.objectContaining({ handId: table.handId, decisionFingerprint: expect.any(String), budgetTier: "standard" })));
     expect(await screen.findByLabelText("Advisor 摘要")).toHaveTextContent("建议：过牌");
     fireEvent.click(screen.getByTestId("hero-action-call"));
     await waitFor(() => expect(api.solver).toHaveBeenCalledTimes(2));
-    expect(screen.getByLabelText("Solver 结果")).toHaveTextContent("Fast Solver 计算中");
+    expect(screen.getByLabelText("Solver 结果")).toHaveTextContent("Fast Solver（standard）计算中");
 
     resolveB!({ solver: { status: "degraded", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "call", amount: 100, approximateEvChips: "4" }], equity: "0.4", iterations: 20, source: "monte_carlo_uniform_opponents", version: "fast-ev-solver/v1", limitations: ["partial"] } });
     await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("近似 EV 求解（降级）"));
     resolveA!({ solver: { status: "ready", recommendedAction: { action: "fold" }, candidates: [{ action: "fold", approximateEvChips: "0" }], equity: "0.1", iterations: 80, source: "monte_carlo_uniform_opponents", version: "fast-ev-solver/v1", limitations: [] } });
     await waitFor(() => expect(screen.getByTestId("table-insights")).not.toHaveTextContent("推荐 fold"));
+  });
+
+  it("releases Hero controls when the latest bot-transition snapshot returns the turn to Hero", async () => {
+    api.action.mockResolvedValueOnce({ table: {
+      ...table, revision: 19, fingerprint: "decision-b",
+      actionHistory: [...table.actionHistory, { sequence: 9, street: "flop", actorSeat: 2, action: "call", amount: 100 }],
+      botDecisionProvenance: [...table.botDecisionProvenance, { sequence: 9, actorSeat: 2, profileId: "balanced", provider: "lightweight-blueprint", degraded: false, fallbackReason: null }],
+    } });
+    render(<ContinuousTablePage />);
+    fireEvent.click(screen.getByTestId("create-continuous-table"));
+    const call = await screen.findByTestId("hero-action-call");
+    fireEvent.click(call);
+    await waitFor(() => expect(api.action).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId("hero-action-call")).toBeEnabled());
   });
 
   it("reconnects, submits only a backend legal action, and starts the next hand", async () => {

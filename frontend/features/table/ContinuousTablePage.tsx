@@ -47,15 +47,20 @@ export default function ContinuousTablePage() {
   const solverRequest = useRef(0);
   const solverIdentity = useRef<string | null>(null);
 
+  function identityFor(next: ContinuousTable) {
+    return `${next.sessionId}:${next.handId ?? "none"}:${next.fingerprint}`;
+  }
+
   function cancelPlayback() { setPlaybackActions([]); setPlaybackIdentity((value) => `${value}:cancel`); setPlaying(false); }
   function loadInsights(next: ContinuousTable) {
     const request = ++insightRequest.current;
+    const identity = identityFor(next);
     setInsights(null);
-    continuousTableApi.insights(next.sessionId).then((response) => { if (request === insightRequest.current) setInsights(response.insights); }).catch(() => { if (request === insightRequest.current) setInsights(null); });
+    continuousTableApi.insights(next.sessionId).then((response) => { if (request === insightRequest.current && identity === identityFor(tableRef.current ?? next)) setInsights(response.insights); }).catch(() => { if (request === insightRequest.current && identity === identityFor(tableRef.current ?? next)) setInsights(null); });
   }
   function loadReview(next: ContinuousTable) {
     const request = ++reviewRequest.current;
-    const identity = next.handComplete && next.handId ? `${next.sessionId}:${next.handId}` : null;
+    const identity = next.handComplete && next.handId ? identityFor(next) : null;
     reviewIdentity.current = identity;
     setReview(null);
     if (!identity || !next.handId) return;
@@ -63,12 +68,12 @@ export default function ContinuousTablePage() {
   }
   function loadSolver(next: ContinuousTable) {
     const request = ++solverRequest.current;
-    const identity = next.handId && !next.handComplete && next.currentActor === next.heroSeat ? `${next.sessionId}:${next.handId}:${next.fingerprint}` : null;
+    const identity = next.handId && !next.handComplete && next.currentActor === next.heroSeat ? identityFor(next) : null;
     solverIdentity.current = identity;
     setSolver(null); setSolverElapsedMs(null); setSolverLoading(Boolean(identity));
     if (!identity || !next.handId) return;
     const started = performance.now();
-    continuousTableApi.solver(next.sessionId, { handId: next.handId, decisionFingerprint: next.fingerprint })
+    continuousTableApi.solver(next.sessionId, { handId: next.handId, decisionFingerprint: next.fingerprint, budgetTier: "standard" })
       .then((response) => { if (request === solverRequest.current && identity === solverIdentity.current) { setSolver(response.solver); setSolverElapsedMs(Math.round(performance.now() - started)); } })
       .catch(() => { if (request === solverRequest.current && identity === solverIdentity.current) setSolver(null); })
       .finally(() => { if (request === solverRequest.current && identity === solverIdentity.current) setSolverLoading(false); });
@@ -79,7 +84,7 @@ export default function ContinuousTablePage() {
     setTable(next);
     setPlaybackActions(actions);
     setPlaybackIdentity(`${next.sessionId}:${next.handId ?? "none"}:${next.revision}:${actions.map((action) => action.id).join("/")}`);
-    setPlaying(actions.length > 0);
+    setPlaying(actions.length > 0 && playbackSpeed !== "skip");
     loadInsights(next); loadSolver(next); loadReview(next);
   }
 
@@ -89,6 +94,13 @@ export default function ContinuousTablePage() {
     setBusy(true);
     continuousTableApi.get(sessionId).then((response) => hydrate(response.table, "snapshot")).catch((cause) => { window.localStorage.removeItem("riverline-continuous-table-session"); setError(cause instanceof Error ? cause.message : "无法重连牌桌"); }).finally(() => setBusy(false));
   }, []);
+
+  // The authoritative snapshot is allowed to advance through bot actions in
+  // one response.  A superseded visual queue must never keep a current Hero
+  // decision disabled after that response says it is Hero's turn again.
+  useEffect(() => {
+    if (table && table.currentActor === table.heroSeat) setPlaying(false);
+  }, [table?.currentActor, table?.fingerprint, table?.heroSeat]);
 
   async function create() {
     cancelPlayback(); setBusy(true); setError(null);
