@@ -15,7 +15,7 @@ from poker_coach.simulator.observation import build_observation
 
 _PROJECTION_CACHE_MAX = 16
 _PROJECTION_CACHE: OrderedDict[
-    tuple[int, int], tuple[object, ...]
+    tuple[int, int, Decimal, Decimal], tuple[object, ...]
 ] = OrderedDict()
 _PROJECTION_CACHE_LOCK = Lock()
 
@@ -140,15 +140,27 @@ def _projection(
         result.current.model_config.get("frozen")
         and result.prior.model_config.get("frozen")
     )
-    cache_key = (id(result.current), id(result.prior))
+    current_combos = result.current.combos
+    prior_combos = result.prior.combos
+    # The 169 projection depends on immutable combo distributions and masses,
+    # not snapshot identity or per-action metadata such as the observed size.
+    # Range replay intentionally reuses a normalized combo map for actions in
+    # the same public likelihood bucket, so keying on snapshots would repeat
+    # the full aggregation for an otherwise identical decision distribution.
+    cache_key = (
+        id(current_combos), id(prior_combos),
+        result.current.retained_mass, result.prior.prior_mass,
+    )
     cached = None
     if cacheable:
         with _PROJECTION_CACHE_LOCK:
             candidate = _PROJECTION_CACHE.get(cache_key)
             if (
                 candidate is not None
-                and candidate[0] is result.current
-                and candidate[1] is result.prior
+                and candidate[0] is current_combos
+                and candidate[1] is prior_combos
+                and candidate[2] == result.current.retained_mass
+                and candidate[3] == result.prior.prior_mass
             ):
                 _PROJECTION_CACHE.move_to_end(cache_key)
                 cached = candidate
@@ -180,8 +192,9 @@ def _projection(
             Decimal("0") if not concentration else Decimal("1") / concentration
         )
         cached = (
-            result.current, result.prior, immutable_matrix, top_rows,
-            width, effective_width,
+            current_combos, prior_combos,
+            result.current.retained_mass, result.prior.prior_mass,
+            immutable_matrix, top_rows, width, effective_width,
         )
         if cacheable:
             with _PROJECTION_CACHE_LOCK:
@@ -189,13 +202,13 @@ def _projection(
                 _PROJECTION_CACHE.move_to_end(cache_key)
                 while len(_PROJECTION_CACHE) > _PROJECTION_CACHE_MAX:
                     _PROJECTION_CACHE.popitem(last=False)
-    top_rows = cached[3]
+    top_rows = cached[5]
     return (
-        dict(cached[2]),
+        dict(cached[4]),
         [
             {"hand": key, "probabilityMass": probability}
             for key, probability in top_rows
         ],
-        cached[4],
-        cached[5],
+        cached[6],
+        cached[7],
     )
