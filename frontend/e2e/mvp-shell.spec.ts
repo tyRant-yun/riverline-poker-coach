@@ -46,5 +46,5 @@ test("MVP shell reports local health and creates an honest continuous table expe
   await expect(page.locator(".tv2-seat:not(.tv2-hero-seat) .tv2-holecards")).toHaveCount(0);
   await expect(page.getByLabel("Advisor 摘要")).toContainText("建议：跟注");
   await expect(page.getByLabel("Range Belief")).toContainText("不含对手私牌");
-  await expect(page.getByLabel("Solver 结果")).toContainText("Solver 尚未就绪");
+  await expect(page.getByLabel("Solver 结果")).toContainText("模拟估计尚未就绪");
 });
