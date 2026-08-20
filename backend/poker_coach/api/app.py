@@ -403,6 +403,17 @@ def create_app(
             raise ApiError("invalid_payload", "solver request payload must be an object")
         return {"schemaVersion": 1, "requestId": request.state.request_id, "solver": table_service.solver(session_id, payload)}
 
+    @app.post("/v1/tables/{session_id}/reconciliation")
+    async def reconcile_table_decision(request: Request, session_id: str):
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ApiError("invalid_payload", "reconciliation request payload must be an object")
+        return {
+            "schemaVersion": 1,
+            "requestId": request.state.request_id,
+            "reconciliation": table_service.reconciliation(session_id, payload),
+        }
+
     @app.get("/v1/tables/{session_id}/reviews")
     async def list_table_reviews(request: Request, session_id: str):
         return {"schemaVersion": 1, "requestId": request.state.request_id, **table_service.reviews(session_id)}

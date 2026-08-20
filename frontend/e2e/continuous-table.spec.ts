@@ -27,6 +27,7 @@ function tableState(overrides: Record<string, unknown> = {}) {
     ],
     actionHistory: [{ sequence: 8, street: "flop", actorSeat: 1, action: "bet", amount: 100 }],
     handComplete: false,
+    fingerprint: "decision-smoke",
     result: null,
     botDecisionProvenance: [
       { sequence: 8, actorSeat: 1, profileId: "aggressive", provider: "lightweight-blueprint", degraded: false, fallbackReason: null },
@@ -69,6 +70,12 @@ test("continuous table create, legal action, completion, next hand, reconnect, a
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, table: current }) });
       return;
     }
+    if (request.method() === "POST" && url.pathname === `/v1/tables/${sessionId}/reconciliation`) {
+      const body = request.postDataJSON();
+      expect(body.decisionFingerprint).toBe(current.fingerprint);
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, reconciliation: { status: "ready", decision: { fingerprint: current.fingerprint, handId: current.handId, sequence: 8, street: "flop" }, ruleBaseline: { role: "rule_baseline", status: "ready", action: { action: "call", amountSemantics: "cost", amountChips: 100, potPct: "22.2" }, provenance: {}, limitations: [] }, simulationEstimate: { role: "simulation_estimate", status: "ready", action: { action: "call", amountSemantics: "cost", amountChips: 100, potPct: "22.2" }, provenance: {}, limitations: [] }, agreement: { kind: "exact_action", reasonCodes: [], confidenceInterval: { status: "available", overlap: false }, sizingRobustness: "robust" } } }) });
+      return;
+    }
     await route.continue();
   });
 
@@ -98,4 +105,5 @@ test("continuous table create, legal action, completion, next hand, reconnect, a
   expect(calls).toContain("POST /v1/tables");
   expect(calls).toContain(`POST /v1/tables/${sessionId}/actions`);
   expect(calls).toContain(`POST /v1/tables/${sessionId}/hands`);
+  expect(calls).toContain(`POST /v1/tables/${sessionId}/reconciliation`);
 });

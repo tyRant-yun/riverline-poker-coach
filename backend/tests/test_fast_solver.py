@@ -170,13 +170,13 @@ def test_all_product_sizings_are_legal_and_preserve_cost_by_to_semantics():
     actual = [(item.action.value, item.amount_semantics.value, item.amount) for item in result.candidates]
     assert actual == [
         ("fold", "none", None), ("call", "cost", 100),
-        ("raise", "to", 300), ("raise", "to", 600), ("raise", "to", 900),
+        ("raise", "to", 300), ("raise", "to", 350), ("raise", "to", 900),
     ]
     for candidate in result.candidates:
         legal = next(item for item in observation.legal_actions if item.action is candidate.action)
         assert legal.accepts(action=candidate.action, amount=candidate.amount)
     assert result.candidates[1].incremental_cost == 100
-    assert [item.incremental_cost for item in result.candidates[2:]] == [250, 550, 850]
+    assert [item.incremental_cost for item in result.candidates[2:]] == [250, 300, 850]
 
     bet_observation = observation.model_copy(update={
         "street_commitments": {0: 0, 1: 0},
@@ -190,7 +190,8 @@ def test_all_product_sizings_are_legal_and_preserve_cost_by_to_semantics():
         range_beliefs=_ranges(_belief(1, {"QcQd": "1"})),
     )
     assert [(item.amount_semantics.value, item.amount, item.incremental_cost) for item in bet_result.candidates] == [
-        ("none", None, 0), ("by", 200, 200), ("by", 450, 450), ("by", 700, 700)
+        ("none", None, 0), ("by", 200, 200), ("by", 225, 225),
+        ("by", 300, 300), ("by", 700, 700)
     ]
 
 

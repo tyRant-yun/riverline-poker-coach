@@ -6,7 +6,7 @@ async function playHeroDecision(page: Page) {
   await expect(actions.getByRole("button").first()).toBeEnabled({ timeout: 15_000 });
   await expect(page.getByLabel("Advisor 摘要")).toContainText(/建议：|暂不可用/);
   await expect(page.getByLabel("Range Belief")).toContainText("不含对手私牌");
-  await expect(page.getByLabel("Solver 结果")).toContainText(/Solver|当前不是 Hero 决策/);
+  await expect(page.getByLabel("Solver 结果")).toContainText(/模拟估计|当前不是 Hero 决策/);
 
   const actionResponse = page.waitForResponse((response) => response.url().includes("/actions") && response.request().method() === "POST");
   const preferred = page.getByTestId("hero-action-check").or(page.getByTestId("hero-action-call"));
@@ -26,7 +26,7 @@ test("R7 golden journey: two run-local hands retain live insights without privat
   await expect(page.getByTestId("health-status")).toContainText("服务状态：在线");
   await page.getByTestId("create-continuous-table").click();
   await expect(page.getByLabel("六人德州扑克牌桌").locator(".tv2-seat")).toHaveCount(6);
-  await page.getByLabel("Bot 播放速度").selectOption("skip");
+  await page.getByLabel("Bot 播放速度").selectOption("instant");
 
   const firstCards = await page.getByLabel("Hero 手牌").locator("i").allTextContents();
   let completedHands = 0;
