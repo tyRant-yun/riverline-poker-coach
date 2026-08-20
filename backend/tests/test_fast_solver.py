@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import statistics
 import time
+from collections import Counter
 from decimal import Decimal
 from itertools import combinations
 from types import SimpleNamespace
 
+from poker_coach.simulator import fast_solver as fast_solver_module
 from poker_coach.analysis.cards import _best_hand_key_bruteforce, deck
 from poker_coach.simulator import FastSolver, LegalActionV1, ObservationV1
 
@@ -96,6 +98,55 @@ def test_joint_sampler_backtracks_from_dead_end_without_uniform_fallback():
     assert unsupported.status == "degraded"
     assert unsupported.source == "monte_carlo_uniform_opponents"
     assert unsupported.range_status == "unavailable_fallback_uniform"
+
+
+def test_sparse_joint_sampler_preserves_conditional_product_weights():
+    observation = _observation()
+    ranges = _ranges(
+        _belief(1, {"QcQd": "0.99", "JhJd": "0.01"}),
+        _belief(2, {"QcQs": "0.99", "TcTd": "0.01"}),
+    )
+    solver = FastSolver()
+    observed: Counter[tuple[str, str]] = Counter()
+    for seed in range(5000):
+        sample = solver.sample_trial(observation, seed=seed, range_beliefs=ranges)
+        observed[("".join(sample[5:7]), "".join(sample[7:9]))] += 1
+
+    expected = {
+        ("QcQd", "TcTd"): 0.0099 / 0.0199,
+        ("JhJd", "QcQs"): 0.0099 / 0.0199,
+        ("JhJd", "TcTd"): 0.0001 / 0.0199,
+    }
+    assert set(observed) == set(expected)
+    observed_percentages = {
+        assignment: observed[assignment] / 50 for assignment in expected
+    }
+    print(f"joint conditional observed percentages={observed_percentages}")
+    for assignment, target in expected.items():
+        assert abs(observed[assignment] / 5000 - target) < 0.03
+    assert solver.sample_trial(
+        observation, seed=137, range_beliefs=ranges
+    ) == solver.sample_trial(observation, seed=137, range_beliefs=ranges)
+
+
+def test_joint_exact_cap_never_returns_first_feasible_range_sample(monkeypatch):
+    observation = _observation()
+    ranges = _ranges(
+        _belief(1, {"QcQd": "0.999999", "JhJd": "0.000001"}),
+        _belief(2, {"QcQs": "0.999999", "TcTd": "0.000001"}),
+    )
+    monkeypatch.setattr(fast_solver_module, "_JOINT_ENUM_STATE_CAP", 0)
+
+    result = FastSolver(iteration_cap=1, clock=lambda: 0).solve(
+        observation, decision_fingerprint="joint-cap", seed=0,
+        range_beliefs=ranges,
+    )
+
+    assert result.status == "unavailable"
+    assert result.source == "range_weighted_public_beliefs"
+    assert result.range_status == "ready"
+    assert result.sample_count == 0
+    assert result.unavailable_reason == "range_joint_enumeration_cap_exhausted"
 
 
 def test_private_poison_does_not_change_range_aware_result():

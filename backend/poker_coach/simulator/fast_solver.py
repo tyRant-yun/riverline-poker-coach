@@ -32,6 +32,8 @@ _ZERO = Decimal("0")
 _ONE = Decimal("1")
 _RangeEntries = tuple[tuple[str, str, Decimal], ...]
 _RangeSampler = tuple[_RangeEntries, tuple[Decimal, ...], Decimal]
+_JOINT_ENUM_STATE_CAP = 20_000
+_JOINT_ENUM_LEAF_CAP = 4_096
 
 
 class _NoJointRangeSupport(RuntimeError):
@@ -198,6 +200,7 @@ class FastSolver:
         )
         exact = self._exact_heads_up_river(observation, active_ranges) if range_ready else None
         timed_out = False
+        joint_limit_exhausted = False
         if exact is not None:
             equity, sample_count, ess = exact
         else:
@@ -225,6 +228,7 @@ class FastSolver:
                     trial = self._sample_trial(observation, rng, None)
                 except _JointSearchLimit:
                     timed_out = True
+                    joint_limit_exhausted = True
                     break
                 shares.append(self._hero_share(observation, trial))
                 if (self._clock() - started) * 1_000 >= hard_ms:
@@ -233,7 +237,13 @@ class FastSolver:
             sample_count = len(shares)
             if sample_count == 0:
                 return self._unavailable(
-                    identity, "solver_budget_exhausted", "unavailable", started,
+                    identity,
+                    (
+                        "range_joint_enumeration_cap_exhausted"
+                        if joint_limit_exhausted else "solver_budget_exhausted"
+                    ),
+                    "unavailable",
+                    started,
                     budget_tier, soft_ms, hard_ms, range_ready=range_ready,
                 )
             equity = sum(shares, _ZERO) / sample_count
@@ -287,9 +297,14 @@ class FastSolver:
                 "The one-layer aggregate call branch stack-caps every active opponent's completion to Hero's target; the raise branch stops with Hero folding and no invented re-raise amount or further Hero cost.",
                 "The response tree uses an approximate showdown continuation; no future actions, opponent private cards, RNG/deck state, terminal payout, or future events are consumed.",
                 (
+                    "Exact joint enumeration hit its state/leaf cap; only earlier unbiased conditional-product samples are returned as partial range-aware output."
+                    if joint_limit_exhausted else
+                    "Joint samples use product-weighted rejection; sparse conflicts use exact state/leaf-capped feasible-joint enumeration and never first-feasible DFS."
+                ),
+                (
                     "R7-04 Range V2 was unavailable, so the action remained non-blocking via the deterministic uniform-opponent L1 fallback."
                     if fallback else
-                    "R7-04 Range V2 heuristic provenance is preserved; independent marginals are sampled sequentially and are not a joint range."
+                    "R7-04 Range V2 heuristic provenance is preserved; independent marginals are conditioned on disjoint cards but are not a learned joint range."
                 ),
             ),
             decision=identity,
@@ -368,9 +383,9 @@ class FastSolver:
         rng: random.Random,
     ) -> dict[int, tuple[str, str]]:
         # Independent rejection samples the product of seat marginals
-        # conditioned on global card uniqueness. A deterministic weighted DFS
-        # resolves rare dead ends; uniform fallback is reserved for proven
-        # empty joint support.
+        # conditioned on global card uniqueness. If sparse support defeats the
+        # bounded rejection phase, exact capped enumeration preserves the same
+        # conditional product weights. No first-feasible assignment is used.
         for _ in range(24):
             assignment = {
                 seat: cls._draw_sampler(samplers[seat], rng)
@@ -380,28 +395,49 @@ class FastSolver:
                 flattened = [card for cards in assignment.values() for card in cards]
                 if len(flattened) == len(set(flattened)):
                     return assignment  # type: ignore[return-value]
-        nodes = [0]
-        result = cls._backtrack_joint(
-            samplers, seats, set(), {}, rng, nodes, node_limit=4096
+        leaves: list[tuple[dict[int, tuple[str, str]], Decimal]] = []
+        states = [0]
+        cls._enumerate_joint(
+            samplers,
+            seats,
+            set(),
+            {},
+            _ONE,
+            leaves,
+            states,
+            state_cap=_JOINT_ENUM_STATE_CAP,
+            leaf_cap=_JOINT_ENUM_LEAF_CAP,
         )
-        if result is None:
+        if not leaves:
             raise _NoJointRangeSupport("range marginals have no compatible joint support")
-        return result
+        total = sum((weight for _assignment, weight in leaves), _ZERO)
+        threshold = Decimal(str(rng.random())) * total
+        cumulative = _ZERO
+        for assignment, weight in leaves:
+            cumulative += weight
+            if threshold < cumulative:
+                return assignment
+        return leaves[-1][0]
 
     @classmethod
-    def _backtrack_joint(
+    def _enumerate_joint(
         cls,
         samplers: Mapping[int, _RangeSampler],
         remaining: tuple[int, ...],
         blocked: set[str],
         assignment: dict[int, tuple[str, str]],
-        rng: random.Random,
-        nodes: list[int],
+        joint_weight: Decimal,
+        leaves: list[tuple[dict[int, tuple[str, str]], Decimal]],
+        states: list[int],
         *,
-        node_limit: int,
-    ) -> dict[int, tuple[str, str]] | None:
+        state_cap: int,
+        leaf_cap: int,
+    ) -> None:
         if not remaining:
-            return dict(assignment)
+            if len(leaves) >= leaf_cap:
+                raise _JointSearchLimit("exact joint leaf cap exhausted")
+            leaves.append((dict(assignment), joint_weight))
+            return
         eligible_by_seat = {
             seat: tuple(
                 item for item in samplers[seat][0]
@@ -412,34 +448,25 @@ class FastSolver:
         seat = min(remaining, key=lambda item: (len(eligible_by_seat[item]), item))
         eligible = eligible_by_seat[seat]
         if not eligible:
-            return None
-        weighted_order = sorted(
-            eligible,
-            key=lambda item: (
-                -math.log(max(rng.random(), 1e-300))
-                / max(float(item[2]), 1e-300),
-                item[0], item[1],
-            ),
-        )
+            return
         next_remaining = tuple(item for item in remaining if item != seat)
-        for first, second, _weight in weighted_order:
-            nodes[0] += 1
-            if nodes[0] > node_limit:
-                raise _JointSearchLimit("bounded joint range search exhausted")
+        for first, second, weight in eligible:
+            states[0] += 1
+            if states[0] > state_cap:
+                raise _JointSearchLimit("exact joint state cap exhausted")
             assignment[seat] = (first, second)
-            found = cls._backtrack_joint(
+            cls._enumerate_joint(
                 samplers,
                 next_remaining,
                 blocked | {first, second},
                 assignment,
-                rng,
-                nodes,
-                node_limit=node_limit,
+                joint_weight * weight,
+                leaves,
+                states,
+                state_cap=state_cap,
+                leaf_cap=leaf_cap,
             )
-            if found is not None:
-                return found
         assignment.pop(seat, None)
-        return None
 
     @staticmethod
     def _draw_sampler(
