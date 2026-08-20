@@ -91,7 +91,7 @@ describe("ContinuousTablePage", () => {
     await waitFor(() => expect(screen.getByLabelText("Decision Summary")).not.toHaveTextContent("尚无可验证原因"));
   });
 
-  it("releases Hero controls when the latest bot-transition snapshot returns the turn to Hero", async () => {
+  it("keeps Hero controls locked through the final Bot playback even when the snapshot already returns Hero", async () => {
     api.action.mockResolvedValueOnce({ table: {
       ...table, revision: 19, fingerprint: "decision-b",
       actionHistory: [...table.actionHistory, { sequence: 9, street: "flop", actorSeat: 2, action: "call", amount: 100 }],
@@ -102,7 +102,7 @@ describe("ContinuousTablePage", () => {
     const call = await screen.findByTestId("hero-action-call");
     fireEvent.click(call);
     await waitFor(() => expect(api.action).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByTestId("hero-action-call")).toBeEnabled());
+    expect(screen.getByTestId("hero-action-call")).toBeDisabled();
   });
 
   it("reconnects, submits only a backend legal action, and starts the next hand", async () => {

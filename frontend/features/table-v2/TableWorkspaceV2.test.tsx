@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ActionPlaybackQueue, HeroActionDockV2, InsightRailV2, PokerTableStageV2, type ActionDelta } from "./TableWorkspaceV2";
@@ -25,11 +25,14 @@ describe("Table V2 visual contracts", () => {
     expect(document.querySelector('[data-seat="2"]')).toHaveClass("is-thinking");
   });
 
-  it("plays public actions in order with seat thinking, readable timing, cancellation, and reduced motion", () => {
-    const setTimeout = vi.fn((fn) => { fn(); return 1; }); const clearTimeout = vi.fn(); const scheduler = { setTimeout, clearTimeout };
+  it("plays public actions in order with a 750ms final dwell, cancellation, and reduced motion", () => {
+    const tasks: (() => void)[] = []; const setTimeout = vi.fn((fn) => { tasks.push(fn); return tasks.length; }); const clearTimeout = vi.fn(); const scheduler = { setTimeout, clearTimeout };
     const seen: string[] = []; const queue = new ActionPlaybackQueue(scheduler, false);
     const thinking: string[] = []; queue.play(actions, "comfort", (action) => seen.push(action.id), undefined, (action) => thinking.push(action?.id ?? "done"));
-    expect(seen).toEqual(["a", "b"]); expect(thinking).toEqual(["a", "done", "b", "done", "done"]); expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 450);
+    expect(seen).toEqual([]); expect(thinking).toEqual(["a"]); expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 450);
+    tasks.shift()!(); expect(seen).toEqual(["a"]); expect(setTimeout).toHaveBeenLastCalledWith(expect.any(Function), 900);
+    tasks.shift()!(); expect(thinking).toEqual(["a", "done", "b"]); tasks.shift()!(); expect(seen).toEqual(["a", "b"]); expect(setTimeout).toHaveBeenLastCalledWith(expect.any(Function), 900);
+    tasks.shift()!(); expect(thinking.at(-1)).toBe("done");
     queue.cancel(); expect(clearTimeout).toHaveBeenCalled();
     const reduced: string[] = []; new ActionPlaybackQueue(scheduler, true).play(actions, "slow", (action) => reduced.push(action.id));
     expect(reduced).toEqual(["a", "b"]);
@@ -61,6 +64,25 @@ describe("Table V2 visual contracts", () => {
     expect(ladder).toHaveTextContent("66.7% pot"); expect(ladder).toHaveTextContent("ΔEV CI -0.2–+0.2");
     expect(ladder).toHaveTextContent("接近最优"); expect(ladder).toHaveTextContent("极端尺度：全压"); expect(ladder).toHaveTextContent("不确定性不可用");
     expect(screen.getByLabelText("Solver 结果")).toHaveTextContent("不是 GTO、Nash 或最终行动裁决");
+  });
+  it("sorts an unsorted ladder by ΔEV, keeps the real best in the first three, and expands all sizes", () => {
+    render(<InsightRailV2 solver={{ status: "ready", recommendedAction: null, candidates: [{ action: "fold", approximateEvChips: "1", deltaEvChips: "-3" }, { action: "bet", amount: 200, approximateEvChips: "4", deltaEvChips: "0", potPercentage: "50" }, { action: "call", amount: 100, approximateEvChips: "3", deltaEvChips: "-1" }, { action: "all_in", amount: 900, approximateEvChips: "2", deltaEvChips: "-2" }], equity: "0.4", iterations: 10, source: "range_weighted_public_beliefs", version: "v1", limitations: [] }} />);
+    const ladder = screen.getByLabelText("Solver Action Ladder");
+    expect(ladder).toHaveTextContent(/^下注 · 50.0% pot · 200/); expect(ladder).not.toHaveTextContent("弃牌");
+    fireEvent.click(screen.getByRole("button", { name: "全部尺度（4）" })); expect(ladder).toHaveTextContent("弃牌");
+  });
+  it("shows reconciliation amountChips, pot percentage, and available SPR without browser arbitration", () => {
+    render(<InsightRailV2 table={{ heroSeat: 0, pot: 500, seats: [{ seatId: 0, stack: 5_000 }] } as never} reconciliation={{ status: "ready", decision: { fingerprint: "f", handId: "h", sequence: 1, street: "flop" }, ruleBaseline: { role: "rule_baseline", status: "ready", action: { action: "bet", amountSemantics: "to", amountChips: 330, potPct: "66" }, provenance: {}, limitations: [] }, simulationEstimate: { role: "simulation_estimate", status: "ready", action: { action: "call", amountSemantics: "cost", amountChips: 100, potPct: "20" }, provenance: {}, limitations: [] }, agreement: { kind: "different_action", reasonCodes: ["model_limitations"], confidenceInterval: { status: "available" }, sizingRobustness: "close" } }} />);
+    const summary = screen.getByLabelText("Decision Summary"); expect(summary).toHaveTextContent("下注 · 66.0% pot · 330"); expect(summary).toHaveTextContent("跟注 · 20.0% pot · 100"); expect(summary).toHaveTextContent("SPR 10.0"); expect(summary).toHaveTextContent("存在分歧 · 模型限制");
+  });
+  it("retains the previous same-hand snapshot for verifiable Top movers", async () => {
+    const table = { sessionId: "s", handId: "h", fingerprint: "a", street: "flop", pot: 100 };
+    const belief = (fingerprint: string, aa: string, aks: string) => ({ table: { ...table, fingerprint } as never, insights: { available: true, seatBeliefs: [{ seatId: 1, available: true, matrix169: { AA: { probabilityMass: aa, comboCount: 6 }, AKs: { probabilityMass: aks, comboCount: 4 } } }] } });
+    const view = render(<InsightRailV2 {...belief("a", "0.1", "0.1")} />);
+    await waitFor(() => expect(screen.getByText(/Top movers 暂不可用/)).toBeInTheDocument());
+    view.rerender(<InsightRailV2 {...belief("b", "0.2", "0.05")} />);
+    await waitFor(() => expect(screen.getByTestId("range-top-movers")).toHaveTextContent("AA +10.0%"));
+    expect(screen.getByTestId("range-top-movers")).toHaveTextContent("AKs -5.0%");
   });
   it("opens an accessible 13×13 Explorer with topology filters, cell details, and an honest delta baseline", () => {
     render(<InsightRailV2 table={{ sessionId: "s", handId: "h", fingerprint: "a", street: "flop", pot: 100 } as never} insights={{ available: true, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, rangeWidthCombos: 214, confidence: "low", source: "riverline.heuristic_seed", matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 }, AKs: { probabilityMass: "0.05", comboCount: 4 }, AKo: { probabilityMass: "0", comboCount: 0 } } }] }} />);
