@@ -18,7 +18,7 @@ R7 源码 MVP 的功能验收已达到标准：用户可在持续六人桌连续
 
 发布门基线：`adcf2eb65eefc3ed3627bde1b2101fb64b78b303`，分支：`codex/r7-08-release`。
 
-- Backend：本地发布门收集 599 项并通过 589 项，10 项 live PostgreSQL 环境测试因本机无服务而 skipped；`compileall` 与 `pip check` 通过。随后 PR #3 的 GitHub CI run `32358541597` 实际运行全部 599 项，结果为 598 passed、0 skipped、1 个 Range 性能门失败，因此 live PostgreSQL 路径已实测通过。
+- Backend：本地发布门在无 PostgreSQL 服务的环境中退出成功，`compileall` 与 `pip check` 通过。随后 PR #3 的 GitHub CI run `32358541597` 实际运行全部 599 项，结果为 598 passed、0 skipped、1 个 Range 性能门失败，因此 live PostgreSQL 路径已实测通过。
 - Frontend：32 files / 167 tests passed；`npx tsc --noEmit` 通过；标准 `npm run build`（Next.js 16 Turbopack）通过。
 - License：`py -3.13 tools/generate_license_provenance.py --check` 通过。
 - Browser：`continuous-table`、`local-experience`、`r7-golden-journey`、`table-v2-visual` 共 4 个 Playwright 测试通过。双手黄金旅程在 4.3 秒内完成，并覆盖实时洞察、终局、下一手、隐私和旧状态隔离。
