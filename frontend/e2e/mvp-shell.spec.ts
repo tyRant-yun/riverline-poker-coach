@@ -40,10 +40,11 @@ test("MVP shell reports local health and creates an honest continuous table expe
   await expect(page.getByTestId("health-status")).toContainText("服务状态：在线");
   await page.getByTestId("create-continuous-table").click();
   await expect(page.getByTestId("hero-legal-actions")).toBeVisible();
-  await expect(page.getByText("A♠")).toBeVisible();
-  expect(await page.locator(".seat:not(.seat--hero) .playing-card--back").count()).toBe(10);
-  for (const heading of ["Advisor", "Range", "Stats", "Solver"]) await expect(page.getByRole("heading", { name: heading })).toBeVisible();
-  await expect(page.getByTestId("table-insights")).toContainText("deterministic_formula");
-  await expect(page.getByTestId("table-insights")).toContainText("独立座位边际；不含对手私牌");
-  await expect(page.getByTestId("table-insights")).toContainText("当前未连接/不可用");
+  const heroCards = page.getByLabel("Hero 手牌");
+  await expect(heroCards.getByLabel("A♠", { exact: true })).toBeVisible();
+  await expect(heroCards.locator("i")).toHaveCount(2);
+  await expect(page.locator(".tv2-seat:not(.tv2-hero-seat) .tv2-holecards")).toHaveCount(0);
+  await expect(page.getByLabel("Advisor 摘要")).toContainText("建议：跟注");
+  await expect(page.getByLabel("Range Belief")).toContainText("不含对手私牌");
+  await expect(page.getByLabel("Solver 结果")).toContainText("Solver 尚未就绪");
 });

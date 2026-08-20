@@ -67,6 +67,11 @@ _ACTION_CACHE: OrderedDict[
     tuple[object, ...], tuple[RangeBeliefSnapshot, RangeBeliefSnapshot]
 ] = OrderedDict()
 _ACTION_CACHE_LOCK = Lock()
+_INACTIVE_CACHE_MAX = 16
+_INACTIVE_CACHE: OrderedDict[
+    int, tuple[RangeBeliefSnapshot, RangeBeliefSnapshot]
+] = OrderedDict()
+_INACTIVE_CACHE_LOCK = Lock()
 _ACTION_DISTRIBUTION_CACHE_MAX = 64
 _ACTION_DISTRIBUTION_CACHE: OrderedDict[
     tuple[object, ...],
@@ -329,7 +334,14 @@ def _mark_inactive(
     folded = _apply_action(
         snapshot, action, sequence, context, likelihood_amount, cache_transition
     )
-    return folded.model_copy(
+    cache_key = id(folded)
+    if cache_transition:
+        with _INACTIVE_CACHE_LOCK:
+            cached = _INACTIVE_CACHE.get(cache_key)
+            if cached is not None and cached[0] is folded:
+                _INACTIVE_CACHE.move_to_end(cache_key)
+                return cached[1]
+    inactive = folded.model_copy(
         update={
             "update": folded.update.model_copy(
                 update={
@@ -341,6 +353,13 @@ def _mark_inactive(
             )
         }
     )
+    if cache_transition:
+        with _INACTIVE_CACHE_LOCK:
+            _INACTIVE_CACHE[cache_key] = (folded, inactive)
+            _INACTIVE_CACHE.move_to_end(cache_key)
+            while len(_INACTIVE_CACHE) > _INACTIVE_CACHE_MAX:
+                _INACTIVE_CACHE.popitem(last=False)
+    return inactive
 
 
 def _apply_blockers(snapshot: RangeBeliefSnapshot, cards: tuple[Card, ...], sequence: int, street: Street) -> RangeBeliefSnapshot:

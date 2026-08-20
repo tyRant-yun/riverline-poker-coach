@@ -23,6 +23,7 @@ from poker_coach.simulator.contracts import (
     HoleCardsRecordedPayloadV1,
     SimulatorActionV1,
 )
+from poker_coach.simulator import table_insights as table_insights_module
 from poker_coach.simulator.table_insights import _compressed_belief, _public_stream
 
 
@@ -280,6 +281,63 @@ def _reachable_turn_decision_events(*, turn_bet: int) -> tuple[HandEventV1, ...]
         _event(18, _public_action(street=Street.TURN, actor=3, action=SimulatorActionV1.CHECK)),
         _event(19, _public_action(street=Street.TURN, actor=4, action=SimulatorActionV1.BET, amount=turn_bet)),
     )
+
+
+def test_v2_projection_cache_reuses_same_immutable_combo_distribution(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    consumer = PublicEventBeliefConsumer()
+    visible = ("As", "Qd")
+    first = consumer.beliefs_at(
+        _reachable_turn_decision_events(turn_bet=1_000),
+        observer_visible_cards=visible,
+    )[4]
+    second = consumer.beliefs_at(
+        _reachable_turn_decision_events(turn_bet=1_001),
+        observer_visible_cards=visible,
+    )[4]
+    assert first.current is not None and second.current is not None
+    assert first.current is not second.current
+    assert first.current.combos is second.current.combos
+    assert first.current.update is not None and second.current.update is not None
+    assert first.current.update.observed_size != second.current.update.observed_size
+
+    with table_insights_module._PROJECTION_CACHE_LOCK:
+        table_insights_module._PROJECTION_CACHE.clear()
+    original_aggregate = table_insights_module.aggregate_belief_to_matrix169
+    aggregate_calls = 0
+
+    def counted_aggregate(*args: object, **kwargs: object):
+        nonlocal aggregate_calls
+        aggregate_calls += 1
+        return original_aggregate(*args, **kwargs)
+
+    monkeypatch.setattr(
+        table_insights_module, "aggregate_belief_to_matrix169", counted_aggregate
+    )
+    first_summary = _compressed_belief(first, "range-v2")
+    second_summary = _compressed_belief(second, "range-v2")
+
+    assert first_summary["matrix169"] == second_summary["matrix169"]
+    assert aggregate_calls == 1
+
+
+def test_v2_replay_reuses_folded_snapshots_across_adjacent_decisions():
+    consumer = PublicEventBeliefConsumer()
+    visible = ("As", "Qd")
+    first = consumer.beliefs_at(
+        _reachable_turn_decision_events(turn_bet=1_000),
+        observer_visible_cards=visible,
+    )
+    second = consumer.beliefs_at(
+        _reachable_turn_decision_events(turn_bet=1_001),
+        observer_visible_cards=visible,
+    )
+
+    for folded_seat in (1, 2, 5):
+        assert first[folded_seat].inactive is True
+        assert second[folded_seat].inactive is True
+        assert first[folded_seat].current is second[folded_seat].current
 
 
 def test_v2_six_max_current_decision_latency_gate(monkeypatch: pytest.MonkeyPatch):

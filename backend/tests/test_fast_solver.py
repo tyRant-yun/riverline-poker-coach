@@ -291,12 +291,31 @@ def test_timeout_returns_partial_and_zero_samples_are_unavailable():
         _observation(), decision_fingerprint="budget", seed=5)
     assert partial.status == "degraded"
     assert partial.sample_count == 1
-    exhausted_ticks = iter((0.0, 0.2, 0.2))
+    exhausted_ticks = iter((0.0, 0.3, 0.3))
     unavailable = FastSolver(clock=lambda: next(exhausted_ticks)).solve(
         _observation(), decision_fingerprint="budget-zero", seed=5)
     assert unavailable.status == "unavailable"
     assert unavailable.sample_count == 0
     assert unavailable.unavailable_reason == "solver_budget_exhausted"
+
+
+def test_cold_start_between_soft_and_hard_returns_one_truthful_sample():
+    observation = _observation(active_seats=(0, 1, 2, 3, 4, 5))
+    ranges = _wide_ranges((1, 2, 3, 4, 5))
+    ticks = iter((0.0, 0.2, 0.31, 0.31))
+
+    result = FastSolver(clock=lambda: next(ticks)).solve(
+        observation,
+        decision_fingerprint="cold-start",
+        seed=5,
+        range_beliefs=ranges,
+    )
+
+    assert result.status == "degraded"
+    assert result.sample_count == 1
+    assert result.source == "range_weighted_public_beliefs"
+    assert result.range_status == "ready"
+    assert result.unavailable_reason is None
 
 
 def test_range_unavailable_honestly_falls_back_to_uniform_l1():
