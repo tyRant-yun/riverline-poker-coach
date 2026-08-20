@@ -68,10 +68,16 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R7-08 Final MVP Release Gate | `/root/r7_08_release_gate` | `completed` | `merged` | `codex/r7-08-release` | `adcf2eb65eefc3ed3627bde1b2101fb64b78b303` | `c455ef002ca336a4133719937d27d19197ae17f8` | [R7-08 handoff](handoffs/R7-08.md) | Local full gate PASS; PR #4 run `32362755546`: backend incl. live PostgreSQL/Redis PASS, frontend build+current-product E2E PASS; Range/Solver narrow reviews PASS | none | Integrated `2b51281..6cbdbb4`; strict Range performance and Solver cold-start P1 closed; source ready, binary/container excluded |
 | R7 Final MVP | `019ff338-3cbc-7d91-999d-0c44208c325e` | `completed` | `merged` | `codex/r7-final-mvp` | `b835b01b18c25a823631784b796f2b62878e4db9` | `6cbdbb4` | [R7 final report](../releases/r7-final-mvp.md) | R7-03/04/05/07/08 complete; real two-hand journey and final GitHub backend/frontend gates PASS | none | Source MVP accepted with no P0/P1; R7-06 deferred; Solver L1.5 remains non-GTO; binary/container publication not authorized |
 | Local Startup Lock Recovery | `01a01ef7-0a9c-7880-aafd-7d5f7fe89534` | `completed` | `merged` | `codex/simulator-rebuild` | `fa72c37ea148192b4999fbb25f14438ff74b3945` | `a3ebc0db5d1c60cc5cac44b9791939db4090406a` | [startup handoff](handoffs/LOCAL-STARTUP-LOCK-RECOVERY.md) | launcher contract PASS; real API/Web HTTP 200; owned process cleanup and port release PASS | local user validation | Integrated as `a58cb71..f7b063c`; missing `frontend/node_modules` still requires `npm ci` and is now reported immediately |
+| R8-01 Decision Cockpit + Bot Narrative | `/root/r8_01_decision_cockpit` | `in_progress` | `in_progress` | `codex/r8-01-decision-cockpit` | `ac72e2d` | — | — | focused frontend tests/screenshots pending | R8-02 | Frontend-only shell; existing DTO only; no Solver/Range algorithm changes |
+| R8-02 Range Explorer | `/root/r8_02_range_explorer` | `planned` | `planned` | `codex/r8-02-range-explorer` | — | — | — | pending R8-01 | R8-05 | Expanded matrix, summary/delta modes and honest unavailable states |
+| R8-03 Decision Reconciliation Contract | `/root/r8_03_reconciliation` | `in_progress` | `in_progress` | `codex/r8-03-reconciliation` | `ac72e2d` | — | — | focused backend contract tests pending | R8-04/R8-05 | Backend/API-only additive contract; no frontend overlap with R8-01 |
+| R8-04 Solver Sizing Calibration | `/root/r8_04_solver_sizing` | `planned` | `planned` | `codex/r8-04-solver-sizing` | — | — | — | pending R8-03 | R8-05 | High-risk sizing/EV calibration; strict amount/privacy/oracle gates |
+| R8-05 Product Evaluation | `/root/r8_05_product_eval` | `planned` | `planned` | `codex/r8-05-product-eval` | — | — | — | pending R8-01/02/03/04 | final review | Real journey, four viewports, async/privacy and five-second tasks |
+| R8 Decision UX Productization | `/root` | `in_progress` | `in_progress` | `codex/r8-decision-ux` | `72696f5b764406869d58fff4e3b1b0170189a4c5` | — | [R8 plan](../plans/r8-decision-cockpit-and-range-explorer.md) | plan commits `6407d3a..ac72e2d` | R8-01/R8-03 | Controlled two-slot implementation; one final Standards/Spec review |
 
 ## 下一入口
 
-`LOCAL-MVP-USER-VALIDATION`：启动脚本恢复已验收。安装 lockfile 精确前端依赖后启动当前 MVP，下一轮仅根据真实体验反馈或 SaaS 阶段范围确认派发；R7-06 与二进制/容器发布门继续保持 deferred。
+`R8-01 + R8-03`：从 `ac72e2d` 并行推进前端 Decision Cockpit/Bot Narrative 与后端 Decision Reconciliation；文件所有权分离。完成集成后串行进入 R8-02 Range Explorer 与 R8-04 Solver Sizing Calibration。
 
 ## MVP 执行策略
 
