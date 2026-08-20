@@ -211,7 +211,16 @@ class FastSolver:
             rng = random.Random(sample_seed)
             shares: list[Decimal] = []
             for _ in range(iteration_cap):
-                if (self._clock() - started) * 1_000 >= soft_ms:
+                elapsed_ms = (self._clock() - started) * 1_000
+                # Sampler preparation is part of the truthful end-to-end
+                # budget. If cold-start work crosses only the soft deadline,
+                # use the already-declared hard window for one real sample;
+                # otherwise a slower runner can report zero evidence before
+                # sampling even begins. Once evidence exists, soft remains the
+                # normal stop boundary. Hard exhaustion is still unavailable.
+                if (shares and elapsed_ms >= soft_ms) or (
+                    not shares and elapsed_ms >= hard_ms
+                ):
                     timed_out = True
                     break
                 try:
