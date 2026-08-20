@@ -1,6 +1,8 @@
 """Read-only Table Insights composition; never serializes opponent hole cards."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 from poker_coach.persistence.session_stats_store import SQLiteSessionStatsStore
 from poker_coach.ranges.event_beliefs import PublicEventBeliefConsumer
 from poker_coach.ranges.aggregation import aggregate_belief_to_matrix169
@@ -98,10 +100,17 @@ def _compressed_belief(result: object, hand_id: str) -> dict[str, object]:
     }
     top = sorted(matrix.items(), key=lambda item: (-item[1].probability_mass, item[0]))[:6]
     width = result.current.retained_mass / result.prior.prior_mass * 100 if result.prior.prior_mass else 0
+    concentration = sum(
+        combo.probability * combo.probability for combo in result.current.combos.values()
+    )
+    effective_width = Decimal("0") if not concentration else Decimal("1") / concentration
     change = result.current.update.action_label if result.current.update else None
     return {
-        **base, "rangeWidthPct": float(width), "confidence": result.provenance.trust_level,
+        **base, "rangeWidthPct": float(width), "rangeWidthCombos": float(effective_width),
+        "confidence": result.provenance.trust_level,
+        "confidenceScore": float(result.provenance.confidence),
         "source": result.provenance.provider, "version": result.provenance.version,
+        "dataVersion": result.provenance.version,
         "changeReason": change or "初始先验", "matrix169": compact_matrix,
         "topClasses": [{"hand": key, "probabilityMass": str(cell.probability_mass)} for key, cell in top],
         "limitations": [

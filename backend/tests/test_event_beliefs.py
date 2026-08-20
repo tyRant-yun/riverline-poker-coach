@@ -81,7 +81,7 @@ def test_position_weighted_prior_and_public_actions_are_normalized_and_fold_inac
     beliefs = PublicEventBeliefConsumer().beliefs_at(events)
     assert beliefs[0].prior.combos["AsAh"].probability != beliefs[3].prior.combos["AsAh"].probability
     assert beliefs[3].current.update.action_type == "raise"
-    assert beliefs[3].current.update.action_label == "公开行动启发式更新"
+    assert beliefs[3].current.update.action_label == "public_action:preflop:raise:medium:utg:deep"
     assert sum(combo.probability for combo in beliefs[3].current.combos.values()) == Decimal("1")
     assert beliefs[4].inactive is True
     assert beliefs[4].current.update.action_type == "fold"

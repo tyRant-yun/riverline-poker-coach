@@ -8,6 +8,7 @@ deck, RNG seed, future board, or any other seat's private cards.
 from __future__ import annotations
 
 from enum import Enum
+from functools import lru_cache
 from hashlib import sha256
 from itertools import combinations
 from decimal import Decimal
@@ -166,6 +167,7 @@ def _unavailable_reason(query: SeatPriorQueryV1, seat_id: int) -> SeatPriorUnava
     return None
 
 
+@lru_cache(maxsize=64)
 def _position_weighted_combos(visible_blockers: tuple[Card, ...], position: SeatPosition | None) -> dict[str, Decimal]:
     """Deterministic first-party seed; all 1326 legal combos remain represented.
 
@@ -191,15 +193,21 @@ def _position_weighted_combos(visible_blockers: tuple[Card, ...], position: Seat
     return {key: max(Decimal("0.02"), min(Decimal("0.98"), weight)) for key, weight in result.items()}
 
 
+@lru_cache(maxsize=96)
 def _snapshot(seat_id: int, position: SeatPosition | None, visible_blockers: tuple[Card, ...]) -> RangeBeliefSnapshot:
     weights = _position_weighted_combos(visible_blockers, position)
     total = sum(weights.values(), Decimal("0"))
     probabilities = _normalized_probabilities(weights)
-    return RangeBeliefSnapshot(
+    return RangeBeliefSnapshot.model_construct(
         snapshot_id=snapshot_id_for(seat_id, Street.PREFLOP, 0), seat_id=seat_id,
         street=Street.PREFLOP, after_sequence=0, source=PolicySource.HEURISTIC,
         confidence="heuristic", prior_mass=total, retained_mass=total,
-        combos={key: RangeBeliefCombo(combo=key, reach=weights[key], probability=probabilities[key]) for key in weights},
+        combos={
+            key: RangeBeliefCombo.model_construct(
+                combo=key, reach=weights[key], probability=probabilities[key]
+            )
+            for key in weights
+        },
         update=RangeUpdateMetadata(action_type="prior", action_label="unopened", node="preflop/unopened",
             policy_source=PolicySource.HEURISTIC, policy_version=_VERSION,
             assumptions=("6-max NLHE cash", "first-party position/stack heuristic", "no ante / no rake", "unopened preflop", "independent marginal; not a joint opponent distribution")),

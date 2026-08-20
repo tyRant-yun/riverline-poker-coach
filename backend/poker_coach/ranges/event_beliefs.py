@@ -6,23 +6,32 @@ and future stream events are deliberately outside this seam.
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 from decimal import Decimal
 from enum import Enum
 from hashlib import sha256
+from threading import Lock
 
 from pydantic import Field, model_validator
 
 from poker_coach.domain.models import Card, DomainModel, Street
 from poker_coach.simulator.contracts import (
-    ActionTakenPayloadV1, BoardDealtPayloadV1, HandEventV1, HandStartedPayloadV1,
-    HoleCardsRecordedPayloadV1, SimulatorActionV1,
+    ActionTakenPayloadV1, AmountSemanticsV1, BoardDealtPayloadV1, HandEventV1,
+    HandStartedPayloadV1, HoleCardsRecordedPayloadV1, SimulatorActionV1,
 )
 
 from .belief import RangeBeliefCombo, RangeBeliefSnapshot, RangeUpdateMetadata, combo_overlaps, snapshot_id_for
+from .likelihood import PublicActionContext, change_reason, likelihood, size_bucket, spr_bucket
 from .seat_priors import SeatPriorQueryV1, SeatPriorResultV1, SeatPriorUnavailableReason, default_seat_prior_provider
 
-_VERSION = "heuristic_likelihood_v1"
-_FINGERPRINT = sha256(b"riverline/public-event-belief/heuristic_likelihood_v1/preflop-action-category").hexdigest()
+_VERSION = "heuristic_likelihood_v2"
+_FINGERPRINT = sha256(b"riverline/public-event-belief/heuristic_likelihood_v2/public-size-street-position-spr-hand-features").hexdigest()
+_BLOCKER_CACHE_MAX = 48
+_BLOCKER_CACHE: OrderedDict[
+    tuple[int, tuple[Card, ...], int, Street],
+    tuple[RangeBeliefSnapshot, RangeBeliefSnapshot],
+] = OrderedDict()
+_BLOCKER_CACHE_LOCK = Lock()
 
 
 class SeatBeliefUnavailableReason(str, Enum):
@@ -98,76 +107,151 @@ class PublicEventBeliefConsumer:
         assert all(snapshots.values())
         prior_snapshots = dict(snapshots)
         inactive_seats: set[int] = set()
+        board: list[Card] = []
+        street_contributions = {seat: 0 for seat in started.active_seat_ids}
+        stacks = dict(started.starting_stacks)
+        pot = started.ante * len(started.active_seat_ids)
+        for seat, prior in priors.items():
+            forced = started.ante
+            if prior.position is not None and prior.position.value == "small_blind":
+                forced += started.small_blind
+                street_contributions[seat] = started.small_blind
+            elif prior.position is not None and prior.position.value == "big_blind":
+                forced += started.big_blind
+                street_contributions[seat] = started.big_blind
+            stacks[seat] = max(0, stacks[seat] - forced)
+            pot += forced - started.ante
         for event in prefix[1:]:
             payload = event.payload
             if isinstance(payload, BoardDealtPayloadV1):
+                board.extend(payload.cards)
+                street_contributions = {seat: 0 for seat in started.active_seat_ids}
                 snapshots = {seat: _apply_blockers(snapshot, payload.cards, event.sequence, payload.street) for seat, snapshot in snapshots.items()}
             elif isinstance(payload, ActionTakenPayloadV1):
                 if payload.action not in {SimulatorActionV1.FOLD, SimulatorActionV1.CALL, SimulatorActionV1.RAISE, SimulatorActionV1.CHECK, SimulatorActionV1.BET}:
                     return _unavailable_all(started, target, SeatBeliefUnavailableReason.OFF_TREE_UNSUPPORTED)
+                position = priors[payload.actor_seat].position
+                context = PublicActionContext(
+                    board=tuple(board), pot_before=pot,
+                    stack_before=stacks[payload.actor_seat],
+                    position=position.value.lower() if position is not None else "unknown",
+                )
                 if payload.action is SimulatorActionV1.FOLD:
                     inactive_seats.add(payload.actor_seat)
-                    snapshots[payload.actor_seat] = _mark_inactive(snapshots[payload.actor_seat], payload, event.sequence)
+                    snapshots[payload.actor_seat] = _mark_inactive(
+                        snapshots[payload.actor_seat], payload, event.sequence, context
+                    )
                 else:
-                    snapshots[payload.actor_seat] = _apply_action(snapshots[payload.actor_seat], payload, event.sequence, priors[payload.actor_seat].position)
+                    snapshots[payload.actor_seat] = _apply_action(
+                        snapshots[payload.actor_seat], payload, event.sequence, context
+                    )
+                pot = _advance_public_state(payload, pot, stacks, street_contributions)
         return {seat: SeatBeliefResultV1(seat_id=seat, after_sequence=target, available=True, prior=prior_snapshots[seat],
             current=snapshots[seat], provenance=SeatBeliefProvenanceV1(), inactive=seat in inactive_seats,
-            approximate=priors[seat].coverage.approximate, approximation_reason=priors[seat].coverage.approximation_reason) for seat in snapshots}
+            approximate=True, approximation_reason=priors[seat].coverage.approximation_reason or "bounded_public_likelihood_v2") for seat in snapshots}
 
 
-def _apply_action(snapshot: RangeBeliefSnapshot, action: ActionTakenPayloadV1, sequence: int, position: object) -> RangeBeliefSnapshot:
-    weighted = {key: combo.reach * _likelihood(key, action.action, action.amount, action.street, position) for key, combo in snapshot.combos.items()}
+def _apply_action(
+    snapshot: RangeBeliefSnapshot,
+    action: ActionTakenPayloadV1,
+    sequence: int,
+    context: PublicActionContext,
+) -> RangeBeliefSnapshot:
+    weighted = {
+        key: combo.reach * likelihood(key, action.action, action.street, action.amount, context)
+        for key, combo in snapshot.combos.items()
+    }
     mass = sum(weighted.values(), Decimal("0"))
     combos = _normalized_combos(weighted, mass)
-    return RangeBeliefSnapshot(snapshot_id=snapshot_id_for(snapshot.seat_id, action.street, sequence), seat_id=snapshot.seat_id,
+    reason = change_reason(action.action, action.street, action.amount, context)
+    return RangeBeliefSnapshot.model_construct(snapshot_id=snapshot_id_for(snapshot.seat_id, action.street, sequence), seat_id=snapshot.seat_id,
         street=action.street, after_sequence=sequence, source=snapshot.source, confidence="heuristic",
         prior_mass=snapshot.retained_mass, retained_mass=mass, combos=combos, parent_snapshot_id=snapshot.snapshot_id,
-        update=RangeUpdateMetadata(action_type=action.action.value, action_label="公开行动启发式更新", observed_size=action.amount, mapped_size=action.amount, policy_source=snapshot.source,
-            node="public-event/preflop-or-public-street", policy_version=_VERSION,
-            assumptions=("bounded heuristic likelihood", "actor-only update", "not solver/GTO or joint distribution")))
+        update=RangeUpdateMetadata(action_type=action.action.value, action_label=reason,
+            observed_size=action.amount, mapped_size=action.amount, policy_source=snapshot.source,
+            node=f"public-event/{reason}", policy_version=_VERSION,
+            assumptions=(
+                "bounded heuristic likelihood", "actor-only update",
+                f"size_bucket:{size_bucket(action.action, action.amount, context.pot_before)}",
+                f"street:{action.street.value}", f"position:{context.position}",
+                f"spr_bucket:{spr_bucket(context.spr)}", "hand_features:made-hand/draw-aware",
+                "not solver/GTO, player profile, or joint distribution",
+            )))
 
 
-def _mark_inactive(snapshot: RangeBeliefSnapshot, action: ActionTakenPayloadV1, sequence: int) -> RangeBeliefSnapshot:
-    """Folding removes the seat from action, not from its historical belief."""
-    return RangeBeliefSnapshot(
-        snapshot_id=snapshot_id_for(snapshot.seat_id, action.street, sequence), seat_id=snapshot.seat_id,
-        street=action.street, after_sequence=sequence, source=snapshot.source, confidence=snapshot.confidence,
-        prior_mass=snapshot.retained_mass, retained_mass=snapshot.retained_mass, combos=snapshot.combos,
-        parent_snapshot_id=snapshot.snapshot_id,
-        update=RangeUpdateMetadata(action_type=action.action.value, action_label="公开行动：弃牌（座位已停用）",
-            policy_source=snapshot.source, node="public-event/fold", policy_version=_VERSION,
-            assumptions=("folded seats are inactive; historical belief is retained for replay only",)),
+def _mark_inactive(
+    snapshot: RangeBeliefSnapshot,
+    action: ActionTakenPayloadV1,
+    sequence: int,
+    context: PublicActionContext,
+) -> RangeBeliefSnapshot:
+    """A fold updates the final marginal and removes the seat from future action."""
+    folded = _apply_action(snapshot, action, sequence, context)
+    return folded.model_copy(
+        update={
+            "update": folded.update.model_copy(
+                update={
+                    "assumptions": (
+                        *folded.update.assumptions,
+                        "folded seat is inactive; final public-action belief remains replayable",
+                    )
+                }
+            )
+        }
     )
 
 
 def _apply_blockers(snapshot: RangeBeliefSnapshot, cards: tuple[Card, ...], sequence: int, street: Street) -> RangeBeliefSnapshot:
+    cache_key = (id(snapshot), cards, sequence, street)
+    with _BLOCKER_CACHE_LOCK:
+        cached = _BLOCKER_CACHE.get(cache_key)
+        if cached is not None and cached[0] is snapshot:
+            _BLOCKER_CACHE.move_to_end(cache_key)
+            return cached[1]
     kept = {key: combo for key, combo in snapshot.combos.items() if not combo_overlaps(key, set(cards))}
     mass = sum((combo.reach for combo in kept.values()), Decimal("0"))
     combos = _normalized_combos({key: combo.reach for key, combo in kept.items()}, mass)
-    return RangeBeliefSnapshot(snapshot_id=snapshot_id_for(snapshot.seat_id, street, sequence), seat_id=snapshot.seat_id,
+    result = RangeBeliefSnapshot.model_construct(snapshot_id=snapshot_id_for(snapshot.seat_id, street, sequence), seat_id=snapshot.seat_id,
         street=street, after_sequence=sequence, source=snapshot.source, confidence=snapshot.confidence,
         prior_mass=snapshot.retained_mass, retained_mass=mass, combos=combos, parent_snapshot_id=snapshot.snapshot_id,
         update=RangeUpdateMetadata(action_type="public_board", policy_source=snapshot.source, node="public-event/board", policy_version=_VERSION))
-
-
-def _likelihood(combo: str, action: SimulatorActionV1, amount: int | None, street: Street, position: object) -> Decimal:
-    high = combo[0] in "AKQJ" or combo[2] in "AKQJ" or combo[0] == combo[2]
-    size_tilt = Decimal("0.10") if amount is not None and amount >= 200 else Decimal("0")
-    positional_tilt = Decimal("0.03") if str(position) in {"utg", "mp"} else Decimal("0")
-    if action in {SimulatorActionV1.RAISE, SimulatorActionV1.BET}:
-        return Decimal("0.80") + size_tilt + positional_tilt if high else Decimal("0.25") - size_tilt / 2
-    if action is SimulatorActionV1.CALL:
-        return Decimal("0.65") if high else Decimal("0.45") + (Decimal("0.03") if street is not Street.PREFLOP else Decimal("0"))
-    if action is SimulatorActionV1.FOLD:
-        return Decimal("0.20") if high else Decimal("0.80")
-    return Decimal("1")
+    with _BLOCKER_CACHE_LOCK:
+        _BLOCKER_CACHE[cache_key] = (snapshot, result)
+        _BLOCKER_CACHE.move_to_end(cache_key)
+        while len(_BLOCKER_CACHE) > _BLOCKER_CACHE_MAX:
+            _BLOCKER_CACHE.popitem(last=False)
+    return result
 
 
 def _normalized_combos(weights: dict[str, Decimal], mass: Decimal) -> dict[str, RangeBeliefCombo]:
     keys = tuple(sorted(weights))
     probabilities = {key: weights[key] / mass for key in keys[:-1]}
     probabilities[keys[-1]] = Decimal("1") - sum(probabilities.values(), Decimal("0"))
-    return {key: RangeBeliefCombo(combo=key, reach=weights[key], probability=probabilities[key]) for key in keys}
+    return {
+        key: RangeBeliefCombo.model_construct(
+            combo=key, reach=weights[key], probability=probabilities[key]
+        )
+        for key in keys
+    }
+
+
+def _advance_public_state(
+    action: ActionTakenPayloadV1,
+    pot: int,
+    stacks: dict[int, int],
+    street_contributions: dict[int, int],
+) -> int:
+    amount = action.amount or 0
+    if action.amount_semantics is AmountSemanticsV1.TO:
+        contribution = max(0, amount - street_contributions[action.actor_seat])
+    elif action.amount_semantics in {AmountSemanticsV1.BY, AmountSemanticsV1.COST}:
+        contribution = amount
+    else:
+        contribution = 0
+    contribution = min(contribution, stacks[action.actor_seat])
+    stacks[action.actor_seat] -= contribution
+    street_contributions[action.actor_seat] += contribution
+    return pot + contribution
 
 
 def _unavailable_all(started: object, target: int, reason: SeatBeliefUnavailableReason) -> dict[int, SeatBeliefResultV1]:
