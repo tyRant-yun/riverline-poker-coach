@@ -107,6 +107,52 @@ def test_contract_is_deterministic_and_does_not_claim_ci_overlap_without_two_ev_
     }
 
 
+def test_real_solver_margin_ci_and_sizing_robustness_are_reconciled_without_arbitration():
+    close_solver = _result(action="raise", semantics="to", amount=1_100)
+    close_solver.update({
+        "sizingRobustness": "close",
+        "recommendationReasonCodes": ["close_conservative_tiebreak"],
+        "robustnessMarginConfidenceInterval95": {"lower": "-2", "upper": "5"},
+    })
+    close = _reconcile(_result(action="raise", semantics="to", amount=300), close_solver)
+
+    assert close["agreement"]["sizingRobustness"] == "close"
+    assert close["agreement"]["confidenceInterval"] == {
+        "schemaVersion": 1, "status": "available", "overlap": True,
+    }
+    assert "solver_sizing_close" in close["agreement"]["reasonCodes"]
+    assert "extreme_sizing_not_robust" in close["agreement"]["reasonCodes"]
+    assert "finalRecommendation" not in close
+
+    robust_solver = _result(action="raise", semantics="to", amount=1_100)
+    robust_solver.update({
+        "sizingRobustness": "robust",
+        "recommendationReasonCodes": ["deterministic_model_clear"],
+        "robustnessMarginConfidenceInterval95": {"lower": "2", "upper": "5"},
+    })
+    robust = _reconcile(_result(action="raise", semantics="to", amount=300), robust_solver)
+    assert robust["agreement"]["sizingRobustness"] == "robust"
+    assert robust["agreement"]["confidenceInterval"]["overlap"] is False
+    assert "solver_sizing_robust" in robust["agreement"]["reasonCodes"]
+
+
+def test_malformed_solver_robustness_evidence_is_not_claimed_or_exposed():
+    poisoned = _result()
+    poisoned.update({
+        "sizingRobustness": "definitely_gto",
+        "recommendationReasonCodes": ["opponentHoleCards=AsAd"],
+        "robustnessMarginConfidenceInterval95": {
+            "lower": "secret", "upper": "opponentHoleCards=AsAd"
+        },
+    })
+    result = _reconcile(_result(), poisoned)
+
+    assert result["agreement"]["sizingRobustness"] == "not_available"
+    assert result["agreement"]["confidenceInterval"]["status"] == "not_available"
+    assert "opponentHoleCards" not in str(result)
+    assert "AsAd" not in str(result)
+
+
 def _table_client(tmp_path):
     path = tmp_path / "reconciliation.sqlite3"
     service = ContinuousTableService(

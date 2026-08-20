@@ -12,7 +12,7 @@ import random
 import time
 from bisect import bisect_left
 from collections.abc import Mapping
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Callable, Literal
 
 from pydantic import ConfigDict, Field, model_validator
@@ -97,9 +97,18 @@ class SolverCandidateV1(_FastSolverContractV1):
     fold_equity: Decimal = Field(ge=0, le=1)
     sample_count: int = Field(ge=0)
     effective_sample_size: Decimal = Field(ge=0)
-    confidence_interval_95: SolverConfidenceIntervalV1
+    confidence_interval_95: SolverConfidenceIntervalV1 | None = None
+    pot_percentage: Decimal | None = None
+    is_jam: bool = False
+    sizing_class: Literal["non_sizing", "standard", "overbet", "jam"] = "non_sizing"
+    delta_ev_chips: Decimal = _ZERO
+    delta_ev_confidence_interval_95: SolverConfidenceIntervalV1 | None = None
+    uncertainty_status: Literal["available", "not_available"] = "not_available"
+    recommendation_tier: Literal[
+        "robust", "close", "not_available", "not_recommended"
+    ] = "not_recommended"
     response_mix: SolverResponseMixV1
-    response_model: Literal["bounded_public_heuristic_v1"] = "bounded_public_heuristic_v1"
+    response_model: Literal["bounded_public_heuristic_v2"] = "bounded_public_heuristic_v2"
 
 
 class FastSolverResultV1(_FastSolverContractV1):
@@ -124,6 +133,16 @@ class FastSolverResultV1(_FastSolverContractV1):
     version: Literal["fast-ev-solver/v1"] = "fast-ev-solver/v1"
     model_version: Literal["fast-ev-solver/v1.5"] = "fast-ev-solver/v1.5"
     confidence: Literal["exact", "coarse", "partial", "unavailable"]
+    sizing_robustness: Literal["robust", "close", "not_available"] = "not_available"
+    recommendation_reason_codes: tuple[
+        Literal[
+            "deterministic_model_clear",
+            "sample_margin_clear",
+            "close_conservative_tiebreak",
+            "uncertainty_not_available_conservative_tiebreak",
+        ], ...
+    ] = ()
+    robustness_margin_confidence_interval_95: SolverConfidenceIntervalV1 | None = None
     limitations: tuple[str, ...]
     decision: SolverDecisionIdentityV1
     unavailable_reason: str | None = None
@@ -201,6 +220,7 @@ class FastSolver:
         exact = self._exact_heads_up_river(observation, active_ranges) if range_ready else None
         timed_out = False
         joint_limit_exhausted = False
+        shares: list[Decimal] = []
         if exact is not None:
             equity, sample_count, ess = exact
         else:
@@ -209,7 +229,6 @@ class FastSolver:
                 if seed is None else seed
             )
             rng = random.Random(sample_seed)
-            shares: list[Decimal] = []
             for _ in range(iteration_cap):
                 elapsed_ms = (self._clock() - started) * 1_000
                 # Sampler preparation is part of the truthful end-to-end
@@ -258,22 +277,29 @@ class FastSolver:
             equity = sum(shares, _ZERO) / sample_count
             ess = Decimal(sample_count)
 
-        equity_ci = self._confidence_interval(equity, ess, exact=exact is not None)
-        candidates = tuple(
+        uncertainty_available = exact is not None or sample_count >= 2
+        equity_ci = (
+            self._confidence_interval(equity, ess, exact=exact is not None)
+            if uncertainty_available else None
+        )
+        raw_candidates = tuple(
             self._candidate(
                 legal, amount, observation, equity, sample_count, ess, equity_ci,
                 range_beliefs if range_ready else None,
             )
             for legal in observation.legal_actions
-            for amount in self._amounts(legal)
+            for amount in self._amounts(legal, observation)
         )
-        recommendation = max(
+        (
             candidates,
-            key=lambda candidate: (
-                candidate.approximate_ev_chips,
-                candidate.action.value,
-                -1 if candidate.amount is None else candidate.amount,
-            ),
+            recommendation,
+            sizing_robustness,
+            recommendation_reasons,
+            robustness_margin_ci,
+        ) = self._calibrate_recommendation(
+            raw_candidates,
+            sample_count=sample_count,
+            exact=exact is not None,
         )
         elapsed = max(0, int((self._clock() - started) * 1_000_000))
         fallback = not range_ready
@@ -300,11 +326,15 @@ class FastSolver:
             confidence=(
                 "exact" if exact is not None else "partial" if timed_out else "coarse"
             ),
+            sizing_robustness=sizing_robustness,
+            recommendation_reason_codes=recommendation_reasons,
+            robustness_margin_confidence_interval_95=robustness_margin_ci,
             limitations=(
                 "Range-aware Fast EV L1.5 uses independent per-seat public-event combo marginals with strict visible-card and sequential opponent card removal.",
                 "Opponent fold/call/raise is a bounded heuristic using public continuation-range width, position, SPR, street, and sizing; it is not GTO, Nash, or a player/profile model.",
                 "The one-layer aggregate call branch stack-caps every active opponent's completion to Hero's target; the raise branch stops with Hero folding and no invented re-raise amount or further Hero cost.",
                 "The response tree uses an approximate showdown continuation; no future actions, opponent private cards, RNG/deck state, terminal payout, or future events are consumed.",
+                "Candidate EV intervals use common showdown samples and quantify sampling uncertainty only; sizing robustness does not include error in the bounded response heuristic.",
                 (
                     "Exact joint enumeration hit its state/leaf cap; only earlier unbiased conditional-product samples are returned as partial range-aware output."
                     if joint_limit_exhausted else
@@ -598,17 +628,36 @@ class FastSolver:
         return equity, len(weighted), _ONE / squared
 
     @staticmethod
-    def _amounts(action: LegalActionV1) -> tuple[int | None, ...]:
+    def _amounts(
+        action: LegalActionV1, observation: ObservationV1
+    ) -> tuple[int | None, ...]:
         if action.amount_semantics is AmountSemanticsV1.NONE:
             amounts: tuple[int | None, ...] = (None,)
         elif action.action is SimulatorActionV1.CALL:
             amounts = (action.min_amount,)
         else:
             assert action.min_amount is not None and action.max_amount is not None
+            hero_commitment = observation.street_commitments[observation.observer_seat]
+            standard = {
+                int(
+                    (Decimal(observation.pot) * percentage / Decimal(100)).quantize(
+                        Decimal("1"), rounding=ROUND_HALF_UP
+                    )
+                )
+                for percentage in (
+                    Decimal("33"), Decimal("50"), Decimal("66"),
+                    Decimal("75"), Decimal("100"),
+                )
+            }
+            if action.amount_semantics is AmountSemanticsV1.TO:
+                standard = {hero_commitment + amount for amount in standard}
             amounts = tuple(sorted({
                 action.min_amount,
-                (action.min_amount + action.max_amount) // 2,
                 action.max_amount,
+                *(
+                    amount for amount in standard
+                    if action.min_amount <= amount <= action.max_amount
+                ),
             }))
         if not all(action.accepts(action=action.action, amount=amount) for amount in amounts):
             raise ValueError("solver generated a candidate rejected by LegalActionV1")
@@ -622,7 +671,7 @@ class FastSolver:
         equity: Decimal,
         sample_count: int,
         ess: Decimal,
-        equity_ci: SolverConfidenceIntervalV1,
+        equity_ci: SolverConfidenceIntervalV1 | None,
         range_beliefs: Mapping[int, object] | None,
     ) -> SolverCandidateV1:
         if legal.amount_semantics is AmountSemanticsV1.NONE:
@@ -674,10 +723,27 @@ class FastSolver:
             equity_sensitivity = Decimal(continuation_pot)
         else:
             equity_sensitivity = mix.call * Decimal(continuation_pot)
-        ev_ci = SolverConfidenceIntervalV1(
+        ev_ci = None if equity_ci is None else SolverConfidenceIntervalV1(
             lower=ev - (equity - equity_ci.lower) * equity_sensitivity,
             upper=ev + (equity_ci.upper - equity) * equity_sensitivity,
         )
+        pot_percentage = (
+            Decimal(cost) * Decimal(100) / Decimal(observation.pot)
+            if amount is not None and observation.pot > 0 else None
+        )
+        is_jam = (
+            legal.action in {SimulatorActionV1.BET, SimulatorActionV1.RAISE}
+            and cost == observation.stacks[observation.observer_seat]
+        )
+        sizing_class: Literal["non_sizing", "standard", "overbet", "jam"]
+        if amount is None:
+            sizing_class = "non_sizing"
+        elif is_jam:
+            sizing_class = "jam"
+        elif pot_percentage is not None and pot_percentage > Decimal("100"):
+            sizing_class = "overbet"
+        else:
+            sizing_class = "standard"
         return SolverCandidateV1(
             action=legal.action,
             amount_semantics=legal.amount_semantics,
@@ -696,7 +762,171 @@ class FastSolver:
             sample_count=sample_count,
             effective_sample_size=ess,
             confidence_interval_95=ev_ci,
+            pot_percentage=pot_percentage,
+            is_jam=is_jam,
+            sizing_class=sizing_class,
+            uncertainty_status="available" if ev_ci is not None else "not_available",
             response_mix=mix,
+        )
+
+    @classmethod
+    def _calibrate_recommendation(
+        cls,
+        candidates: tuple[SolverCandidateV1, ...],
+        *,
+        sample_count: int,
+        exact: bool,
+    ) -> tuple[
+        tuple[SolverCandidateV1, ...],
+        SolverCandidateV1,
+        Literal["robust", "close", "not_available"],
+        tuple[str, ...],
+        SolverConfidenceIntervalV1 | None,
+    ]:
+        point_best = max(candidates, key=cls._point_estimate_key)
+        uncertainty_available = exact or sample_count >= 2
+        calibrated: list[SolverCandidateV1] = []
+        for candidate in candidates:
+            delta_ci = (
+                cls._difference_interval(
+                    candidate, point_best, sample_count=sample_count, exact=exact
+                )
+                if uncertainty_available else None
+            )
+            calibrated.append(candidate.model_copy(update={
+                "delta_ev_chips": (
+                    candidate.approximate_ev_chips - point_best.approximate_ev_chips
+                ),
+                "delta_ev_confidence_interval_95": delta_ci,
+                "uncertainty_status": (
+                    "available" if uncertainty_available else "not_available"
+                ),
+            }))
+        candidates = tuple(calibrated)
+        point_best = next(
+            candidate for candidate in candidates
+            if cls._same_candidate(candidate, point_best)
+        )
+        alternatives = tuple(
+            candidate for candidate in candidates
+            if not cls._same_candidate(candidate, point_best)
+        )
+        if not uncertainty_available:
+            eligible = tuple(candidate for candidate in candidates if not cls._is_extreme(candidate))
+            recommendation = max(eligible or candidates, key=cls._point_estimate_key)
+            robustness: Literal["robust", "close", "not_available"] = "not_available"
+            reasons = ("uncertainty_not_available_conservative_tiebreak",)
+            margin_ci = None
+        else:
+            close = tuple(
+                candidate for candidate in alternatives
+                if cls._difference_interval(
+                    point_best, candidate, sample_count=sample_count, exact=exact
+                ).lower <= _ZERO
+            )
+            challenger = (
+                max(alternatives, key=cls._point_estimate_key)
+                if alternatives else point_best
+            )
+            if close:
+                recommendation = min((point_best, *close), key=cls._conservative_key)
+                robustness = "close"
+                reasons = ("close_conservative_tiebreak",)
+                margin_ci = cls._difference_interval(
+                    point_best,
+                    recommendation if not cls._same_candidate(point_best, recommendation) else challenger,
+                    sample_count=sample_count,
+                    exact=exact,
+                )
+            else:
+                recommendation = point_best
+                robustness = "robust"
+                reasons = (
+                    "deterministic_model_clear" if exact else "sample_margin_clear",
+                )
+                margin_ci = cls._difference_interval(
+                    point_best, challenger, sample_count=sample_count, exact=exact
+                )
+        candidates = tuple(
+            candidate.model_copy(update={
+                "recommendation_tier": (
+                    robustness if cls._same_candidate(candidate, recommendation)
+                    else "not_recommended"
+                )
+            })
+            for candidate in candidates
+        )
+        recommendation = next(
+            candidate for candidate in candidates
+            if cls._same_candidate(candidate, recommendation)
+        )
+        return candidates, recommendation, robustness, reasons, margin_ci
+
+    @staticmethod
+    def _point_estimate_key(candidate: SolverCandidateV1) -> tuple[Decimal, str, int]:
+        return (
+            candidate.approximate_ev_chips,
+            candidate.action.value,
+            -1 if candidate.amount is None else candidate.amount,
+        )
+
+    @staticmethod
+    def _same_candidate(first: SolverCandidateV1, second: SolverCandidateV1) -> bool:
+        return (
+            first.action is second.action
+            and first.amount_semantics is second.amount_semantics
+            and first.amount == second.amount
+        )
+
+    @staticmethod
+    def _is_extreme(candidate: SolverCandidateV1) -> bool:
+        return candidate.is_jam or candidate.sizing_class == "overbet"
+
+    @staticmethod
+    def _conservative_key(candidate: SolverCandidateV1) -> tuple[int, int, Decimal, int]:
+        action_risk = {
+            SimulatorActionV1.CHECK: 0,
+            SimulatorActionV1.CALL: 1,
+            SimulatorActionV1.BET: 2,
+            SimulatorActionV1.RAISE: 2,
+            SimulatorActionV1.FOLD: 3,
+        }[candidate.action]
+        sizing_distance = (
+            abs(candidate.pot_percentage - Decimal("66"))
+            if candidate.pot_percentage is not None else _ZERO
+        )
+        return (
+            1 if FastSolver._is_extreme(candidate) else 0,
+            action_risk,
+            sizing_distance,
+            candidate.incremental_cost,
+        )
+
+    @staticmethod
+    def _equity_sensitivity(candidate: SolverCandidateV1) -> Decimal:
+        if candidate.action is SimulatorActionV1.FOLD:
+            return _ZERO
+        if candidate.action in {SimulatorActionV1.CHECK, SimulatorActionV1.CALL}:
+            return Decimal(candidate.call_continuation_pot)
+        return candidate.response_mix.call * Decimal(candidate.call_continuation_pot)
+
+    @classmethod
+    def _difference_interval(
+        cls,
+        first: SolverCandidateV1,
+        second: SolverCandidateV1,
+        *,
+        sample_count: int,
+        exact: bool,
+    ) -> SolverConfidenceIntervalV1:
+        difference = first.approximate_ev_chips - second.approximate_ev_chips
+        radius = _ZERO if exact else (
+            abs(cls._equity_sensitivity(first) - cls._equity_sensitivity(second))
+            * Decimal(str(math.sqrt(math.log(40) / (2 * sample_count))))
+        )
+        return SolverConfidenceIntervalV1(
+            lower=difference - radius,
+            upper=difference + radius,
         )
 
     @staticmethod
@@ -709,18 +939,24 @@ class FastSolver:
         if action not in {SimulatorActionV1.BET, SimulatorActionV1.RAISE}:
             return SolverResponseMixV1(fold=_ZERO, call=_ONE, raise_=_ZERO)
         pot = max(1, observation.pot)
-        size_ratio = min(Decimal("2"), Decimal(cost) / Decimal(pot))
-        spr = Decimal(min(observation.stacks.values())) / Decimal(pot)
+        size_ratio = min(Decimal("4"), Decimal(cost) / Decimal(pot))
+        pressure = size_ratio / (_ONE + size_ratio)
+        effective_stack = min(observation.stacks[seat] for seat in observation.active_seats)
+        spr = Decimal(effective_stack) / Decimal(pot)
+        spr_leverage = min(_ONE, spr / Decimal("3"))
         street_factor = {
             Street.PREFLOP: Decimal("0"),
             Street.FLOP: Decimal("0.03"),
             Street.TURN: Decimal("0.06"),
             Street.RIVER: Decimal("0.09"),
         }[observation.street]
-        position_distance = (
-            observation.observer_seat - observation.button_seat
+        distance_to_button = (
+            observation.button_seat - observation.observer_seat
         ) % observation.table_size
-        position_factor = Decimal(position_distance) / Decimal(max(1, observation.table_size - 1))
+        position_factor = _ONE - (
+            Decimal(distance_to_button) / Decimal(max(1, observation.table_size - 1))
+        )
+        position_factor = min(_ONE, max(_ZERO, position_factor))
         range_strength = Decimal("0.5")
         if beliefs:
             visible = set((*observation.own_hole_cards, *observation.board))
@@ -750,20 +986,26 @@ class FastSolver:
                     )
             if widths:
                 range_strength = _ONE - sum(widths, _ZERO) / Decimal(len(widths))
-        fold = (
-            Decimal("0.14") + Decimal("0.28") * size_ratio + street_factor
-            + Decimal("0.04") * position_factor - Decimal("0.12") * range_strength
+        single_fold = (
+            Decimal("0.10")
+            + Decimal("0.40") * pressure * (Decimal("0.75") + Decimal("0.25") * spr_leverage)
+            + street_factor
+            + Decimal("0.04") * position_factor
+            - Decimal("0.14") * range_strength
         )
-        fold = min(Decimal("0.75"), max(Decimal("0.05"), fold))
-        raise_probability = (
-            Decimal("0.06") + Decimal("0.10") * range_strength
-            + (Decimal("0.04") if spr > Decimal("3") else _ZERO)
-            - Decimal("0.03") * size_ratio
+        single_fold = min(Decimal("0.68"), max(Decimal("0.04"), single_fold))
+        single_raise = (
+            Decimal("0.04") + Decimal("0.10") * range_strength
+            + Decimal("0.02") * spr_leverage - Decimal("0.025") * pressure
         )
-        raise_probability = min(Decimal("0.25"), max(Decimal("0.02"), raise_probability))
-        if fold + raise_probability > Decimal("0.9"):
-            raise_probability = Decimal("0.9") - fold
-        call = _ONE - fold - raise_probability
+        single_raise = min(Decimal("0.18"), max(Decimal("0.02"), single_raise))
+        if single_fold + single_raise > Decimal("0.9"):
+            single_raise = Decimal("0.9") - single_fold
+        opponents = max(1, len(observation.active_seats) - 1)
+        fold = single_fold ** opponents
+        no_raise = (single_fold + (_ONE - single_fold - single_raise)) ** opponents
+        raise_probability = _ONE - no_raise
+        call = no_raise - fold
         return SolverResponseMixV1(fold=fold, call=call, raise_=raise_probability)
 
     @staticmethod
@@ -776,8 +1018,8 @@ class FastSolver:
             else Decimal(str(math.sqrt(math.log(40) / (2 * max(1.0, float(ess))))))
         )
         return SolverConfidenceIntervalV1(
-            lower=equity - radius,
-            upper=equity + radius,
+            lower=max(_ZERO, equity - radius),
+            upper=min(_ONE, equity + radius),
         )
 
     def _unavailable(

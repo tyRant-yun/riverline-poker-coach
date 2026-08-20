@@ -6,7 +6,7 @@ does not choose a winner, solve a hand, or infer strategic explanations.
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Literal, Mapping
 
 from pydantic import ConfigDict, Field
@@ -58,10 +58,13 @@ class DecisionAgreementV1(_ReconciliationContractV1):
         Literal[
             "advisor_degraded", "solver_degraded", "solver_unavailable",
             "sizing_set_mismatch", "range_missing", "range_coarse",
-            "model_limitations", "unexplained",
+            "model_limitations", "solver_sizing_close", "solver_sizing_robust",
+            "extreme_sizing_not_robust", "solver_uncertainty_unavailable",
+            "unexplained",
         ], ...
     ]
     confidence_interval: ConfidenceIntervalAvailabilityV1
+    sizing_robustness: Literal["robust", "close", "not_available"] = "not_available"
 
 
 class DecisionReconciliationV1(_ReconciliationContractV1):
@@ -114,6 +117,7 @@ def reconcile_decision(
         hero_commitment=hero_commitment,
     )
     interval = _ci_availability(solver, solver_matches)
+    sizing_robustness = _sizing_robustness(solver, solver_matches)
     if baseline.action is None or estimate.action is None:
         kind = "insufficient_evidence"
     elif baseline.action.action is not estimate.action.action:
@@ -141,6 +145,20 @@ def reconcile_decision(
         reasons.append("range_coarse")
     if estimate.limitations:
         reasons.append("model_limitations")
+    if sizing_robustness == "close":
+        reasons.append("solver_sizing_close")
+        if estimate.action is not None and (
+            estimate.action.is_jam
+            or (
+                estimate.action.pot_pct is not None
+                and estimate.action.pot_pct > Decimal("100")
+            )
+        ):
+            reasons.append("extreme_sizing_not_robust")
+    elif sizing_robustness == "robust":
+        reasons.append("solver_sizing_robust")
+    elif solver_matches and solver.get("sizingRobustness") == "not_available":
+        reasons.append("solver_uncertainty_unavailable")
     if kind == "different_action" and not reasons:
         reasons.append("unexplained")
     status: Literal["ready", "degraded", "not_ready"]
@@ -154,7 +172,8 @@ def reconcile_decision(
         status=status, decision=identity, rule_baseline=baseline,
         simulation_estimate=estimate,
         agreement=DecisionAgreementV1(
-            kind=kind, reason_codes=tuple(dict.fromkeys(reasons)), confidence_interval=interval
+            kind=kind, reason_codes=tuple(dict.fromkeys(reasons)),
+            confidence_interval=interval, sizing_robustness=sizing_robustness,
         ),
     )
 
@@ -228,11 +247,32 @@ def _normalize_action(
 def _ci_availability(raw: Mapping[str, object], identity_matches: bool) -> ConfidenceIntervalAvailabilityV1:
     if not identity_matches or not isinstance(raw.get("recommendedAction"), Mapping):
         return ConfidenceIntervalAvailabilityV1(status="not_available")
+    margin = raw.get("robustnessMarginConfidenceInterval95")
+    if isinstance(margin, Mapping):
+        try:
+            lower = Decimal(str(margin.get("lower")))
+            upper = Decimal(str(margin.get("upper")))
+        except (InvalidOperation, TypeError, ValueError):
+            return ConfidenceIntervalAvailabilityV1(status="not_available")
+        if not lower.is_finite() or not upper.is_finite() or upper < lower:
+            return ConfidenceIntervalAvailabilityV1(status="not_available")
+        return ConfidenceIntervalAvailabilityV1(
+            status="available", overlap=lower <= Decimal("0") <= upper
+        )
     ci = raw["recommendedAction"].get("confidenceInterval95")
     if not isinstance(ci, Mapping) or not isinstance(ci.get("lower"), (int, float, str)) or not isinstance(ci.get("upper"), (int, float, str)):
         return ConfidenceIntervalAvailabilityV1(status="not_available")
     # Advisor has no EV interval, so overlap is deliberately not invented.
     return ConfidenceIntervalAvailabilityV1(status="available", overlap=None)
+
+
+def _sizing_robustness(
+    raw: Mapping[str, object], identity_matches: bool
+) -> Literal["robust", "close", "not_available"]:
+    value = raw.get("sizingRobustness")
+    if identity_matches and value in {"robust", "close", "not_available"}:
+        return value
+    return "not_available"
 
 
 def _text(value: object) -> str | None:
