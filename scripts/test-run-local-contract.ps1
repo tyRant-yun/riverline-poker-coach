@@ -14,6 +14,8 @@ Require-Text 'POKER_COACH_REDIS_URL"] = ""'
 Require-Text 'POKER_COACH_CORS_ORIGINS = $webUrl'
 Require-Text 'Start-Process -FilePath "py"'
 Require-Text 'Wait-ForHttpReady "$apiUrl/health" "Backend"'
+Require-Text 'exited before becoming ready'
+Require-Text 'Next.js development lock is already held'
 Require-Text 'Get-ChildProcessIds'
 Require-Text "Stop-StartedProcesses"
 Require-Text "-WindowStyle Hidden"
