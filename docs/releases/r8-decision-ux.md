@@ -8,10 +8,10 @@
 
 ## 结论
 
-- `source_release_ready: pending_independent_review_and_ci`
+- `source_release_ready: PASS`（2026-08-20 独立窄审无 P0/P1 + GitHub CI 精确环境全绿后由 Controller 更新）
 - `binary_or_container_release_ready: false`
 - `license_source_repository_release: PASS`
-- `release_gate_status: PENDING_INDEPENDENT_REVIEW_AND_CI`
+- `release_gate_status: PASS`
 
 首轮发布门发现的 source security P1 已在极窄授权范围内本地关闭：唯一直接依赖变更是 `next` 从精确版本 `16.1.0` 升至 `16.3.1`，React/React DOM 保持 `19.2.0`。lockfile 实际解析为 Next/PostCSS/Sharp `16.3.1/8.5.23/0.35.3`；`npm audit --audit-level=high` 终态为 `found 0 vulnerabilities`。完整 frontend unit、tsc、production build 与当前产品 Playwright 均通过。
 
@@ -109,9 +109,9 @@ Range fixture 没有同手上一快照，因此不伪造 Top mover；计时任�
 
 `docs/provenance/sbom.json` 的 `bundled_binary_container_release=FAIL`。npm/Python binary artifact integrity 与各平台 Sharp/libvips 实际捆绑、notice、corresponding-source 处理尚未闭合。因此禁止发布捆绑二进制或容器；这与 source license verdict PASS 及本地 audit 0 相互独立。
 
-## 最终解锁条件
+## 最终解锁条件（2026-08-20 全部闭合）
 
-1. 独立窄审 `7ccbc2d..1e6dee3` 中的 release-only 增量，确认依赖升级、Range overlay 修复与 E2E 证据无 P0/P1。
-2. GitHub CI 在仓库精确 Node 24.15.0 环境完成 clean install、`npm audit --audit-level=high`、完整 unit、tsc、production build 与当前产品 Playwright。
-3. 上述两项通过后，Controller 才可把 `source_release_ready` 从 `pending_independent_review_and_ci` 改为最终 PASS。
-4. Binary/container 发布继续保持禁止，直到 SBOM 对应 verdict 独立转为 PASS。
+1. ~~独立窄审 `7ccbc2d..1e6dee3` 中的 release-only 增量，确认依赖升级、Range overlay 修复与 E2E 证据无 P0/P1。~~ **PASS**：依赖升级范围外无变更；provenance 无本机 metadata；Range overlay 为单行 z-index 修复；E2E 契约诚实（Top-mover 不可用文案、四视口、Bot dwell、私牌清理）。
+2. ~~GitHub CI 在仓库精确 Node 24.15.0 环境完成 clean install、`npm audit --audit-level=high`、完整 unit、tsc、production build 与当前产品 Playwright。~~ **PASS**：PR #6 run `32389468721`，backend 1m57s（含 live PostgreSQL/Redis 回归）、frontend 2m7s（Node 24.15.0 clean install、174 unit、tsc、build、Playwright E2E）全绿。
+3. ~~上述两项通过后，Controller 才可把 `source_release_ready` 从 `pending_independent_review_and_ci` 改为最终 PASS。~~ **已完成**：`source_release_ready=PASS`。
+4. Binary/container 发布继续保持禁止，直到 SBOM 对应 verdict 独立转为 PASS。**保持**：`bundled_binary_container_release=FAIL`。

@@ -73,11 +73,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R8-03 Decision Reconciliation Contract | `/root/r8_03_reconciliation` | `completed` | `merged` | `codex/r8-03-reconciliation` | `ac72e2d` | `c3cfd55a69dc6629c3bb10773784a3ce21e20935` | [R8-03 handoff](handoffs/R8-03.md) | 23 focused backend tests; compileall PASS | R8-04/R8-05 | Integrated `708cc62..b870a31`; additive private-safe contract, no final arbitration |
 | R8-04 Solver Sizing Calibration | `/root/r8_04_solver_sizing` | `completed` | `merged` | `codex/r8-04-solver-sizing` | `3d2081b` | `ec1bb0b7fabdf4695acbe5b9f2b2f735b643612c` | [R8-04 handoff](handoffs/R8-04.md) | 35 focused tests; API/reconciliation 11 passed; compileall; p95 35.877ms | R8-05 | Integrated `69c4e16..b67e543`; uncertainty covers sampling, not heuristic-model error |
 | R8-05 Product Evaluation | `/root/r8_05_product_eval` | `completed` | `merged` | `codex/r8-05-product-eval` | `671caa6` | `d68b250aebc6b372ce9639af16153eacfd941e0a` | [R8-05 handoff](handoffs/R8-05.md) | backend 19; UI 20; focused Playwright 3; build PASS; reduced-motion 11 PASS | final release gate | Integrated `9a69c12..f5a578e`; controlled two-hand and 5-second evidence deferred to release gate |
-| R8 Decision UX Productization | `/root` | `in_progress` | `pending_acceptance` | `codex/r8-decision-ux` | `72696f5b764406869d58fff4e3b1b0170189a4c5` | `a1799c5` | [R8 plan](../plans/r8-decision-cockpit-and-range-explorer.md) | Standards hard findings 0; Spec P0/P1 0 after narrow repairs | release gate | R8-01..05 integrated; final full gate and real user journey remain |
+| R8 Decision UX Productization | `/root` | `completed` | `merged` | `codex/r8-decision-ux` | `72696f5b764406869d58fff4e3b1b0170189a4c5` | `7ccbc2d` | [R8 plan](../plans/r8-decision-cockpit-and-range-explorer.md) | Standards hard findings 0; Spec P0/P1 0 after narrow repairs | R8-RELEASE | R8-01..05 integrated; final full gate and real user journey remain |
+| R8-RELEASE Source MVP Release Gate | `/root/r8_release_gate` | `completed` | `merged` | `codex/r8-release` | `7ccbc2d` | `593294b` | [R8-RELEASE handoff](handoffs/R8-RELEASE.md) | Backend 621 passed/10 live-PG skipped；frontend 174 tests/tsc/build/Playwright 7/7；npm audit 0；独立窄审 PASS（无 P0/P1）；GitHub CI run `32389468721` 全绿（含 live PostgreSQL/Redis、Node 24.15.0 clean install） | main 合并 | PR #6 `codex/r8-release`→main；`source_release_ready=PASS`；binary/container 发布继续禁止（SBOM FAIL） |
 
 ## 下一入口
 
-`R8 Release Gate`：从已完成整体双轴审查的集成 head 运行一次完整发布门，补齐受控两手牌与 5 秒任务证据；无 P0/P1 后生成发布报告并提交 GitHub。
+`R8 发布完成`：R8-RELEASE 已验收（独立窄审无 P0/P1 + GitHub CI run `32389468721` 全绿），PR #6 已合并 main；`source_release_ready=PASS`。后续为产品迭代（用户反馈驱动的 R9 计划）；binary/container 发布保持禁止，直到 SBOM bundled verdict 独立转为 PASS。
 
 ## MVP 执行策略
 
@@ -138,6 +139,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 - 2026-08-13：PR #2 远端 CI 首轮失败；只读诊断确认三个环境/测试契约根因：provenance 混入本机 metadata、Node 20 不满足锁定 jsdom/undici、live-PG fixture 混用固定 claim 时间与真实当前时钟。产品负责人已确认仅做三项最小兼容修复，不放宽恢复安全校验。
 - 2026-08-13：三项最小修复以 `e5d9044..8c46c8b` 集成；focused provenance 5 passed、Node contract 1 passed、claim/lease 6 passed。精确 Node 24.15 与 live PostgreSQL 证据交由 PR #2 GitHub CI，不重复本地完整门。
 - 2026-08-13：产品负责人授权按新产品闭环自主移除旧产品表面。Controller 冻结 R5 顺序：新产品壳 → 本地启动可靠性 → 复盘/数据体验 → 调用关系驱动的旧功能删除；复用原 Worker，最多两实现槽，独立审查只看 P0/P1 增量。
+- 2026-08-20：R8-RELEASE 交付（`82cde45` Range overlay P1 修复、`6e93229`/`593294b` 发布报告、`1e6dee3` Next 16.1.0→16.3.1 安全升级 + 再生 provenance、`r8-release-gate.spec.ts` 受控代理）与 handoff `R8-RELEASE.md`、Git diff、9 个 changed files 一致。独立窄审 `7ccbc2d..1e6dee3` 无 P0/P1：依赖升级范围外无变更、provenance 无本机 metadata、CSS 为单行 z-index 修复、E2E 契约诚实。GitHub CI run `32389468721` 全绿（backend 1m57s 含 live PostgreSQL/Redis、frontend 2m7s Node 24.15.0 clean install/174 unit/tsc/build/Playwright E2E）。PR #6 `codex/r8-release`→main 合并；`source_release_ready=PASS`、`release_gate_status=PASS`；binary/container 发布继续禁止（SBOM `bundled_binary_container_release=FAIL`）。
 
 ## 主控更新规则
 
