@@ -26,6 +26,11 @@ from .bot_providers import BLUEPRINT_PROFILE_IDS, build_bot_provider
 from .bot_runtime import BotRuntime
 from .auto_review import AutomaticReviewProjectionService
 from .contracts import ActionTakenPayloadV1, HandCompletedPayloadV1, HoleCardsRecordedPayloadV1
+from .decision_reconciliation import (
+    ReconciliationIdentityV1,
+    reconcile_decision,
+    unavailable_simulation,
+)
 from .event_store import ExpectedSequenceConflict, HandEventStore
 from .fast_solver import FastSolver
 from .formula_advisor import FormulaAdvisorFactory
@@ -283,6 +288,64 @@ class ContinuousTableService:
             decision_fingerprint=fingerprint,
             range_beliefs=range_beliefs,
             budget_tier=budget_tier,
+        ).to_dict()
+
+    def reconciliation(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
+        """Compare L0 and L1.5 for one frozen, current Hero decision snapshot."""
+
+        hand_id = request.get("handId")
+        fingerprint = request.get("decisionFingerprint")
+        budget_tier = request.get("budgetTier", "standard")
+        if not isinstance(hand_id, str) or not isinstance(fingerprint, str):
+            raise ContinuousTableError("invalid_reconciliation_request", "handId and decisionFingerprint are required strings")
+        if budget_tier not in {"quick", "standard", "deep"}:
+            raise ContinuousTableError("invalid_reconciliation_request", "budgetTier must be quick, standard, or deep")
+        with self._lock:
+            stored = self._recover(session_id)
+            metadata = self._metadata(session_id)
+            current = self._projection(stored, metadata)
+            if current["handId"] != hand_id:
+                raise ContinuousTableError("stale_decision", "reconciliation request is not for the current hand", conflict=True)
+            if current["fingerprint"] != fingerprint:
+                raise ContinuousTableError("stale_decision", "reconciliation request does not match the current decision", conflict=True)
+            hero = int(metadata["hero_seat"])
+            events = tuple(item.event for item in self.event_store.read(hand_id))
+            state = replay_hand(events).state
+            identity = ReconciliationIdentityV1(
+                fingerprint=fingerprint, hand_id=hand_id, sequence=events[-1].sequence,
+                street=state.street,
+            )
+            if not state.hand_in_progress or self._actor(events) != hero:
+                return _not_ready_reconciliation(identity).to_dict()
+            try:
+                observation = build_observation(
+                    events, observer_seat=hero, after_sequence=events[-1].sequence
+                )
+            except Exception:
+                # No private fallback is possible without a verified decision snapshot.
+                return _not_ready_reconciliation(identity).to_dict()
+        advisor = FormulaAdvisorFactory().create().evaluate(
+            observation, decision_fingerprint=fingerprint
+        ).to_dict()
+        try:
+            range_beliefs = PublicEventBeliefConsumer().beliefs_at(
+                _public_stream(events), observer_visible_cards=observation.own_hole_cards,
+            )
+        except Exception:
+            range_beliefs = None
+        try:
+            solver = self._fast_solver.solve(
+                observation, decision_fingerprint=fingerprint,
+                range_beliefs=range_beliefs, budget_tier=budget_tier,
+            ).to_dict()
+        except Exception:
+            # L0 must remain a usable independent baseline if L1.5 fails.
+            solver = unavailable_simulation(identity)
+        return reconcile_decision(
+            identity=identity, legal_actions=observation.legal_actions, pot=observation.pot,
+            hero_stack=observation.stacks[hero],
+            hero_commitment=observation.street_commitments[hero],
+            advisor=advisor, solver=solver,
         ).to_dict()
 
     def reviews(self, session_id: str, hand_id: str | None = None) -> dict[str, object]:
@@ -578,6 +641,21 @@ def _advisor_projection_fallback(
         "limitations": ["L0 fallback uses only current public facts, Hero visibility, and legal actions."],
         "decision": {"fingerprint": fingerprint, "handId": hand_id, "sequence": sequence, "street": street},
     }
+
+
+def _not_ready_reconciliation(identity: ReconciliationIdentityV1):
+    from .decision_reconciliation import reconcile_decision
+
+    unavailable = unavailable_simulation(identity, reason="not_hero_decision")
+    return reconcile_decision(
+        identity=identity, legal_actions=(), pot=0, hero_stack=0, hero_commitment=0,
+        advisor={
+            "status": "not_ready", "recommendedAction": None,
+            "source": "deterministic_formula", "version": "formula-advisor/v1",
+            "limitations": ["L0 Advisor is only applicable to an active Hero decision."],
+            "decision": identity.to_dict(),
+        }, solver={**unavailable, "status": "not_ready"},
+    )
 
 
 def _required_text(request: dict[str, object], name: str) -> str:
