@@ -2,92 +2,116 @@
 
 日期：2026-08-20  
 分支：`codex/r8-release`  
-精确基线：`7ccbc2d43e8f3271cfe0a3225c0bf39d6b0396b8`  
-发布门 delivery：`82cde45027bb4ac16457ab467afca7dfd0ae894a`
+精确集成基线：`7ccbc2d43e8f3271cfe0a3225c0bf39d6b0396b8`
+首轮发布门 delivery：`82cde45027bb4ac16457ab467afca7dfd0ae894a`
+依赖安全 follow-up delivery：`1e6dee37e59d9b72f7098939508f4e259dbeb326`
 
 ## 结论
 
-- `source_release_ready: false`
+- `source_release_ready: pending_independent_review_and_ci`
 - `binary_or_container_release_ready: false`
 - `license_source_repository_release: PASS`
-- `release_gate_status: BLOCKED`
+- `release_gate_status: PENDING_INDEPENDENT_REVIEW_AND_CI`
 
-R8 功能、构建、本地启动与产品交互证据在本地 SQLite/no Redis 范围内闭合，且没有遗留的已知功能 P0/P1。发布仍被一个新发现的依赖安全 P1 阻塞：`npm audit --json` 报告 3 个 high severity 依赖项（直接依赖 `next@16.1.0`，以及其 `postcss`、`sharp` 传递链），npm 给出的可用修复是 `next@16.3.1`。本任务明确禁止依赖升级，因此没有修改 `package.json` 或 lockfile，也没有把 source release 宣称为可发布。
+首轮发布门发现的 source security P1 已在极窄授权范围内本地关闭：唯一直接依赖变更是 `next` 从精确版本 `16.1.0` 升至 `16.3.1`，React/React DOM 保持 `19.2.0`。lockfile 实际解析为 Next/PostCSS/Sharp `16.3.1/8.5.23/0.35.3`；`npm audit --audit-level=high` 终态为 `found 0 vulnerabilities`。完整 frontend unit、tsc、production build 与当前产品 Playwright 均通过。
 
-另外，发布门发现并最小修复了一个 Range Explorer 可操作性 P1：overlay 的 `z-index:20` 低于 sticky app header 的 `z-index:50`，1280×720 下关闭按钮会被 header 截获。修复把 overlay 提升至 `z-index:60`，focused 当前产品 E2E 已通过；在合并或发布前仍需对 `82cde45027bb4ac16457ab467afca7dfd0ae894a` 做独立窄审。
+这不是最终发布声明。仓库要求 Node `24.15.0`，本机实测为 `24.18.0`；此外依赖 delivery 与发布 E2E 仍需独立窄审。只有独立审查与 GitHub CI 精确环境门均通过后，Controller 才能把 source readiness 改为最终 PASS。
+
+Binary/container publication 继续明确禁止。更新后的 SBOM source verdict 为 PASS，但 bundled binary/container verdict 仍为 FAIL。
+
+## 依赖安全修复
+
+升级前在 `27f7e6ad45a1af7a93745b0482dd92c39aa043c2` 实测：
+
+```text
+npm audit --audit-level=high --json
+exit 1; high=3; critical=0
+next@16.1.0 (direct), postcss<=8.5.22, sharp<0.35.0
+fixAvailable: next@16.3.1
+```
+
+升级后实测安装树：
+
+| Package | Version |
+|---|---:|
+| next | 16.3.1 |
+| @next/env | 16.3.1 |
+| @next/swc-win32-x64-msvc | 16.3.1 |
+| postcss（Next chain） | 8.5.23 |
+| sharp | 0.35.3 |
+| react | 19.2.0 |
+| react-dom | 19.2.0 |
+
+`npm ls next postcss sharp react react-dom --depth=1` 退出 0。精确终态命令 `npm audit --audit-level=high` 退出 0，输出 `found 0 vulnerabilities`。
+
+在线 clean install 遇到下载层瞬态：Next/SWC/Sharp 平台包通过 registry 的速度异常缓慢，多次安装在无 package error 的下载阶段被受控中止；IPv4 优先下载后本地缓存完整，`npm ci --offline --ignore-scripts --no-audit --no-fund` 成功安装 178 packages，随后显式安装 lockfile 已含的 Windows SWC 16.3.1 可选包。production build 和完整 Playwright 证明实际平台运行时可用。GitHub CI 仍是干净网络与精确 Node 24.15.0 的最终门。
 
 ## 质量门实测
 
 | 范围 | 原始命令 | 结果 |
 |---|---|---|
-| Backend 完整测试 | `cd backend; py -3.13 -m pytest -q` | 621 collected；611 passed；10 个 live PostgreSQL 测试在本地服务范围跳过；退出 0。 |
-| Python 编译 | `py -3.13 -m compileall -q backend/poker_coach` | 退出 0。 |
-| Python 依赖 | `py -3.13 -m pip check` | `No broken requirements found.` |
-| License/source 边界 | `py -3.13 tools/generate_license_provenance.py --root . --check` | `PASS`；已提交 SBOM 含 296 components；`source_repository_release=PASS`。 |
-| Frontend unit | `cd frontend; npm test` | 32 files / 174 tests passed。 |
-| TypeScript | `cd frontend; npm run lint` | `tsc --noEmit` 退出 0。 |
-| Production build | `cd frontend; npm run build` | Next 16 production build passed；`next-env.d.ts` 的 dev/build 生成改写已恢复，未进入 Git diff 或提交。 |
-| 完整当前产品 Playwright | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:13880 npx playwright test` | 5 passed / 2 failed。失败均为旧 E2E 契约漂移：旧 Solver 文案、已移除的 `skip` Bot speed option；未重复完整套件。 |
-| 失败项 focused 修订 | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:13880 npx playwright test e2e/mvp-shell.spec.ts e2e/r7-golden-journey.spec.ts` | `mvp-shell` passed；golden journey 因第二处旧英文 `Solver` 断言失败。 |
-| 真实两手 focused 终态 | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:13880 npx playwright test e2e/r7-golden-journey.spec.ts` | 1 passed，3.5s；真实 SQLite/no Redis 服务完成连续两手、Hero action、Advisor/Range/Solver 可用性、next hand、reload/reconnect 与私牌不泄漏检查。 |
-| R8 受控产品证据 | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:13880 npx playwright test e2e/r8-release-gate.spec.ts` | focused 终态 1 passed；完整 Playwright 中同项也 passed。覆盖 Bot seat action pill/dwell、Advisor/模拟估计分歧、Solver 全部尺度、Range Explorer、showdown、next hand、reconnect 与终局私牌清理。 |
-| 依赖安全 | `cd frontend; npm audit --json` | 退出 1；3 high / 0 critical。直接 `next@16.1.0` 与传递 `postcss`、`sharp`；fix available 指向 `next@16.3.1`。阻塞 source release。 |
-
-完整 Playwright 没有在测试修订后重跑，这是“一次且仅一次完整门”的明确约束。终态证据由完整套件中已通过的 5 项，加两项失败 spec 的 focused 终态通过组成；本报告不把它伪写成一次 7/7 的 post-repair 完整运行。
+| Backend 完整测试（首轮发布门） | `cd backend; py -3.13 -m pytest -q` | 621 collected；611 passed；10 个 live PostgreSQL 测试在本地服务范围跳过；退出 0。Frontend-only 安全 follow-up 未重复 backend。 |
+| Python 编译/依赖（首轮发布门） | `py -3.13 -m compileall -q backend/poker_coach`; `py -3.13 -m pip check` | 退出 0；`No broken requirements found.` |
+| License/source 边界（升级后） | `py -3.13 tools/generate_license_provenance.py --root .`; `py -3.13 tools/generate_license_provenance.py --root . --check` | 生成器与 `--check` 均 PASS；298 components；`source_repository_release=PASS`；`bundled_binary_container_release=FAIL`。 |
+| Frontend unit（升级后） | `cd frontend; npm test` | 32 files / 174 tests passed。 |
+| TypeScript（升级后） | `cd frontend; npm run lint` | `tsc --noEmit` 退出 0。 |
+| Production build（升级后） | `cd frontend; npm run build` | Next 16.3.1 production build passed；`next-env.d.ts` 生成改写未进入 delivery。 |
+| R8 E2E focused（证据修订后） | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:13880 npx playwright test e2e/r8-release-gate.spec.ts` | 首次因 SWC 首次下载未完成导致 `page.goto` 35s `ERR_ABORTED/frame detached`，未执行产品断言；SWC 安装完成后 1 passed / 4.8s，代理 54/42/10ms。 |
+| 当前产品完整 Playwright（升级后） | `PLAYWRIGHT_BASE_URL=http://127.0.0.1:13880 npx playwright test` | 7/7 passed，10.4s；真实两手 journey 2.7s；R8 代理 58/37/9ms。 |
+| 依赖安全（升级后） | `cd frontend; npm audit --audit-level=high` | 退出 0；`found 0 vulnerabilities`。 |
 
 ## 本地启动与清理
 
-执行：
+完整 Playwright 使用：
 
 ```powershell
 scripts/run-local.ps1 -ApiPort 18880 -WebPort 13880 -StartupTimeoutSeconds 120
 ```
 
-实测事实：
+- 默认 SQLite + no Redis，未使用外部服务。
+- API `/health` 与 Web 均返回 HTTP 200。
+- 本次升级后完整门启动根 PID 为 API `27716`、Web `16372`；仅清理这两个已核对根 PID 的子进程树。
+- 清理后 18880/13880 监听数均为 0。
+- Next dev 自动生成的 `frontend/AGENTS.md`、`frontend/CLAUDE.md` 与 `next-env.d.ts` dev import 均作为运行副作用清理，未提交。
 
-- 模式：默认 SQLite + no Redis，未使用 `-UseExternalServices`。
-- API：`http://127.0.0.1:18880/health` 返回 200，body `status=ok`。
-- Web：`http://127.0.0.1:13880` 返回 200。
-- 启动根 PID：API `7396`，Web `14424`；仅清理这两个已核对根 PID 的子进程树。
-- 清理后：18880 与 13880 的监听数均为 0，两个根 PID 均不存在。
+## R8 产品与窄审证据
 
-## R8 产品证据
+受控 Playwright 使用真实当前产品组件与确定性网络 fixture，属于 automated interaction proxy，不是人类可用性研究。升级后完整 Playwright 计时：
 
-受控 Playwright 使用真实当前产品组件与确定性网络 fixture，属于 automated interaction proxy，不是人类可用性研究。计时从可决策桌面稳定后开始：
-
-| 任务 | 完整 Playwright 实测 | 阈值 |
+| 任务 | 实测 | 阈值 |
 |---|---:|---:|
-| 定位并打开 Range Explorer | 84ms | ≤5000ms |
-| 定位 Solver 首选并展开全部 5 个尺度 | 56ms | ≤5000ms |
-| 定位 Advisor/Solver 分歧及原因 | 14ms | ≤5000ms |
+| 定位 Range Summary、识别 Top mover 状态并打开 Range Explorer | 58ms | ≤5000ms |
+| 定位 Solver 首选并展开全部 5 个尺度 | 37ms | ≤5000ms |
+| 定位 Advisor/Solver 分歧及原因 | 9ms | ≤5000ms |
 
-同一受控路径还验证：
+Range fixture 没有同手上一快照，因此不伪造 Top mover；计时任务明确断言用户可见的诚实解释：`Top movers 暂不可用：需同手、同座位的上一公开行动 Range 快照。`
 
-- Advisor 明确标为“规则基线”，Solver 明确标为“模拟估计”，分歧原因显示为“模型限制”，不做前端最终仲裁。
-- Solver 首选、pot%、筹码、EV、ΔEV CI、接近/极端尺度与全部尺度展开均来自 DTO fixture 的公开字段。
-- Range Summary 显示范围宽度、置信度、主要牌类；Explorer 169 格可展开并可实际关闭。
-- Bot 先显示 seat thinking，再显示 action pill；浏览器内 MutationObserver 断言可感知 dwell 不低于 700ms，随后 Hero 控件在 200ms 断言窗口内恢复。
-- 受控 showdown 只在终局显示对手 reveal，下一手和 reload/reconnect 后清除；非终局始终只有 Hero 的 hole-card 容器。
-- 1366×768、1440×900、1920×1080 与 1280×720 窄桌面当前产品 surface 均无水平页面滚动；静态 geometry/Explorer spec 同样通过。
+每个 1366×768、1440×900、1920×1080 与 1280×720 窄桌面都逐一断言：
 
-真实服务 golden journey 与受控证据的边界保持诚实：真实服务 spec 覆盖连续两手牌和 API/状态闭环，但牌局可以由弃牌结束，不强制生成 showdown；showdown reveal 与 dwell 的确定性断言由受控当前产品 spec 提供。
+- Hero seat 在牌桌水平中置且可见；Hero action 可达。
+- Decision Summary 在初始 viewport 可达。
+- Solver 默认候选精确为前三行，三行均在 viewport 可达。
+- Range Summary 在初始 viewport 可达。
+- 页面无水平滚动。
 
-## 已继承审查与未实测项
+同一路径继续覆盖 Bot seat thinking/action pill 与可感知 dwell、Advisor 规则基线与 Solver 模拟估计/分歧原因、Solver 全部尺度、Range Explorer、showdown、next hand、reload/reconnect 与终局私牌清理。真实服务 golden journey 覆盖连续两手与 API/状态闭环；受控 fixture 提供确定性 showdown/dwell 断言。
 
-- 整体双轴审查由上游完成：Standards hard findings = 0；Spec P0/P1 = 0。该结果是本任务输入，不是本发布 Worker 重复执行的审查。
-- 本任务新增 `82cde45` 后，需要独立窄审 Range Explorer 层级修复与发布 E2E，不得把上游审查结果继承为对新 diff 的审查。
-- live PostgreSQL、外部 Redis、二进制/容器实际捆绑、对应源码/notice 处理未实测。
-- 仓库要求 Node `24.15.0`；本机实测为 Node `24.18.0`，因此精确 Node engine 验证未完成。
-- 没有人类参与 5 秒任务；这里只报告自动化操作代理。
-- `npm audit` 安全阻塞未修复；本任务禁止依赖升级。
+## 剩余风险与未实测项
+
+- 依赖安全 delivery `1e6dee37e59d9b72f7098939508f4e259dbeb326` 及首轮 UI P1 delivery `82cde45027bb4ac16457ab467afca7dfd0ae894a` 尚待独立窄审；上游 Standards/Spec review 不覆盖这些新 diff。
+- 精确 Node 24.15.0 未在本机测量；本机为 24.18.0。GitHub CI 必须复跑 audit、unit、tsc、build 与当前产品 Playwright。
+- live PostgreSQL、外部 Redis 未在 follow-up 中测试；本次变更限于 frontend dependency/E2E/provenance。
+- 没有人类参与 5 秒任务；这里只报告自动化交互代理。
+- 在线 npm/SWC 下载出现明显网络瞬态；本地功能门最终通过，但 CI 的干净安装仍是必要证据。
+- Binary/container 实际捆绑、artifact integrity、notice/corresponding-source 处理未闭合。
 
 ## Binary/container 边界
 
-`docs/provenance/sbom.json` 的 `bundled_binary_container_release=FAIL`。主要原因是 npm/Python 组件缺少可验证的 binary artifact integrity hash，以及各平台 `sharp/libvips` 实际捆绑二进制、notice 与 corresponding-source 处理尚未验证。因此禁止发布捆绑二进制或容器，与 source license verdict PASS 相互独立。
+`docs/provenance/sbom.json` 的 `bundled_binary_container_release=FAIL`。npm/Python binary artifact integrity 与各平台 Sharp/libvips 实际捆绑、notice、corresponding-source 处理尚未闭合。因此禁止发布捆绑二进制或容器；这与 source license verdict PASS 及本地 audit 0 相互独立。
 
-## 解锁条件
+## 最终解锁条件
 
-1. Controller/产品负责人授权独立依赖升级任务，将 Next 升级至包含 npm advisory 修复的版本（npm 当前建议 `16.3.1`），按受影响范围重跑 unit、tsc、build、当前产品 Playwright、license provenance 与 `npm audit`。
-2. 独立窄审 `82cde45027bb4ac16457ab467afca7dfd0ae894a`，确认 Range Explorer 层级修复与测试没有 P0/P1。
-3. 只有安全审计无阻塞 high/critical 且窄审通过后，才能把 `source_release_ready` 改为 `true`。
-4. Binary/container 发布继续保持禁止，直到 SBOM 中对应 verdict 独立转为 PASS。
+1. 独立窄审 `7ccbc2d..1e6dee3` 中的 release-only 增量，确认依赖升级、Range overlay 修复与 E2E 证据无 P0/P1。
+2. GitHub CI 在仓库精确 Node 24.15.0 环境完成 clean install、`npm audit --audit-level=high`、完整 unit、tsc、production build 与当前产品 Playwright。
+3. 上述两项通过后，Controller 才可把 `source_release_ready` 从 `pending_independent_review_and_ci` 改为最终 PASS。
+4. Binary/container 发布继续保持禁止，直到 SBOM 对应 verdict 独立转为 PASS。
