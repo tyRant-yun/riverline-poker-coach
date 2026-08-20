@@ -12,7 +12,7 @@ from enum import Enum
 from hashlib import sha256
 from threading import Lock
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 from poker_coach.domain.models import Card, DomainModel, Street
 from poker_coach.simulator.contracts import (
@@ -26,12 +26,60 @@ from .seat_priors import SeatPriorQueryV1, SeatPriorResultV1, SeatPriorUnavailab
 
 _VERSION = "heuristic_likelihood_v2"
 _FINGERPRINT = sha256(b"riverline/public-event-belief/heuristic_likelihood_v2/public-size-street-position-spr-hand-features").hexdigest()
+
+
+class _ImmutableDict(dict[str, RangeBeliefCombo]):
+    """JSON-compatible dict whose mutation surface is fully disabled."""
+
+    def _blocked(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError("cached range values are immutable")
+
+    __setitem__ = _blocked
+    __delitem__ = _blocked
+    clear = _blocked
+    pop = _blocked
+    popitem = _blocked
+    setdefault = _blocked
+    update = _blocked
+    __ior__ = _blocked
+
+
+class _ImmutableRangeBeliefCombo(RangeBeliefCombo):
+    model_config = ConfigDict(frozen=True)
+
+
+class _ImmutableRangeUpdateMetadata(RangeUpdateMetadata):
+    model_config = ConfigDict(frozen=True)
+
+
+class _ImmutableRangeBeliefSnapshot(RangeBeliefSnapshot):
+    model_config = ConfigDict(frozen=True)
+
+
 _BLOCKER_CACHE_MAX = 48
 _BLOCKER_CACHE: OrderedDict[
     tuple[int, tuple[Card, ...], int, Street],
     tuple[RangeBeliefSnapshot, RangeBeliefSnapshot],
 ] = OrderedDict()
 _BLOCKER_CACHE_LOCK = Lock()
+_ACTION_CACHE_MAX = 64
+_ACTION_CACHE: OrderedDict[
+    tuple[object, ...], tuple[RangeBeliefSnapshot, RangeBeliefSnapshot]
+] = OrderedDict()
+_ACTION_CACHE_LOCK = Lock()
+_ACTION_DISTRIBUTION_CACHE_MAX = 64
+_ACTION_DISTRIBUTION_CACHE: OrderedDict[
+    tuple[object, ...],
+    tuple[
+        RangeBeliefSnapshot, dict[str, RangeBeliefCombo], Decimal, str, Decimal
+    ],
+] = OrderedDict()
+_ACTION_DISTRIBUTION_CACHE_LOCK = Lock()
+_IMMUTABLE_SNAPSHOT_CACHE_MAX = 32
+_IMMUTABLE_SNAPSHOT_CACHE: OrderedDict[
+    int, tuple[RangeBeliefSnapshot, _ImmutableRangeBeliefSnapshot]
+] = OrderedDict()
+_IMMUTABLE_SNAPSHOT_CACHE_LOCK = Lock()
 _BELIEF_CACHE_MAX = 12
 _BELIEF_CACHE: OrderedDict[
     tuple[object, ...], dict[int, "SeatBeliefResultV1"]
@@ -75,6 +123,14 @@ class SeatBeliefResultV1(DomainModel):
         if self.available == (self.unavailable_reason is not None):
             raise ValueError("unavailable reason must appear exactly on unavailable results")
         return self
+
+
+class _ImmutableSeatBeliefProvenance(SeatBeliefProvenanceV1):
+    model_config = ConfigDict(frozen=True)
+
+
+class _ImmutableSeatBeliefResult(SeatBeliefResultV1):
+    model_config = ConfigDict(frozen=True)
 
 
 class PublicEventBeliefConsumer:
@@ -151,16 +207,17 @@ class PublicEventBeliefConsumer:
                     payload, stacks, street_contributions
                 )
                 likelihood_amount = contribution if payload.amount is not None else None
+                cache_transition = event.sequence < target
                 if payload.action is SimulatorActionV1.FOLD:
                     inactive_seats.add(payload.actor_seat)
                     snapshots[payload.actor_seat] = _mark_inactive(
                         snapshots[payload.actor_seat], payload, event.sequence, context,
-                        likelihood_amount,
+                        likelihood_amount, cache_transition,
                     )
                 else:
                     snapshots[payload.actor_seat] = _apply_action(
                         snapshots[payload.actor_seat], payload, event.sequence, context,
-                        likelihood_amount,
+                        likelihood_amount, cache_transition,
                     )
                 pot = _advance_public_state(
                     payload, pot, stacks, street_contributions, contribution
@@ -168,8 +225,9 @@ class PublicEventBeliefConsumer:
         results = {seat: SeatBeliefResultV1(seat_id=seat, after_sequence=target, available=True, prior=prior_snapshots[seat],
             current=snapshots[seat], provenance=SeatBeliefProvenanceV1(), inactive=seat in inactive_seats,
             approximate=True, approximation_reason=priors[seat].coverage.approximation_reason or "bounded_public_likelihood_v2") for seat in snapshots}
-        _belief_cache_put(belief_cache_key, results)
-        return results
+        immutable_results = _immutable_beliefs(results)
+        _belief_cache_put(belief_cache_key, immutable_results)
+        return dict(immutable_results)
 
 
 def _apply_action(
@@ -178,17 +236,66 @@ def _apply_action(
     sequence: int,
     context: PublicActionContext,
     likelihood_amount: int | None,
+    cache_transition: bool,
 ) -> RangeBeliefSnapshot:
-    weighted = {
-        key: combo.reach * likelihood(
-            key, action.action, action.street, likelihood_amount, context
+    cache_key = (
+        id(snapshot), action.street, action.actor_seat, action.action,
+        action.amount, action.amount_semantics, sequence, context,
+        likelihood_amount,
+    )
+    if cache_transition:
+        with _ACTION_CACHE_LOCK:
+            cached = _ACTION_CACHE.get(cache_key)
+            if cached is not None and cached[0] is snapshot:
+                _ACTION_CACHE.move_to_end(cache_key)
+                return cached[1]
+    distribution_key = (
+        id(snapshot), action.action, action.street,
+        size_bucket(action.action, likelihood_amount, context.pot_before),
+        context.board, context.position, spr_bucket(context.spr),
+    )
+    probe_key = next(iter(snapshot.combos))
+    probe_likelihood = likelihood(
+        probe_key, action.action, action.street, likelihood_amount, context
+    )
+    with _ACTION_DISTRIBUTION_CACHE_LOCK:
+        distribution = _ACTION_DISTRIBUTION_CACHE.get(distribution_key)
+        if (
+            distribution is not None
+            and distribution[0] is snapshot
+            and distribution[3] == probe_key
+            and distribution[4] == probe_likelihood
+        ):
+            _ACTION_DISTRIBUTION_CACHE.move_to_end(distribution_key)
+        else:
+            distribution = None
+    if distribution is None:
+        weighted = {
+            key: combo.reach * (
+                probe_likelihood if key == probe_key else likelihood(
+                    key, action.action, action.street, likelihood_amount, context
+                )
+            )
+            for key, combo in snapshot.combos.items()
+        }
+        mass = sum(weighted.values(), Decimal("0"))
+        combos = _normalized_combos(weighted, mass)
+        distribution = (
+            snapshot, combos, mass, probe_key, probe_likelihood
         )
-        for key, combo in snapshot.combos.items()
-    }
-    mass = sum(weighted.values(), Decimal("0"))
-    combos = _normalized_combos(weighted, mass)
+        with _ACTION_DISTRIBUTION_CACHE_LOCK:
+            _ACTION_DISTRIBUTION_CACHE[distribution_key] = distribution
+            _ACTION_DISTRIBUTION_CACHE.move_to_end(distribution_key)
+            while (
+                len(_ACTION_DISTRIBUTION_CACHE)
+                > _ACTION_DISTRIBUTION_CACHE_MAX
+            ):
+                _ACTION_DISTRIBUTION_CACHE.popitem(last=False)
+    else:
+        combos = distribution[1]
+        mass = distribution[2]
     reason = change_reason(action.action, action.street, likelihood_amount, context)
-    return RangeBeliefSnapshot.model_construct(snapshot_id=snapshot_id_for(snapshot.seat_id, action.street, sequence), seat_id=snapshot.seat_id,
+    result = RangeBeliefSnapshot.model_construct(snapshot_id=snapshot_id_for(snapshot.seat_id, action.street, sequence), seat_id=snapshot.seat_id,
         street=action.street, after_sequence=sequence, source=snapshot.source, confidence="heuristic",
         prior_mass=snapshot.retained_mass, retained_mass=mass, combos=combos, parent_snapshot_id=snapshot.snapshot_id,
         update=RangeUpdateMetadata(action_type=action.action.value, action_label=reason,
@@ -201,6 +308,13 @@ def _apply_action(
                 f"spr_bucket:{spr_bucket(context.spr)}", "hand_features:made-hand/draw-aware",
                 "not solver/GTO, player profile, or joint distribution",
             )))
+    if cache_transition:
+        with _ACTION_CACHE_LOCK:
+            _ACTION_CACHE[cache_key] = (snapshot, result)
+            _ACTION_CACHE.move_to_end(cache_key)
+            while len(_ACTION_CACHE) > _ACTION_CACHE_MAX:
+                _ACTION_CACHE.popitem(last=False)
+    return result
 
 
 def _mark_inactive(
@@ -209,9 +323,12 @@ def _mark_inactive(
     sequence: int,
     context: PublicActionContext,
     likelihood_amount: int | None,
+    cache_transition: bool,
 ) -> RangeBeliefSnapshot:
     """A fold updates the final marginal and removes the seat from future action."""
-    folded = _apply_action(snapshot, action, sequence, context, likelihood_amount)
+    folded = _apply_action(
+        snapshot, action, sequence, context, likelihood_amount, cache_transition
+    )
     return folded.model_copy(
         update={
             "update": folded.update.model_copy(
@@ -252,12 +369,12 @@ def _normalized_combos(weights: dict[str, Decimal], mass: Decimal) -> dict[str, 
     keys = tuple(sorted(weights))
     probabilities = {key: weights[key] / mass for key in keys[:-1]}
     probabilities[keys[-1]] = Decimal("1") - sum(probabilities.values(), Decimal("0"))
-    return {
-        key: RangeBeliefCombo.model_construct(
+    return _ImmutableDict({
+        key: _ImmutableRangeBeliefCombo.model_construct(
             combo=key, reach=weights[key], probability=probabilities[key]
         )
         for key in keys
-    }
+    })
 
 
 def _advance_public_state(
@@ -333,6 +450,84 @@ def _belief_cache_put(
         _BELIEF_CACHE.move_to_end(key)
         while len(_BELIEF_CACHE) > _BELIEF_CACHE_MAX:
             _BELIEF_CACHE.popitem(last=False)
+
+
+def _immutable_beliefs(
+    results: dict[int, SeatBeliefResultV1],
+) -> dict[int, SeatBeliefResultV1]:
+    immutable: dict[int, SeatBeliefResultV1] = {}
+    for seat, result in results.items():
+        values = {
+            name: getattr(result, name)
+            for name in SeatBeliefResultV1.model_fields
+        }
+        values["prior"] = _immutable_snapshot(result.prior, cache_value=True)
+        values["current"] = _immutable_snapshot(
+            result.current,
+            cache_value=(
+                result.current is not None
+                and result.current.after_sequence < result.after_sequence
+            ),
+        )
+        if result.provenance is not None:
+            values["provenance"] = _ImmutableSeatBeliefProvenance.model_construct(
+                **{
+                    name: getattr(result.provenance, name)
+                    for name in SeatBeliefProvenanceV1.model_fields
+                }
+            )
+        immutable[seat] = _ImmutableSeatBeliefResult.model_construct(
+            **values
+        )
+    return immutable
+
+
+def _immutable_snapshot(
+    snapshot: RangeBeliefSnapshot | None,
+    *,
+    cache_value: bool,
+) -> _ImmutableRangeBeliefSnapshot | None:
+    if snapshot is None:
+        return None
+    cache_key = id(snapshot)
+    if cache_value:
+        with _IMMUTABLE_SNAPSHOT_CACHE_LOCK:
+            cached = _IMMUTABLE_SNAPSHOT_CACHE.get(cache_key)
+            if cached is not None and cached[0] is snapshot:
+                _IMMUTABLE_SNAPSHOT_CACHE.move_to_end(cache_key)
+                return cached[1]
+    values = {
+        name: getattr(snapshot, name)
+        for name in RangeBeliefSnapshot.model_fields
+    }
+    if isinstance(snapshot.combos, _ImmutableDict):
+        values["combos"] = snapshot.combos
+    else:
+        values["combos"] = _ImmutableDict({
+            key: (
+                combo if isinstance(combo, _ImmutableRangeBeliefCombo)
+                else _ImmutableRangeBeliefCombo.model_construct(
+                    combo=combo.combo, reach=combo.reach,
+                    probability=combo.probability,
+                )
+            )
+            for key, combo in snapshot.combos.items()
+        })
+    if snapshot.update is not None:
+        values["update"] = _ImmutableRangeUpdateMetadata.model_construct(
+            **{
+                name: getattr(snapshot.update, name)
+                for name in RangeUpdateMetadata.model_fields
+            }
+        )
+    immutable = _ImmutableRangeBeliefSnapshot.model_construct(**values)
+    if cache_value:
+        with _IMMUTABLE_SNAPSHOT_CACHE_LOCK:
+            _IMMUTABLE_SNAPSHOT_CACHE[cache_key] = (snapshot, immutable)
+            _IMMUTABLE_SNAPSHOT_CACHE.move_to_end(cache_key)
+            while len(_IMMUTABLE_SNAPSHOT_CACHE) > _IMMUTABLE_SNAPSHOT_CACHE_MAX:
+                _IMMUTABLE_SNAPSHOT_CACHE.popitem(last=False)
+    return immutable
 
 
 def _unavailable_all(started: object, target: int, reason: SeatBeliefUnavailableReason) -> dict[int, SeatBeliefResultV1]:

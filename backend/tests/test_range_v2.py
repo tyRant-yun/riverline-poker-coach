@@ -6,8 +6,10 @@ from statistics import median, quantiles
 from time import perf_counter_ns
 
 import pytest
+from pydantic import ValidationError
 
 from poker_coach.domain.models import Street
+from poker_coach.ranges import event_beliefs as event_beliefs_module
 from poker_coach.ranges.event_beliefs import PublicEventBeliefConsumer
 from poker_coach.simulator.contracts import (
     ActionTakenPayloadV1,
@@ -168,6 +170,32 @@ def test_v2_same_public_prefix_ignores_rng_private_terminal_and_future_events():
     )
 
 
+def test_v2_complete_belief_cache_detaches_nested_values_across_calls_and_hands():
+    event = _event(1, _started(stack=12_345))
+    events = (event,)
+    consumer = PublicEventBeliefConsumer()
+
+    first = consumer.beliefs_at(events)
+    combo_keys = sorted(first[3].current.combos)
+    changed_key, removed_key = combo_keys[:2]
+    expected_reach = first[3].current.combos[changed_key].reach
+    with pytest.raises(ValidationError):
+        first[3].inactive = True
+    with pytest.raises(ValidationError):
+        first[3].current.combos[changed_key].reach = Decimal("0")
+    with pytest.raises(TypeError, match="immutable"):
+        first[3].current.combos.pop(removed_key)
+
+    repeated = consumer.beliefs_at(events)
+    other_hand = consumer.beliefs_at(
+        (event.model_copy(update={"event_id": "other-e1", "hand_id": "other-hand"}),)
+    )
+    for result in (repeated, other_hand):
+        assert result[3].inactive is False
+        assert result[3].current.combos[changed_key].reach == expected_reach
+        assert removed_key in result[3].current.combos
+
+
 def test_v2_reraise_to_uses_incremental_chips_for_bucket_and_likelihood():
     events = (
         _event(1, _started()),
@@ -230,8 +258,8 @@ def test_v2_river_busted_draw_has_no_future_card_likelihood_bonus(
     ) < Decimal("1e-24")
 
 
-def test_v2_six_max_current_decision_latency_gate():
-    events = (
+def _reachable_turn_decision_events(*, turn_bet: int) -> tuple[HandEventV1, ...]:
+    return (
         _event(1, _started()),
         _event(2, _public_action(street=Street.PREFLOP, actor=3, action=SimulatorActionV1.RAISE, amount=300)),
         _event(3, _public_action(street=Street.PREFLOP, actor=4, action=SimulatorActionV1.CALL, amount=300)),
@@ -245,17 +273,56 @@ def test_v2_six_max_current_decision_latency_gate():
         _event(11, _public_action(street=Street.FLOP, actor=3, action=SimulatorActionV1.BET, amount=600)),
         _event(12, _public_action(street=Street.FLOP, actor=4, action=SimulatorActionV1.CALL, amount=600)),
         _event(13, _public_action(street=Street.FLOP, actor=5, action=SimulatorActionV1.FOLD)),
-        _event(14, BoardDealtPayloadV1(street=Street.TURN, cards=("Jh",))),
-        _event(15, _public_action(street=Street.TURN, actor=3, action=SimulatorActionV1.CHECK)),
-        _event(16, _public_action(street=Street.TURN, actor=4, action=SimulatorActionV1.BET, amount=1_500)),
+        _event(14, _public_action(street=Street.FLOP, actor=0, action=SimulatorActionV1.CALL, amount=600)),
+        _event(15, _public_action(street=Street.FLOP, actor=1, action=SimulatorActionV1.FOLD)),
+        _event(16, _public_action(street=Street.FLOP, actor=2, action=SimulatorActionV1.FOLD)),
+        _event(17, BoardDealtPayloadV1(street=Street.TURN, cards=("Jh",))),
+        _event(18, _public_action(street=Street.TURN, actor=3, action=SimulatorActionV1.CHECK)),
+        _event(19, _public_action(street=Street.TURN, actor=4, action=SimulatorActionV1.BET, amount=turn_bet)),
     )
+
+
+def test_v2_six_max_current_decision_latency_gate(monkeypatch: pytest.MonkeyPatch):
     consumer = PublicEventBeliefConsumer()
     visible = ("As", "Qd")
+    original_likelihood = event_beliefs_module.likelihood
+    original_apply_action = event_beliefs_module._apply_action
+    likelihood_calls = 0
+    replay_action_calls = 0
 
-    for _ in range(10):
+    def counted_likelihood(*args: object, **kwargs: object) -> Decimal:
+        nonlocal likelihood_calls
+        likelihood_calls += 1
+        return original_likelihood(*args, **kwargs)
+
+    def counted_apply_action(*args: object, **kwargs: object):
+        nonlocal replay_action_calls
+        replay_action_calls += 1
+        return original_apply_action(*args, **kwargs)
+
+    monkeypatch.setattr(event_beliefs_module, "likelihood", counted_likelihood)
+    monkeypatch.setattr(
+        event_beliefs_module, "_apply_action", counted_apply_action
+    )
+
+    warmup_events = tuple(
+        _reachable_turn_decision_events(turn_bet=900 + index)
+        for index in range(10)
+    )
+    timed_events = tuple(
+        _reachable_turn_decision_events(turn_bet=1_000 + index)
+        for index in range(100)
+    )
+    for events in warmup_events:
+        with event_beliefs_module._BELIEF_CACHE_LOCK:
+            event_beliefs_module._BELIEF_CACHE.clear()
         consumer.beliefs_at(events, observer_visible_cards=visible)
     samples_ms = []
-    for _ in range(100):
+    for events in timed_events:
+        with event_beliefs_module._BELIEF_CACHE_LOCK:
+            event_beliefs_module._BELIEF_CACHE.clear()
+        calls_before = likelihood_calls
+        replay_calls_before = replay_action_calls
         started = perf_counter_ns()
         result = consumer.beliefs_at(events, observer_visible_cards=visible)
         summaries = [
@@ -267,11 +334,15 @@ def test_v2_six_max_current_decision_latency_gate():
         assert len(result) == 6
         assert all(seat.current is not None for seat in result.values())
         assert all("matrix169" in summary for summary in summaries)
+        assert likelihood_calls > calls_before
+        assert replay_action_calls - replay_calls_before == 16
+        del summaries, result
 
     p50 = median(samples_ms)
     p95 = quantiles(samples_ms, n=100, method="inclusive")[94]
     print(
-        "range_v2_latency scope=16-event-preflop-flop-turn-replay+5-opponent-169-projection "
+        "range_v2_latency scope=19-event-reachable-preflop-flop-turn-replay+5-opponent-169-projection "
+        "whole-result-cache=cleared action-spy=16 likelihood-spy=required "
         f"warmup=10 samples=100 p50={p50:.3f}ms p95={p95:.3f}ms"
     )
     assert p50 < 25
