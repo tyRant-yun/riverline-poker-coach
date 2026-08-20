@@ -95,6 +95,13 @@ export default function ContinuousTablePage() {
     continuousTableApi.get(sessionId).then((response) => hydrate(response.table, "snapshot")).catch((cause) => { window.localStorage.removeItem("riverline-continuous-table-session"); setError(cause instanceof Error ? cause.message : "无法重连牌桌"); }).finally(() => setBusy(false));
   }, []);
 
+  // The authoritative snapshot is allowed to advance through bot actions in
+  // one response.  A superseded visual queue must never keep a current Hero
+  // decision disabled after that response says it is Hero's turn again.
+  useEffect(() => {
+    if (table && table.currentActor === table.heroSeat) setPlaying(false);
+  }, [table?.currentActor, table?.fingerprint, table?.heroSeat]);
+
   async function create() {
     cancelPlayback(); setBusy(true); setError(null);
     try { const response = await continuousTableApi.create({ commandId: commandId("create"), botProfile: profile }); hydrate(response.table, "snapshot"); window.localStorage.setItem("riverline-continuous-table-session", response.table.sessionId); }
