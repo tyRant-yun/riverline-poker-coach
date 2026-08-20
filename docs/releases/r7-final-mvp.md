@@ -18,11 +18,17 @@ R7 源码 MVP 已达到验收标准：用户可在持续六人桌连续完成牌
 
 发布门基线：`adcf2eb65eefc3ed3627bde1b2101fb64b78b303`，分支：`codex/r7-08-release`。
 
-- Backend：完整测试收集 599 项，589 passed、10 个既有 live PostgreSQL/Redis 环境测试 skipped；`compileall` 与 `pip check` 通过。
+- Backend：本地发布门收集 599 项并通过 589 项，10 项 live PostgreSQL 环境测试因本机无服务而 skipped；`compileall` 与 `pip check` 通过。随后 PR #3 的 GitHub CI run `32358541597` 实际运行全部 599 项，结果为 598 passed、0 skipped、1 个 Range 性能门失败，因此 live PostgreSQL 路径已实测通过。
 - Frontend：32 files / 167 tests passed；`npx tsc --noEmit` 通过；标准 `npm run build`（Next.js 16 Turbopack）通过。
 - License：`py -3.13 tools/generate_license_provenance.py --check` 通过。
 - Browser：`continuous-table`、`local-experience`、`r7-golden-journey`、`table-v2-visual` 共 4 个 Playwright 测试通过。双手黄金旅程在 4.3 秒内完成，并覆盖实时洞察、终局、下一手、隐私和旧状态隔离。
 - Local runtime：`scripts/run-local.ps1` 在 SQLite/no-Redis 默认模式启动成功；同一专用端口停止后重启成功，API `/health` 返回 `ok`，Web 返回 HTTP 200。
+
+### PR #3 CI 性能修订
+
+GitHub runner 上，原 Range V2 benchmark 测得 p50 `35.667ms`、p95 `49.491ms`：p95 满足冻结的 `<50ms` 门，但 p50 未满足冻结的 `<25ms` 门。该失败未被改成 skip/xfail，也没有放宽产品阈值。
+
+窄诊断确认两个直接缓存热点：同一不可变 combo 分布因快照 metadata 不同而重复生成 169 projection；折牌 seat 在相邻决策重放时重复复制等价 inactive 快照，破坏后续 blocker/projection 缓存命中。修复为有界、带对象身份守卫的不可变结果复用，并新增两个先红后绿的回归测试。修复后同一完整 19-event/16-action/5-opponent benchmark 本机 p50 `2.095ms`、p95 `2.307ms`，Range V2 focused suite `86 passed`。修复提交后的 GitHub CI 复跑尚未由本任务实测。
 
 ## 本地体验
 
@@ -46,5 +52,5 @@ R7 源码 MVP 已达到验收标准：用户可在持续六人桌连续完成牌
 - Range V2 是第一方公开事件启发式独立边际 belief，不是校准人群模型、玩家画像或联合对手范围。
 - R7-06 HU River CFR/L2 已延期，不阻塞本次 MVP。
 - 源码仓库 provenance gate 已通过；包含原生依赖的 binary/container 仍需单独核验 LGPL 工件义务，本次未发布此类制品。
-- Live PostgreSQL/Redis 未在本次发布门中实测；相关 10 项测试保持 `measured: false`/skipped。
+- Live PostgreSQL 已由 PR #3 GitHub CI 实测通过；本地 SQLite/no-Redis 纵向路径仍独立通过。修复提交后的完整 CI 复跑尚未执行，不能继承为通过。
 - 仓库声明 Node.js `24.15.0`，本机实测为 `24.18.0`；测试与构建均通过，该补丁版本差异记录为非阻塞环境偏差。
