@@ -19,6 +19,7 @@ function botDeltas(previous: ContinuousTable | null, next: ContinuousTable): Act
   return delta.map((action, index) => ({
     id: `${next.sessionId}:${next.handId}:${action.sequence}`,
     actor: `Bot ${action.actorSeat + 1}`,
+    actorSeat: String(action.actorSeat),
     label: actionLabels[action.action] ?? action.action,
     kind: next.handComplete && index === delta.length - 1 ? "showdown" : action.action === "all_in" ? "all-in" : action.action === "raise" || action.action === "raise_to" ? "raise" : "action",
     ...(action.amount != null ? { potDelta: String(action.amount) } : {}),
@@ -38,7 +39,7 @@ export default function ContinuousTablePage() {
   const [solverElapsedMs, setSolverElapsedMs] = useState<number | null>(null);
   const [playbackActions, setPlaybackActions] = useState<readonly ActionDelta[]>([]);
   const [playbackIdentity, setPlaybackIdentity] = useState("initial");
-  const [playbackSpeed, setPlaybackSpeed] = useState<PlaybackSpeed>("standard");
+  const [playbackSpeed, setPlaybackSpeed] = useState<PlaybackSpeed>("comfort");
   const [playing, setPlaying] = useState(false);
   const tableRef = useRef<ContinuousTable | null>(null);
   const insightRequest = useRef(0);
@@ -84,7 +85,7 @@ export default function ContinuousTablePage() {
     setTable(next);
     setPlaybackActions(actions);
     setPlaybackIdentity(`${next.sessionId}:${next.handId ?? "none"}:${next.revision}:${actions.map((action) => action.id).join("/")}`);
-    setPlaying(actions.length > 0 && playbackSpeed !== "skip");
+    setPlaying(actions.length > 0 && playbackSpeed !== "skip" && playbackSpeed !== "instant");
     loadInsights(next); loadSolver(next); loadReview(next);
   }
 
@@ -130,6 +131,6 @@ export default function ContinuousTablePage() {
   return <section className="continuous-table" data-testid="continuous-table-page">
     {!table && <div className="panel-heading"><div><h2>持续牌桌</h2><p>Hero + 5 bots · 6-max · 100BB</p></div><label>Bot profile <select value={profile} disabled={busy} onChange={(event) => setProfile(event.target.value as typeof profile)} data-testid="bot-profile">{profiles.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><button className="primary" onClick={create} disabled={busy} data-testid="create-continuous-table">{busy ? "连接中…" : "开始牌桌"}</button></div>}
     {error && <p className="warning" role="alert">{error}</p>}
-    {table && <><div className="tv2-toolbar"><p data-testid="continuous-table-status">第 {table.handSequence} 手 · {table.street ?? "等待开局"} · {table.currentActor == null ? "本手结束" : `座位 ${table.currentActor + 1} 行动`}</p><label>Bot 播放 <select aria-label="Bot 播放速度" value={playbackSpeed} onChange={(event) => setPlaybackSpeed(event.target.value as PlaybackSpeed)}><option value="slow">慢速</option><option value="standard">标准</option><option value="fast">快速</option><option value="skip">跳过</option></select></label></div><TableWorkspaceV2 table={table} insights={insights} solver={solver} solverLoading={solverLoading} solverElapsedMs={solverElapsedMs} playbackActions={playbackActions} playbackIdentity={playbackIdentity} playbackSpeed={playbackSpeed} onPlaybackComplete={() => setPlaying(false)} actionDisabled={busy || playing} amounts={amounts} onAmountChange={(action, amount) => setAmounts((current) => ({ ...current, [action]: amount }))} onAction={submit} onNextHand={nextHand} review={review} /></>}
+    {table && <><div className="tv2-toolbar"><p data-testid="continuous-table-status">第 {table.handSequence} 手 · {table.street ?? "等待开局"} · {table.currentActor == null ? "本手结束" : `座位 ${table.currentActor + 1} 行动`}</p><label>Bot 节奏 <select aria-label="Bot 播放速度" value={playbackSpeed} onChange={(event) => setPlaybackSpeed(event.target.value as PlaybackSpeed)}><option value="comfort">舒适</option><option value="fast">快速</option><option value="instant">即时</option></select></label><button type="button" onClick={cancelPlayback} disabled={!playing}>跳过播放</button></div><TableWorkspaceV2 table={table} insights={insights} solver={solver} solverLoading={solverLoading} solverElapsedMs={solverElapsedMs} playbackActions={playbackActions} playbackIdentity={playbackIdentity} playbackSpeed={playbackSpeed} onPlaybackComplete={() => setPlaying(false)} actionDisabled={busy || playing} amounts={amounts} onAmountChange={(action, amount) => setAmounts((current) => ({ ...current, [action]: amount }))} onAction={submit} onNextHand={nextHand} review={review} /></>}
   </section>;
 }

@@ -9,46 +9,52 @@ import "../../styles/table-v2.css";
 
 export type SeatStatus = "current" | "folded" | "all-in" | "showdown" | "dealer" | "waiting";
 export type TableSeat = { id: string; name: string; stack: string; position: string; status: SeatStatus; cards?: string[] };
-export type ActionDelta = { id: string; actor: string; label: string; kind: "action" | "raise" | "all-in" | "showdown"; potDelta?: string };
-export type PlaybackSpeed = "slow" | "standard" | "fast" | "skip";
+export type ActionDelta = { id: string; actor: string; actorSeat?: string; label: string; kind: "action" | "raise" | "all-in" | "showdown"; potDelta?: string };
+export type PlaybackSpeed = "comfort" | "fast" | "instant" | "skip" | "slow" | "standard";
 export type Scheduler = { setTimeout: (fn: () => void, ms: number) => number; clearTimeout: (id: number | undefined) => void };
 
-const durations: Record<ActionDelta["kind"], number> = { action: 650, raise: 1000, "all-in": 1000, showdown: 1300 };
-const multipliers: Record<Exclude<PlaybackSpeed, "skip">, number> = { slow: 1.65, standard: 1, fast: 0.45 };
-const actionNames: Record<string, string> = { fold: "弃牌", check: "过牌", call: "跟注", bet: "下注", raise: "加注", raise_to: "加注", all_in: "全下" };
+const playbackTiming: Record<Exclude<PlaybackSpeed, "skip">, { think: number; readable: number; transition: number }> = {
+  comfort: { think: 450, readable: 750, transition: 150 }, standard: { think: 450, readable: 750, transition: 150 }, slow: { think: 600, readable: 900, transition: 200 }, fast: { think: 220, readable: 400, transition: 90 }, instant: { think: 0, readable: 0, transition: 0 },
+};
+const actionNames: Record<string, string> = { fold: "弃牌", check: "过牌", call: "跟注", bet: "下注", raise: "加注", raise_to: "加注", all_in: "全压" };
 
 export class ActionPlaybackQueue {
   private timer: number | undefined;
   private token = 0;
   constructor(private readonly scheduler: Scheduler, private readonly reducedMotion = false) {}
-  play(actions: readonly ActionDelta[], speed: PlaybackSpeed, onAction: (action: ActionDelta) => void, onComplete?: () => void) {
+  play(actions: readonly ActionDelta[], speed: PlaybackSpeed, onAction: (action: ActionDelta) => void, onComplete?: () => void, onThinking?: (action?: ActionDelta) => void) {
     this.cancel();
     const token = ++this.token;
-    if (speed === "skip" || this.reducedMotion) { actions.forEach(onAction); onComplete?.(); return; }
+    if (speed === "skip" || this.reducedMotion) { actions.forEach(onAction); onThinking?.(); onComplete?.(); return; }
     let index = 0;
     const next = () => {
       if (token !== this.token) return;
       const action = actions[index++];
-      if (!action) { onComplete?.(); return; }
-      onAction(action);
-      this.timer = this.scheduler.setTimeout(next, durations[action.kind] * multipliers[speed]);
+      if (!action) { onThinking?.(); onComplete?.(); return; }
+      const timing = playbackTiming[speed];
+      onThinking?.(action);
+      this.timer = this.scheduler.setTimeout(() => {
+        if (token !== this.token) return;
+        onAction(action); onThinking?.();
+        this.timer = this.scheduler.setTimeout(next, timing.readable + timing.transition);
+      }, timing.think);
     };
     next();
   }
   cancel() { this.token++; if (this.timer !== undefined) this.scheduler.clearTimeout(this.timer); this.timer = undefined; }
 }
 
-export function ActionPlaybackController({ actions, identity, speed, reducedMotion, scheduler, onChange, onComplete }: {
+export function ActionPlaybackController({ actions, identity, speed, reducedMotion, scheduler, onChange, onThinking, onComplete }: {
   actions: readonly ActionDelta[]; identity: string; speed: PlaybackSpeed; reducedMotion: boolean; scheduler?: Scheduler;
-  onChange: (action?: ActionDelta) => void; onComplete: () => void;
+  onChange: (action?: ActionDelta) => void; onThinking: (action?: ActionDelta) => void; onComplete: () => void;
 }) {
   const queue = useRef<ActionPlaybackQueue | null>(null);
-  const callbacks = useRef({ onChange, onComplete });
-  callbacks.current = { onChange, onComplete };
+  const callbacks = useRef({ onChange, onThinking, onComplete });
+  callbacks.current = { onChange, onThinking, onComplete };
   useEffect(() => {
     queue.current = new ActionPlaybackQueue(scheduler ?? window, reducedMotion);
-    if (!actions.length) { callbacks.current.onChange(undefined); callbacks.current.onComplete(); return () => queue.current?.cancel(); }
-    queue.current.play(actions, speed, (action) => callbacks.current.onChange(action), () => callbacks.current.onComplete());
+    if (!actions.length) { callbacks.current.onThinking(undefined); callbacks.current.onChange(undefined); callbacks.current.onComplete(); return () => queue.current?.cancel(); }
+    queue.current.play(actions, speed, (action) => callbacks.current.onChange(action), () => callbacks.current.onComplete(), (action) => callbacks.current.onThinking(action));
     return () => queue.current?.cancel();
   }, [actions, identity, speed, reducedMotion, scheduler]);
   return null;
@@ -70,12 +76,11 @@ function seatViews(table?: ContinuousTable): TableSeat[] {
   }));
 }
 
-export function PokerTableStageV2({ seats = defaultSeats, currentAction, board = ["Q♠", "J♥", "4♣"], pot = "1,240" }: { seats?: TableSeat[]; currentAction?: ActionDelta; board?: string[]; pot?: string }) {
+export function PokerTableStageV2({ seats = defaultSeats, currentAction, thinkingAction, board = ["Q♠", "J♥", "4♣"], pot = "1,240" }: { seats?: TableSeat[]; currentAction?: ActionDelta; thinkingAction?: ActionDelta; board?: string[]; pot?: string }) {
   return <section className="tv2-stage" aria-label="六人德州扑克牌桌">
     <div className="tv2-felt" />
     <div className="tv2-safe-zone" aria-label="底池与公共牌安全区"><div className="tv2-pot">底池 <strong>{pot}</strong></div><div className="tv2-board" aria-label="公共牌">{board.length ? board.map((card, index) => <i key={`${card}-${index}`}>{card}</i>) : <span>等待公共牌</span>}</div></div>
-    {seats.map((seat, index) => <article className={`tv2-seat tv2-seat-${index} ${seat.name === "Hero" ? "tv2-hero-seat" : ""} is-${seat.status}`} data-seat={seat.id} key={seat.id} aria-label={`${seat.position} ${seat.name} ${seat.status}`}><span className="tv2-position">{seat.position}</span><div className="tv2-avatar">{seat.name.slice(0, 1)}</div><div className="tv2-player"><b>{seat.name}</b><small>{seat.stack}</small></div>{seat.cards?.length ? <div className="tv2-holecards" aria-label="Hero 手牌">{seat.cards.map((card, cardIndex) => <i key={`${card}-${cardIndex}`} aria-label={card}>{card}</i>)}</div> : null}{seat.status === "folded" && <span className="tv2-fold">弃牌</span>}</article>)}
-    {currentAction && <div className="tv2-action-bubble" data-testid="bot-action-bubble" aria-live="polite">{currentAction.actor} · {currentAction.label}{currentAction.potDelta ? ` ${currentAction.potDelta}` : ""}</div>}
+    {seats.map((seat, index) => { const thinking = thinkingAction?.actorSeat === seat.id; const acted = currentAction?.actorSeat === seat.id; return <article className={`tv2-seat tv2-seat-${index} ${seat.name === "Hero" ? "tv2-hero-seat" : ""} is-${seat.status} ${thinking ? "is-thinking" : ""}`} data-seat={seat.id} key={seat.id} aria-label={`${seat.position} ${seat.name} ${thinking ? "思考中" : seat.status}`}><span className="tv2-position">{seat.position}</span><div className="tv2-avatar">{seat.name.slice(0, 1)}</div><div className="tv2-player"><b>{seat.name}</b><small>{seat.stack}</small></div>{thinking && <span className="tv2-seat-narrative" data-testid="bot-thinking">{seat.name} 思考中…</span>}{acted && <span className="tv2-seat-narrative tv2-action-pill" data-testid="bot-action-bubble" aria-live="polite">{currentAction.label}{currentAction.potDelta ? ` ${currentAction.potDelta}` : ""}</span>}{seat.cards?.length ? <div className="tv2-holecards" aria-label="Hero 手牌">{seat.cards.map((card, cardIndex) => <i key={`${card}-${cardIndex}`} aria-label={card}>{card}</i>)}</div> : null}{seat.status === "folded" && <span className="tv2-fold">弃牌</span>}</article>; })}
   </section>;
 }
 
@@ -111,6 +116,13 @@ function approximationLabel(reason?: string | null) {
 function percent(value?: string | number | null) {
   return value == null ? "—" : `${(Number(value) * 100).toFixed(1)}%`;
 }
+function chips(value?: string | number | null) { return value == null || !Number.isFinite(Number(value)) ? "—" : Math.round(Number(value)).toLocaleString("zh-CN"); }
+function ev(value?: string | number | null) { return value == null || !Number.isFinite(Number(value)) ? "—" : `${Number(value) >= 0 ? "+" : ""}${Number(value).toFixed(1)}`; }
+function candidateLabel(candidate: { action: string; amount?: number | null }, pot?: number) {
+  if (candidate.action === "all_in") return `全压${candidate.amount != null ? ` · ${pot && pot > 0 ? `${Math.round(Number(candidate.amount) / pot * 100)}% pot · ` : ""}${chips(candidate.amount)}` : ""}`;
+  const label = actionNames[candidate.action] ?? candidate.action;
+  return candidate.amount != null ? `${label}${pot && pot > 0 ? ` ${Math.round(Number(candidate.amount) / pot * 100)}% pot ·` : ""} ${chips(candidate.amount)}` : label;
+}
 function RangeHeatmap({ belief }: { belief: NonNullable<TableInsightsResponse["insights"]["seatBeliefs"]>[number] }) {
   const matrix = belief.matrix169;
   if (!matrix) return null;
@@ -125,13 +137,18 @@ function statText(stats: NonNullable<TableInsightsResponse["insights"]["stats"]>
   return stats.bySeat.map((stat) => `座位 ${stat.seatId + 1}：入池率 ${(stat.vpip * 100).toFixed(0)}% · 翻前加注率 ${(stat.pfr * 100).toFixed(0)}% · 3Bet ${(stat.threeBet * 100).toFixed(0)}%`).join("；");
 }
 
-export function InsightRailV2({ insights, solver, solverLoading = false, solverElapsedMs }: { insights?: TableInsightsResponse["insights"] | null; solver?: TableSolverResponse["solver"] | null; solverLoading?: boolean; solverElapsedMs?: number | null }) {
+export function InsightRailV2({ insights, solver, table, solverLoading = false, solverElapsedMs }: { insights?: TableInsightsResponse["insights"] | null; solver?: TableSolverResponse["solver"] | null; table?: ContinuousTable; solverLoading?: boolean; solverElapsedMs?: number | null }) {
   const [rangeSeatId, setRangeSeatId] = useState<number | null>(null);
   const range = insights?.seatBeliefs ?? [];
   const selectedRange = range.find((belief) => belief.seatId === rangeSeatId) ?? range.find((belief) => belief.available) ?? range[0];
-  const rangeContent = range.length ? <><div className="tv2-range-seats">{range.map((belief) => <button key={belief.seatId} aria-pressed={selectedRange?.seatId === belief.seatId} onClick={() => setRangeSeatId(belief.seatId)}>座位 {belief.seatId + 1}</button>)}</div>{selectedRange?.available ? <><p>范围宽度 {selectedRange.rangeWidthPct?.toFixed(1) ?? "—"}% · {selectedRange.rangeWidthCombos?.toFixed(0) ?? "—"} combos · 置信度 {selectedRange.confidenceScore != null ? `${(selectedRange.confidenceScore * 100).toFixed(0)}%` : selectedRange.confidence === "heuristic" ? "启发式" : selectedRange.confidence ?? "未提供"}</p><p>最近变化：{selectedRange.changeReason ?? "初始先验"}{selectedRange.approximate ? ` · ${approximationLabel(selectedRange.approximationReason)}` : ""}</p><RangeHeatmap belief={selectedRange} /><small>来源 {selectedRange.source} · 数据 {selectedRange.dataVersion ?? selectedRange.version ?? "未提供"}。限制：{selectedRange.limitations?.join("；") ?? "未提供"}</small></> : <p>{rangeMessage(selectedRange?.unavailableReason)}</p>}</> : <p>{rangeMessage()}</p>;
-  const solverContent = solverLoading ? <p>Fast Solver（standard）计算中；Advisor 仍可用。</p> : solver?.status === "ready" || solver?.status === "degraded" ? <><p>{solver.status === "degraded" ? "近似 EV 求解（降级）" : "近似 EV 求解"}，不是 GTO 或 Nash。</p><p>推荐：{solver.recommendedAction ? `${actionNames[solver.recommendedAction.action] ?? solver.recommendedAction.action}${solver.recommendedAction.amount != null ? ` ${solver.recommendedAction.amount}` : ""}` : "未返回"} · 预算 {solver.budgetTier ?? "旧响应"} / {solver.budgetMs ?? "—"}ms · {solver.confidence ?? "—"}</p><p>权益 {percent(solver.equity)} · 样本 {solver.sampleCount ?? solver.iterations} · ESS {solver.effectiveSampleSize ?? "—"} · 耗时 {solverElapsedMs != null ? `${solverElapsedMs}ms` : solver.elapsedMicroseconds != null ? `${Math.round(solver.elapsedMicroseconds / 1000)}ms` : "未测得"}</p>{solver.candidates.map((candidate) => <div className="tv2-ev" key={`${candidate.action}-${candidate.amount ?? ""}`}><span>{actionNames[candidate.action] ?? candidate.action}{candidate.amount != null ? ` ${candidate.amount}` : ""}</span><b>EV {candidate.approximateEvChips}</b><small>CI {candidate.confidenceInterval95 ? `${candidate.confidenceInterval95.lower}–${candidate.confidenceInterval95.upper}` : "—"} · 权益 {percent(candidate.showdownEquity)} · 弃牌 {percent(candidate.foldEquity)} · 样本 {candidate.sampleCount ?? "—"} / ESS {candidate.effectiveSampleSize ?? "—"} · 响应 F/C/R {candidate.responseMix ? `${percent(candidate.responseMix.fold)}/${percent(candidate.responseMix.call)}/${percent(candidate.responseMix.raise)}` : "—"}</small></div>)}<small>来源 {solver.source} · {solver.modelVersion ?? solver.version} · Range {solver.rangeStatus ?? "旧响应"}。限制：{solver.limitations.join("；") || "后端未返回限制"}</small></> : <p>{solver?.unavailableReason ?? "当前不是 Hero 决策；Solver 尚未就绪。"}</p>;
-  return <aside className="tv2-rail" data-testid="table-insights" aria-label="分析洞察"><section className="tv2-analysis-panel" aria-label="Range Belief"><h2>Range Belief</h2><p>座位独立边际估计，不含对手私牌</p>{rangeContent}</section><section className="tv2-analysis-panel" aria-label="Solver 结果"><h2>Solver</h2>{solverContent}</section></aside>;
+  const rangeContent = range.length ? <><div className="tv2-range-seats">{range.map((belief) => <button key={belief.seatId} aria-pressed={selectedRange?.seatId === belief.seatId} onClick={() => setRangeSeatId(belief.seatId)}>座位 {belief.seatId + 1}</button>)}</div>{selectedRange?.available ? <><p>范围宽度 {selectedRange.rangeWidthPct?.toFixed(1) ?? "—"}% · {selectedRange.rangeWidthCombos?.toFixed(0) ?? "—"} combos · 置信度 {selectedRange.confidenceScore != null ? `${(selectedRange.confidenceScore * 100).toFixed(0)}%` : selectedRange.confidence === "heuristic" ? "启发式" : selectedRange.confidence ?? "未提供"}</p><p>最近变化：{selectedRange.changeReason ?? "初始先验"}{selectedRange.approximate ? ` · ${approximationLabel(selectedRange.approximationReason)}` : ""}</p><small>{selectedRange.limitations?.join("；") ?? "构成分析将在 Range Explorer 中提供。"}</small></> : <p>{rangeMessage(selectedRange?.unavailableReason)}</p>}</> : <p>{rangeMessage()}</p>;
+  const advisor = insights?.advisor;
+  const advisorAction = advisor?.result?.recommendedAction;
+  const solverAction = solver?.recommendedAction ?? solver?.candidates?.slice().sort((a, b) => Number(b.approximateEvChips) - Number(a.approximateEvChips))[0];
+  const disagreement = Boolean(advisorAction && solverAction && advisorAction.action !== solverAction.action);
+  const ordered = solver?.candidates.slice().sort((a, b) => Number(b.approximateEvChips) - Number(a.approximateEvChips)) ?? [];
+  const solverContent = solverLoading ? <p>模拟估计计算中；规则基线仍可用。</p> : solver?.status === "ready" || solver?.status === "degraded" ? <><div className="tv2-ladder" aria-label="Solver Action Ladder">{ordered.slice(0, 3).map((candidate, index) => { const best = Number(ordered[0]?.approximateEvChips ?? 0); const delta = Number(candidate.approximateEvChips) - best; const extreme = candidate.action === "all_in" || (candidate.amount != null && table?.pot && Number(candidate.amount) / table.pot > 2); return <article key={`${candidate.action}-${candidate.amount ?? ""}`} className="tv2-ladder-row"><strong>{candidateLabel(candidate, table?.pot)}</strong><span>ΔEV {ev(delta)}</span><span>EV {ev(candidate.approximateEvChips)}</span>{candidate.confidenceInterval95 ? <small>CI {ev(candidate.confidenceInterval95.lower)}–{ev(candidate.confidenceInterval95.upper)}</small> : null}{index > 0 && Math.abs(delta) < .3 ? <small>与最佳接近</small> : null}{extreme ? <small className="risk">高风险尺度</small> : null}</article>; })}</div><details><summary>模型详情</summary><p>{solver.status === "degraded" ? "近似 EV 求解（降级）" : "近似 EV 求解"}，不是 GTO 或 Nash。</p><p>权益 {percent(solver.equity)} · 样本 {solver.sampleCount ?? solver.iterations} · ESS {solver.effectiveSampleSize ?? "—"} · 耗时 {solverElapsedMs != null ? `${solverElapsedMs}ms` : solver.elapsedMicroseconds != null ? `${Math.round(solver.elapsedMicroseconds / 1000)}ms` : "未测得"}</p>{ordered[0]?.responseMix ? <p>最佳候选响应 F/C/R {percent(ordered[0].responseMix.fold)}/{percent(ordered[0].responseMix.call)}/{percent(ordered[0].responseMix.raise)}</p> : null}<p>预算 {solver.budgetTier ?? "未提供"} / {solver.budgetMs ?? "—"}ms · 置信度 {solver.confidence ?? "未提供"}</p><p>限制：{solver.limitations.join("；") || "后端未返回限制"}</p></details></> : <p>{solver?.unavailableReason ?? "当前不是 Hero 决策；模拟估计尚未就绪。"}</p>;
+  return <aside className="tv2-rail" data-testid="table-insights" aria-label="决策驾驶舱"><section className="tv2-summary" aria-label="Decision Summary"><p>轮到 Hero · {table?.street ?? "等待开局"} · Pot {chips(table?.pot)}</p><div><span>规则基线</span><strong>Advisor：{advisor?.available && advisorAction ? candidateLabel(advisorAction, table?.pot) : advisor?.unavailableReason ?? "暂不可用"}</strong></div><div><span>模拟估计</span><strong>Solver：{solverAction ? candidateLabel(solverAction, table?.pot) : solverLoading ? "计算中" : "暂不可用"}</strong></div><b className={disagreement ? "disagreement" : "agreement"}>{disagreement ? "存在分歧 · 原因尚未确定" : advisorAction && solverAction ? "结论一致" : "等待可比较结果"}</b></section><section className="tv2-analysis-panel" aria-label="Solver 结果"><h2>模拟估计</h2>{solverContent}</section><section className="tv2-analysis-panel tv2-range-summary" aria-label="Range Belief"><h2>Range 摘要</h2><p>座位独立边际估计，不含对手私牌</p>{rangeContent}</section></aside>;
 }
 
 export function TableTimelineV2({ table }: { table: ContinuousTable }) {
@@ -145,7 +162,8 @@ export function TableWorkspaceV2({ table, insights, solver, solverLoading, solve
   amounts: Record<string, string>; onAmountChange: (action: string, amount: string) => void; onAction: (action: ContinuousTable["heroLegalActions"][number]) => void; onNextHand: () => void; review: TableReviewResponse["review"] | null;
 }) {
   const [currentAction, setCurrentAction] = useState<ActionDelta>();
+  const [thinkingAction, setThinkingAction] = useState<ActionDelta>();
   const reducedMotion = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const seats = useMemo(() => seatViews(table), [table]);
-  return <main className="tv2-workspace" data-testid="table-workspace-v2"><ActionPlaybackController actions={playbackActions} identity={playbackIdentity} speed={playbackSpeed} reducedMotion={reducedMotion} onChange={setCurrentAction} onComplete={() => { setCurrentAction(undefined); onPlaybackComplete(); }} /><PokerTableStageV2 seats={seats} currentAction={currentAction} board={table.board.map(formatCard)} pot={table.pot.toLocaleString("zh-CN")} /><InsightRailV2 insights={insights} solver={solver} solverLoading={solverLoading} solverElapsedMs={solverElapsedMs} /><TableTimelineV2 table={table} /><HeroActionDockV2 table={table} advisor={insights?.advisor} disabled={actionDisabled} amounts={amounts} onAmountChange={onAmountChange} onAction={onAction} onNextHand={onNextHand} review={review} /></main>;
+  return <main className="tv2-workspace" data-testid="table-workspace-v2"><ActionPlaybackController actions={playbackActions} identity={playbackIdentity} speed={playbackSpeed} reducedMotion={reducedMotion} onChange={setCurrentAction} onThinking={setThinkingAction} onComplete={() => { setThinkingAction(undefined); setCurrentAction(undefined); onPlaybackComplete(); }} /><PokerTableStageV2 seats={seats} currentAction={currentAction} thinkingAction={thinkingAction} board={table.board.map(formatCard)} pot={table.pot.toLocaleString("zh-CN")} /><InsightRailV2 table={table} insights={insights} solver={solver} solverLoading={solverLoading} solverElapsedMs={solverElapsedMs} /><TableTimelineV2 table={table} /><HeroActionDockV2 table={table} advisor={insights?.advisor} disabled={actionDisabled} amounts={amounts} onAmountChange={onAmountChange} onAction={onAction} onNextHand={onNextHand} review={review} /></main>;
 }

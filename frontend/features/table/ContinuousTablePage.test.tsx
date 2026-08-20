@@ -38,7 +38,7 @@ describe("ContinuousTablePage", () => {
     expect(screen.queryByLabelText("A♥")).not.toBeInTheDocument();
     expect(await screen.findByLabelText("Advisor 摘要")).toHaveTextContent("建议：过牌");
     expect(screen.getByLabelText("Range Belief")).toHaveTextContent("不含对手私牌");
-    expect(screen.getByLabelText("Solver 结果")).toHaveTextContent("fast-ev-solver/v1");
+    expect(screen.getByLabelText("Solver Action Ladder")).toBeInTheDocument();
   });
 
   it("uses the V2 workspace as the real table entry and renders backend table facts", async () => {
@@ -64,7 +64,7 @@ describe("ContinuousTablePage", () => {
     expect(await screen.findByLabelText("Advisor 摘要")).toHaveTextContent("建议：过牌");
     fireEvent.click(screen.getByTestId("hero-action-call"));
     await waitFor(() => expect(api.solver).toHaveBeenCalledTimes(2));
-    expect(screen.getByLabelText("Solver 结果")).toHaveTextContent("Fast Solver（standard）计算中");
+    expect(screen.getByLabelText("Solver 结果")).toHaveTextContent("模拟估计计算中；规则基线仍可用");
 
     resolveB!({ solver: { status: "degraded", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "call", amount: 100, approximateEvChips: "4" }], equity: "0.4", iterations: 20, source: "monte_carlo_uniform_opponents", version: "fast-ev-solver/v1", limitations: ["partial"] } });
     await waitFor(() => expect(screen.getByTestId("table-insights")).toHaveTextContent("近似 EV 求解（降级）"));

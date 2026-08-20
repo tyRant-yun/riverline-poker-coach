@@ -18,11 +18,18 @@ describe("Table V2 visual contracts", () => {
     expect(document.querySelector('[data-seat="hero"] .tv2-holecards')).not.toBeNull();
   });
 
-  it("plays in order, honors speed, cancellation, and reduced motion without sleeping", () => {
+  it("places the public Bot thought and action narrative beside its actor seat", () => {
+    render(<PokerTableStageV2 seats={[{ id: "2", name: "Bot 3", stack: "筹码 9,200", position: "UTG", status: "waiting" }, ...Array.from({ length: 5 }, (_, index) => ({ id: String(index + 3), name: `Seat ${index}`, stack: "筹码 100", position: `P${index}`, status: "waiting" as const }))]} thinkingAction={{ id: "think", actor: "Bot 3", actorSeat: "2", label: "", kind: "action" }} currentAction={{ id: "act", actor: "Bot 3", actorSeat: "2", label: "下注 66% ·", potDelta: "560", kind: "action" }} />);
+    expect(screen.getByTestId("bot-thinking")).toHaveTextContent("Bot 3 思考中");
+    expect(screen.getByTestId("bot-action-bubble")).toHaveTextContent("下注 66% · 560");
+    expect(document.querySelector('[data-seat="2"]')).toHaveClass("is-thinking");
+  });
+
+  it("plays public actions in order with seat thinking, readable timing, cancellation, and reduced motion", () => {
     const setTimeout = vi.fn((fn) => { fn(); return 1; }); const clearTimeout = vi.fn(); const scheduler = { setTimeout, clearTimeout };
     const seen: string[] = []; const queue = new ActionPlaybackQueue(scheduler, false);
-    queue.play(actions, "fast", (action) => seen.push(action.id));
-    expect(seen).toEqual(["a", "b"]); expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 292.5);
+    const thinking: string[] = []; queue.play(actions, "comfort", (action) => seen.push(action.id), undefined, (action) => thinking.push(action?.id ?? "done"));
+    expect(seen).toEqual(["a", "b"]); expect(thinking).toEqual(["a", "done", "b", "done", "done"]); expect(setTimeout).toHaveBeenCalledWith(expect.any(Function), 450);
     queue.cancel(); expect(clearTimeout).toHaveBeenCalled();
     const reduced: string[] = []; new ActionPlaybackQueue(scheduler, true).play(actions, "slow", (action) => reduced.push(action.id));
     expect(reduced).toEqual(["a", "b"]);
@@ -34,18 +41,18 @@ describe("Table V2 visual contracts", () => {
     fireEvent.keyDown(window, { key: "c" }); expect(action).not.toHaveBeenCalled();
   });
 
-  it("keeps Range heatmap and Solver evidence visible together without a tab switch", () => {
+  it("keeps Range summary and Solver evidence visible together without a tab switch", () => {
     render(<InsightRailV2 insights={{ available: true, advisor: { available: true, result: { status: "ready", recommendedAction: { action: "call", amountSemantics: "cost", reason: "price" }, source: "deterministic_formula", version: "v1", confidence: "high", explanationKey: "price", limitations: [], decision: { fingerprint: "fp", handId: "h1", sequence: 3, street: "flop" } } }, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, confidence: "heuristic", source: "riverline.heuristic_seed", version: "heuristic_seed_v2", approximate: true, approximationReason: "nearest_stack_bucket:100bb", changeReason: "公开行动：加注", limitations: ["这是独立边际估计，不含对手私牌。"], decision: { handId: "h1", afterSequence: 3 }, matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 }, AKs: { probabilityMass: "0.05", comboCount: 4 } }, topClasses: [{ hand: "AA", probabilityMass: "0.08" }] }], stats: { available: true, bySeat: [{ seatId: 1, vpip: 0.25, pfr: 0.18, threeBet: 0.07 }] } }} solver={{ status: "degraded", recommendedAction: null, candidates: [{ action: "call", approximateEvChips: "12.5" }], equity: "0.42", iterations: 80, source: "monte_carlo", version: "v1", limitations: ["uniform opponents"] }} solverElapsedMs={24} />);
-    expect(screen.getByLabelText("Range Belief")).toBeVisible(); expect(screen.getByLabelText("Solver 结果")).toBeVisible();
+    expect(screen.getByLabelText("Range Belief")).toBeVisible(); expect(screen.getByLabelText("Solver 结果")).toBeVisible(); expect(screen.getByLabelText("Decision Summary")).toHaveTextContent("规则基线");
     expect(screen.getByText(/范围宽度 28.5%/)).toBeInTheDocument(); expect(screen.getByText(/近似：100BB 最近档/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /座位 2/ })); expect(screen.getByLabelText("座位 2 Range 热图")).toBeInTheDocument(); expect(screen.getByTitle(/AA：概率质量 8.00%/)).toBeInTheDocument();
-    expect(screen.getByText(/不是 GTO 或 Nash/)).toBeInTheDocument(); expect(screen.getByText(/耗时 24ms/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /座位 2/ })); expect(screen.getByLabelText("Range Belief")).toHaveTextContent("最近变化：公开行动：加注");
+    expect(screen.getAllByText(/模拟估计/).length).toBeGreaterThanOrEqual(1); expect(screen.getAllByText(/跟注/).length).toBeGreaterThanOrEqual(1);
   });
   it("shows the additive Range V2 and Solver L1.5 provenance without requiring new fields from old responses", () => {
     render(<InsightRailV2 insights={{ available: true, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, rangeWidthCombos: 214, confidenceScore: 0.8, dataVersion: "range-v2.1", changeReason: "公开行动：加注", approximate: true, approximationReason: "nearest_stack_bucket:100bb", matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 } } }] }} solver={{ status: "ready", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "call", amount: 100, approximateEvChips: "12.5", showdownEquity: "0.42", foldEquity: "0", sampleCount: 80, effectiveSampleSize: "80", confidenceInterval95: { lower: "8", upper: "17" }, responseMix: { fold: "0", call: "1", raise: "0" } }], equity: "0.42", iterations: 80, sampleCount: 80, effectiveSampleSize: "80", budgetTier: "standard", budgetMs: 150, confidence: "coarse", source: "range_weighted_public_beliefs", rangeStatus: "ready", version: "fast-ev-solver/v1", modelVersion: "fast-ev-solver/v1.5", limitations: ["not GTO"] }} />);
     expect(screen.getByText(/214 combos · 置信度 80%/)).toBeInTheDocument();
-    expect(screen.getByText(/数据 range-v2.1/)).toBeInTheDocument();
-    expect(screen.getByText(/推荐：跟注 100 · 预算 standard \/ 150ms/)).toBeInTheDocument();
-    expect(screen.getByText(/CI 8–17 · 权益 42.0%/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Range Belief")).toHaveTextContent("范围宽度 28.5%");
+    expect(screen.getByLabelText("Decision Summary")).toHaveTextContent("Advisor：暂不可用");
+    expect(screen.getByLabelText("Solver Action Ladder")).toHaveTextContent("跟注 100");
   });
 });
