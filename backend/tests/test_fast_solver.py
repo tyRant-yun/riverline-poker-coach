@@ -8,7 +8,7 @@ from decimal import Decimal
 from itertools import combinations
 from types import SimpleNamespace
 
-from poker_coach.analysis.cards import best_hand_key, deck
+from poker_coach.analysis.cards import _best_hand_key_bruteforce, deck
 from poker_coach.simulator import FastSolver, LegalActionV1, ObservationV1
 
 
@@ -170,10 +170,10 @@ def test_fixed_river_range_matches_bruteforce_oracle_below_one_percentage_point(
     result = FastSolver(clock=lambda: 0).solve(
         observation, decision_fingerprint="river-oracle",
         range_beliefs=_ranges(_belief(1, combos)))
-    hero_key = best_hand_key(observation.own_hole_cards + observation.board)
+    hero_key = _best_hand_key_bruteforce(observation.own_hole_cards + observation.board)
     oracle = Decimal("0")
     for combo, weight in combos.items():
-        villain_key = best_hand_key((combo[:2], combo[2:]) + observation.board)
+        villain_key = _best_hand_key_bruteforce((combo[:2], combo[2:]) + observation.board)
         share = Decimal("1") if hero_key > villain_key else Decimal("0.5") if hero_key == villain_key else Decimal("0")
         oracle += Decimal(weight) * share
     assert result.equity is not None
