@@ -25,7 +25,19 @@ export class ActionPlaybackQueue {
   play(actions: readonly ActionDelta[], speed: PlaybackSpeed, onAction: (action: ActionDelta) => void, onComplete?: () => void, onThinking?: (action?: ActionDelta) => void) {
     this.cancel();
     const token = ++this.token;
-    if (speed === "skip" || this.reducedMotion) { actions.forEach(onAction); onThinking?.(); onComplete?.(); return; }
+    if (speed === "skip" || speed === "instant") { actions.forEach(onAction); onThinking?.(); onComplete?.(); return; }
+    if (this.reducedMotion) {
+      let index = 0;
+      const next = () => {
+        if (token !== this.token) return;
+        const action = actions[index++];
+        if (!action) { onThinking?.(); onComplete?.(); return; }
+        onAction(action); onThinking?.();
+        this.timer = this.scheduler.setTimeout(next, 750);
+      };
+      next();
+      return;
+    }
     let index = 0;
     const next = () => {
       if (token !== this.token) return;

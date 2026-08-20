@@ -34,8 +34,10 @@ describe("Table V2 visual contracts", () => {
     tasks.shift()!(); expect(thinking).toEqual(["a", "done", "b"]); tasks.shift()!(); expect(seen).toEqual(["a", "b"]); expect(setTimeout).toHaveBeenLastCalledWith(expect.any(Function), 900);
     tasks.shift()!(); expect(thinking.at(-1)).toBe("done");
     queue.cancel(); expect(clearTimeout).toHaveBeenCalled();
-    const reduced: string[] = []; new ActionPlaybackQueue(scheduler, true).play(actions, "slow", (action) => reduced.push(action.id));
-    expect(reduced).toEqual(["a", "b"]);
+    const reducedTasks: (() => void)[] = []; const reducedScheduler = { setTimeout: vi.fn((fn) => { reducedTasks.push(fn); return reducedTasks.length; }), clearTimeout: vi.fn() };
+    const reduced: string[] = []; new ActionPlaybackQueue(reducedScheduler, true).play(actions, "slow", (action) => reduced.push(action.id));
+    expect(reduced).toEqual(["a"]); expect(reducedScheduler.setTimeout).toHaveBeenCalledWith(expect.any(Function), 750);
+    reducedTasks.shift()!(); expect(reduced).toEqual(["a", "b"]); expect(reducedScheduler.setTimeout).toHaveBeenLastCalledWith(expect.any(Function), 750);
   });
 
   it("disables accessible hero controls and only submits backend legal actions", () => {
