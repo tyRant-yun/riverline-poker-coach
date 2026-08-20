@@ -63,11 +63,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R7-02I Advisor Type Fixture | `019ffa56-4dad-7751-a426-f54cff4f3ceb` | `completed` | `merged` | `codex/r7-02i-type-fixture` | `d2ece371be873eace5a79062702047ffcc0aac40` | `6aac88150b51df79c50e90bab9e315b97f8aca52` | [R7-02I handoff](handoffs/R7-02I.md) | tsc; TableWorkspaceV2 4/4; diff check PASS | current-snapshot release | Integrated as `a4e307f..dca70d4`; production logic unchanged |
 | R7 Current Snapshot Release | `019ff53a-fe87-7353-b7cc-ac3288f0553e` | `completed` | `merged` | `codex/r7-current-snapshot-release` | `e7ae8e83aa8392085465d71fa89c980d31ab40ae` | `76e2dcca9337a2c56e11b8c68b26c426cbc3553c` | [R7 release handoff](handoffs/R7-CURRENT-RELEASE.md) | Backend full PASS/10 skips; frontend 165 tests/tsc/build; license; Playwright 2 PASS | none | Integrated as `b4765fc..79b1f84`; current source snapshot ready for authorized GitHub PR/merge; binary/container publication remains excluded |
 | R7-04 Range V2 | `/root/r7_04_range_v2` | `completed` | `merged` | `codex/r7-04-range-v2` | `85e1b52ddd6300eddeb0976c8194d83102c4b508` | `fc487ae32a42ae81cdb551498a6583fffd2f6505` | [R7-04 handoff](handoffs/R7-04.md) | 84 focused PASS; compileall; truthful 19-event p50 19.181ms/p95 24.539ms; [R7-04R](handoffs/R7-04R.md) final PASS | R7-05 | Integrated `9593d39..b8e889e`; two FAIL reviews preserved; all four P1 closed, remaining P0/P1 none |
-| R7 Final MVP | `019ff338-3cbc-7d91-999d-0c44208c325e` | `in_progress` | `in_progress` | `codex/r7-final-mvp` | `b835b01b18c25a823631784b796f2b62878e4db9` | — | — | R7-03 adopted current evaluator; R7-04 integrated and privacy/performance accepted | R7-05 → R7-07 → R7-08 | Fast path excludes non-blocking HU River CFR R7-06; acceptance requires Solver L1.5, golden journey and one release gate |
+| R7-05 Fast Solver L1.5 | `/root/r7_05_solver_l15` | `completed` | `merged` | `codex/r7-05-solver-l15` | `11240329d8a20693a5bdef6e72fd45c2d29e5ae6` | `5c9023d6b0e3f32e6f897d30cd5810e151d9e0d5` | [R7-05 handoff](handoffs/R7-05.md) | 30 focused PASS; river MAE 0; standard p50 34.572ms/p95 36.828ms; [R7-05R](handoffs/R7-05R.md) final PASS | R7-07 | Integrated `54759b5..b0f8a52`; two FAIL reviews preserved; sampling/amount/response P1 closed, remaining P0/P1 none |
+| R7 Final MVP | `019ff338-3cbc-7d91-999d-0c44208c325e` | `in_progress` | `in_progress` | `codex/r7-final-mvp` | `b835b01b18c25a823631784b796f2b62878e4db9` | — | — | R7-03/04/05 complete; Range V2 and Solver L1.5 accepted | R7-07 → R7-08 | Fast path excludes non-blocking HU River CFR R7-06; acceptance requires golden journey and one release gate |
 
 ## 下一入口
 
-`R7-05 Fast Solver L1.5`：Range V2 已集成并通过最终隐私/性能审查。下一步只交付 range-aware sampling、多合法 sizing、一层响应、CI/ESS、三档预算和诚实降级；不启动 R7-06。
+`R7-07 Product Integration + Eval`：Range V2 与 Solver L1.5 已集成并通过最终窄审查。下一步只接当前同屏 UI/DTO，完成真实连续两手黄金旅程、旧异步状态、隐私与延迟门；随后进入 R7-08 一次发布门。
 
 ## MVP 执行策略
 
