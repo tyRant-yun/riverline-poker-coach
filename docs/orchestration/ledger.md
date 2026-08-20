@@ -67,10 +67,11 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R7-07 Product Integration + Eval | `/root/r7_07_product_integration` | `completed` | `merged` | `codex/r7-07-product-integration` | `cc13953a92d9e47c4b9b81ae3d3385db50ff25de` | `3a5b0dd` | [R7-07 handoff](handoffs/R7-07.md) | 13 focused Vitest; tsc; production build; continuous-table smoke; real SQLite two-hand golden journey 5.5s PASS | R7-08 | Integrated `65dbcef..e8e2177`; bot-transition control P1 closed, remaining P0/P1 none |
 | R7-08 Final MVP Release Gate | `/root/r7_08_release_gate` | `completed` | `merged` | `codex/r7-08-release` | `adcf2eb65eefc3ed3627bde1b2101fb64b78b303` | `c455ef002ca336a4133719937d27d19197ae17f8` | [R7-08 handoff](handoffs/R7-08.md) | Local full gate PASS; PR #4 run `32362755546`: backend incl. live PostgreSQL/Redis PASS, frontend build+current-product E2E PASS; Range/Solver narrow reviews PASS | none | Integrated `2b51281..6cbdbb4`; strict Range performance and Solver cold-start P1 closed; source ready, binary/container excluded |
 | R7 Final MVP | `019ff338-3cbc-7d91-999d-0c44208c325e` | `completed` | `merged` | `codex/r7-final-mvp` | `b835b01b18c25a823631784b796f2b62878e4db9` | `6cbdbb4` | [R7 final report](../releases/r7-final-mvp.md) | R7-03/04/05/07/08 complete; real two-hand journey and final GitHub backend/frontend gates PASS | none | Source MVP accepted with no P0/P1; R7-06 deferred; Solver L1.5 remains non-GTO; binary/container publication not authorized |
+| Local Startup Lock Recovery | `01a01ef7-0a9c-7880-aafd-7d5f7fe89534` | `completed` | `merged` | `codex/simulator-rebuild` | `fa72c37ea148192b4999fbb25f14438ff74b3945` | `a3ebc0db5d1c60cc5cac44b9791939db4090406a` | [startup handoff](handoffs/LOCAL-STARTUP-LOCK-RECOVERY.md) | launcher contract PASS; real API/Web HTTP 200; owned process cleanup and port release PASS | local user validation | Integrated as `a58cb71..f7b063c`; missing `frontend/node_modules` still requires `npm ci` and is now reported immediately |
 
 ## 下一入口
 
-`R7 Final MVP` 已完成源码验收，当前无活动工程任务。下一轮仅在用户体验反馈或 SaaS 阶段范围确认后启动；R7-06 与二进制/容器发布门继续保持 deferred。
+`LOCAL-MVP-USER-VALIDATION`：启动脚本恢复已验收。安装 lockfile 精确前端依赖后启动当前 MVP，下一轮仅根据真实体验反馈或 SaaS 阶段范围确认派发；R7-06 与二进制/容器发布门继续保持 deferred。
 
 ## MVP 执行策略
 
