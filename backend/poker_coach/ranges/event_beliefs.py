@@ -32,6 +32,11 @@ _BLOCKER_CACHE: OrderedDict[
     tuple[RangeBeliefSnapshot, RangeBeliefSnapshot],
 ] = OrderedDict()
 _BLOCKER_CACHE_LOCK = Lock()
+_BELIEF_CACHE_MAX = 12
+_BELIEF_CACHE: OrderedDict[
+    tuple[object, ...], dict[int, "SeatBeliefResultV1"]
+] = OrderedDict()
+_BELIEF_CACHE_LOCK = Lock()
 
 
 class SeatBeliefUnavailableReason(str, Enum):
@@ -88,6 +93,12 @@ class PublicEventBeliefConsumer:
             return _unavailable_all(events[0].payload, target, SeatBeliefUnavailableReason.PRIVATE_EVENT_FORBIDDEN)
         started = prefix[0].payload
         assert isinstance(started, HandStartedPayloadV1)
+        belief_cache_key = _belief_cache_key(
+            started, prefix, observer_visible_cards, target
+        )
+        cached_beliefs = _belief_cache_get(belief_cache_key)
+        if cached_beliefs is not None:
+            return cached_beliefs
         public_cards = tuple(card for event in prefix if isinstance(event.payload, BoardDealtPayloadV1) for card in event.payload.cards)
         query = SeatPriorQueryV1(table_size=started.table_size, active_seat_ids=started.active_seat_ids,
             button_seat=started.button_seat, small_blind=started.small_blind, big_blind=started.big_blind,
@@ -136,19 +147,29 @@ class PublicEventBeliefConsumer:
                     stack_before=stacks[payload.actor_seat],
                     position=position.value.lower() if position is not None else "unknown",
                 )
+                contribution = _incremental_contribution(
+                    payload, stacks, street_contributions
+                )
+                likelihood_amount = contribution if payload.amount is not None else None
                 if payload.action is SimulatorActionV1.FOLD:
                     inactive_seats.add(payload.actor_seat)
                     snapshots[payload.actor_seat] = _mark_inactive(
-                        snapshots[payload.actor_seat], payload, event.sequence, context
+                        snapshots[payload.actor_seat], payload, event.sequence, context,
+                        likelihood_amount,
                     )
                 else:
                     snapshots[payload.actor_seat] = _apply_action(
-                        snapshots[payload.actor_seat], payload, event.sequence, context
+                        snapshots[payload.actor_seat], payload, event.sequence, context,
+                        likelihood_amount,
                     )
-                pot = _advance_public_state(payload, pot, stacks, street_contributions)
-        return {seat: SeatBeliefResultV1(seat_id=seat, after_sequence=target, available=True, prior=prior_snapshots[seat],
+                pot = _advance_public_state(
+                    payload, pot, stacks, street_contributions, contribution
+                )
+        results = {seat: SeatBeliefResultV1(seat_id=seat, after_sequence=target, available=True, prior=prior_snapshots[seat],
             current=snapshots[seat], provenance=SeatBeliefProvenanceV1(), inactive=seat in inactive_seats,
             approximate=True, approximation_reason=priors[seat].coverage.approximation_reason or "bounded_public_likelihood_v2") for seat in snapshots}
+        _belief_cache_put(belief_cache_key, results)
+        return results
 
 
 def _apply_action(
@@ -156,23 +177,26 @@ def _apply_action(
     action: ActionTakenPayloadV1,
     sequence: int,
     context: PublicActionContext,
+    likelihood_amount: int | None,
 ) -> RangeBeliefSnapshot:
     weighted = {
-        key: combo.reach * likelihood(key, action.action, action.street, action.amount, context)
+        key: combo.reach * likelihood(
+            key, action.action, action.street, likelihood_amount, context
+        )
         for key, combo in snapshot.combos.items()
     }
     mass = sum(weighted.values(), Decimal("0"))
     combos = _normalized_combos(weighted, mass)
-    reason = change_reason(action.action, action.street, action.amount, context)
+    reason = change_reason(action.action, action.street, likelihood_amount, context)
     return RangeBeliefSnapshot.model_construct(snapshot_id=snapshot_id_for(snapshot.seat_id, action.street, sequence), seat_id=snapshot.seat_id,
         street=action.street, after_sequence=sequence, source=snapshot.source, confidence="heuristic",
         prior_mass=snapshot.retained_mass, retained_mass=mass, combos=combos, parent_snapshot_id=snapshot.snapshot_id,
         update=RangeUpdateMetadata(action_type=action.action.value, action_label=reason,
-            observed_size=action.amount, mapped_size=action.amount, policy_source=snapshot.source,
+            observed_size=action.amount, mapped_size=likelihood_amount, policy_source=snapshot.source,
             node=f"public-event/{reason}", policy_version=_VERSION,
             assumptions=(
                 "bounded heuristic likelihood", "actor-only update",
-                f"size_bucket:{size_bucket(action.action, action.amount, context.pot_before)}",
+                f"size_bucket:{size_bucket(action.action, likelihood_amount, context.pot_before)}",
                 f"street:{action.street.value}", f"position:{context.position}",
                 f"spr_bucket:{spr_bucket(context.spr)}", "hand_features:made-hand/draw-aware",
                 "not solver/GTO, player profile, or joint distribution",
@@ -184,9 +208,10 @@ def _mark_inactive(
     action: ActionTakenPayloadV1,
     sequence: int,
     context: PublicActionContext,
+    likelihood_amount: int | None,
 ) -> RangeBeliefSnapshot:
     """A fold updates the final marginal and removes the seat from future action."""
-    folded = _apply_action(snapshot, action, sequence, context)
+    folded = _apply_action(snapshot, action, sequence, context, likelihood_amount)
     return folded.model_copy(
         update={
             "update": folded.update.model_copy(
@@ -240,6 +265,17 @@ def _advance_public_state(
     pot: int,
     stacks: dict[int, int],
     street_contributions: dict[int, int],
+    contribution: int,
+) -> int:
+    stacks[action.actor_seat] -= contribution
+    street_contributions[action.actor_seat] += contribution
+    return pot + contribution
+
+
+def _incremental_contribution(
+    action: ActionTakenPayloadV1,
+    stacks: dict[int, int],
+    street_contributions: dict[int, int],
 ) -> int:
     amount = action.amount or 0
     if action.amount_semantics is AmountSemanticsV1.TO:
@@ -248,10 +284,55 @@ def _advance_public_state(
         contribution = amount
     else:
         contribution = 0
-    contribution = min(contribution, stacks[action.actor_seat])
-    stacks[action.actor_seat] -= contribution
-    street_contributions[action.actor_seat] += contribution
-    return pot + contribution
+    return min(contribution, stacks[action.actor_seat])
+
+
+def _belief_cache_key(
+    started: HandStartedPayloadV1,
+    prefix: tuple[HandEventV1, ...],
+    observer_visible_cards: tuple[Card, ...],
+    target: int,
+) -> tuple[object, ...]:
+    public_payloads: list[tuple[object, ...]] = []
+    for event in prefix[1:]:
+        payload = event.payload
+        if isinstance(payload, ActionTakenPayloadV1):
+            public_payloads.append((
+                "action", event.sequence, payload.street.value, payload.actor_seat,
+                payload.action.value, payload.amount, payload.amount_semantics.value,
+            ))
+        elif isinstance(payload, BoardDealtPayloadV1):
+            public_payloads.append((
+                "board", event.sequence, payload.street.value, payload.cards,
+            ))
+    return (
+        "public-belief-v2", target, tuple(sorted(observer_visible_cards)),
+        started.table_size, started.button_seat, started.small_blind,
+        started.big_blind, started.ante, started.rake_bps,
+        started.active_seat_ids, tuple(sorted(started.starting_stacks.items())),
+        tuple(public_payloads),
+    )
+
+
+def _belief_cache_get(
+    key: tuple[object, ...],
+) -> dict[int, SeatBeliefResultV1] | None:
+    with _BELIEF_CACHE_LOCK:
+        cached = _BELIEF_CACHE.get(key)
+        if cached is None:
+            return None
+        _BELIEF_CACHE.move_to_end(key)
+        return dict(cached)
+
+
+def _belief_cache_put(
+    key: tuple[object, ...], results: dict[int, SeatBeliefResultV1]
+) -> None:
+    with _BELIEF_CACHE_LOCK:
+        _BELIEF_CACHE[key] = dict(results)
+        _BELIEF_CACHE.move_to_end(key)
+        while len(_BELIEF_CACHE) > _BELIEF_CACHE_MAX:
+            _BELIEF_CACHE.popitem(last=False)
 
 
 def _unavailable_all(started: object, target: int, reason: SeatBeliefUnavailableReason) -> dict[int, SeatBeliefResultV1]:

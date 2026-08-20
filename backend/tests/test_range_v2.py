@@ -5,6 +5,8 @@ from decimal import Decimal
 from statistics import median, quantiles
 from time import perf_counter_ns
 
+import pytest
+
 from poker_coach.domain.models import Street
 from poker_coach.ranges.event_beliefs import PublicEventBeliefConsumer
 from poker_coach.simulator.contracts import (
@@ -49,12 +51,34 @@ def _started(*, rng_seed: int = 1, stack: int = 10_000) -> HandStartedPayloadV1:
 
 
 def _bet(*, amount: int, street: Street = Street.FLOP) -> ActionTakenPayloadV1:
-    return ActionTakenPayloadV1(
+    return _public_action(
         street=street,
-        actor_seat=3,
+        actor=3,
         action=SimulatorActionV1.BET,
         amount=amount,
-        amount_semantics=AmountSemanticsV1.BY,
+    )
+
+
+def _public_action(
+    *,
+    street: Street,
+    actor: int,
+    action: SimulatorActionV1,
+    amount: int | None = None,
+) -> ActionTakenPayloadV1:
+    semantics = {
+        SimulatorActionV1.FOLD: AmountSemanticsV1.NONE,
+        SimulatorActionV1.CHECK: AmountSemanticsV1.NONE,
+        SimulatorActionV1.CALL: AmountSemanticsV1.COST,
+        SimulatorActionV1.RAISE: AmountSemanticsV1.TO,
+        SimulatorActionV1.BET: AmountSemanticsV1.BY,
+    }[action]
+    return ActionTakenPayloadV1(
+        street=street,
+        actor_seat=actor,
+        action=action,
+        amount=amount,
+        amount_semantics=semantics,
     )
 
 
@@ -144,11 +168,86 @@ def test_v2_same_public_prefix_ignores_rng_private_terminal_and_future_events():
     )
 
 
-def test_v2_six_max_current_decision_latency_gate():
+def test_v2_reraise_to_uses_incremental_chips_for_bucket_and_likelihood():
+    events = (
+        _event(1, _started()),
+        _event(2, _public_action(street=Street.PREFLOP, actor=3, action=SimulatorActionV1.RAISE, amount=500)),
+        _event(3, _public_action(street=Street.PREFLOP, actor=4, action=SimulatorActionV1.CALL, amount=500)),
+        _event(4, _public_action(street=Street.PREFLOP, actor=5, action=SimulatorActionV1.CALL, amount=500)),
+        _event(5, _public_action(street=Street.PREFLOP, actor=0, action=SimulatorActionV1.CALL, amount=350)),
+        _event(6, _public_action(street=Street.PREFLOP, actor=3, action=SimulatorActionV1.RAISE, amount=1_200)),
+    )
+
+    belief = PublicEventBeliefConsumer().beliefs_at(events)[3]
+    update = belief.current.update
+    assert update.observed_size == Decimal("1200")
+    assert update.mapped_size == Decimal("700")
+    assert update.action_label == "public_action:preflop:raise:small:utg:medium"
+    assert "size_bucket:small" in update.assumptions
+
+    reference = (
+        _event(1, _started()),
+        _event(2, _public_action(street=Street.PREFLOP, actor=4, action=SimulatorActionV1.CALL, amount=600)),
+        _event(3, _public_action(street=Street.PREFLOP, actor=5, action=SimulatorActionV1.CALL, amount=600)),
+        _event(4, _public_action(street=Street.PREFLOP, actor=0, action=SimulatorActionV1.CALL, amount=650)),
+        _event(5, _public_action(street=Street.PREFLOP, actor=3, action=SimulatorActionV1.RAISE, amount=700)),
+    )
+    consumer = PublicEventBeliefConsumer()
+    before_reraise = consumer.beliefs_at(events, after_sequence=5)[3].current
+    before_reference = consumer.beliefs_at(reference, after_sequence=4)[3].current
+    after_reference = consumer.beliefs_at(reference)[3].current
+    actual_factor = (
+        belief.current.combos["AsAh"].reach
+        / before_reraise.combos["AsAh"].reach
+    )
+    reference_factor = (
+        after_reference.combos["AsAh"].reach
+        / before_reference.combos["AsAh"].reach
+    )
+    assert abs(actual_factor - reference_factor) < Decimal("1e-24")
+
+
+@pytest.mark.parametrize(
+    "action",
+    (SimulatorActionV1.CALL, SimulatorActionV1.BET, SimulatorActionV1.RAISE),
+)
+def test_v2_river_busted_draw_has_no_future_card_likelihood_bonus(
+    action: SimulatorActionV1,
+):
     events = (
         _event(1, _started()),
         _event(2, BoardDealtPayloadV1(street=Street.FLOP, cards=("Kh", "7h", "2c"))),
-        _event(3, _bet(amount=300)),
+        _event(3, BoardDealtPayloadV1(street=Street.TURN, cards=("Jh",))),
+        _event(4, BoardDealtPayloadV1(street=Street.RIVER, cards=("3d",))),
+        _event(5, _public_action(street=Street.RIVER, actor=3, action=action, amount=200)),
+    )
+
+    belief = PublicEventBeliefConsumer().beliefs_at(
+        events, observer_visible_cards=("Qc", "Td")
+    )[3]
+    assert abs(
+        _multiplier(belief, "Ah9s") - _multiplier(belief, "As9s")
+    ) < Decimal("1e-24")
+
+
+def test_v2_six_max_current_decision_latency_gate():
+    events = (
+        _event(1, _started()),
+        _event(2, _public_action(street=Street.PREFLOP, actor=3, action=SimulatorActionV1.RAISE, amount=300)),
+        _event(3, _public_action(street=Street.PREFLOP, actor=4, action=SimulatorActionV1.CALL, amount=300)),
+        _event(4, _public_action(street=Street.PREFLOP, actor=5, action=SimulatorActionV1.CALL, amount=300)),
+        _event(5, _public_action(street=Street.PREFLOP, actor=0, action=SimulatorActionV1.CALL, amount=300)),
+        _event(6, _public_action(street=Street.PREFLOP, actor=1, action=SimulatorActionV1.CALL, amount=250)),
+        _event(7, _public_action(street=Street.PREFLOP, actor=2, action=SimulatorActionV1.CALL, amount=200)),
+        _event(8, BoardDealtPayloadV1(street=Street.FLOP, cards=("Kh", "7h", "2c"))),
+        _event(9, _public_action(street=Street.FLOP, actor=1, action=SimulatorActionV1.CHECK)),
+        _event(10, _public_action(street=Street.FLOP, actor=2, action=SimulatorActionV1.CHECK)),
+        _event(11, _public_action(street=Street.FLOP, actor=3, action=SimulatorActionV1.BET, amount=600)),
+        _event(12, _public_action(street=Street.FLOP, actor=4, action=SimulatorActionV1.CALL, amount=600)),
+        _event(13, _public_action(street=Street.FLOP, actor=5, action=SimulatorActionV1.FOLD)),
+        _event(14, BoardDealtPayloadV1(street=Street.TURN, cards=("Jh",))),
+        _event(15, _public_action(street=Street.TURN, actor=3, action=SimulatorActionV1.CHECK)),
+        _event(16, _public_action(street=Street.TURN, actor=4, action=SimulatorActionV1.BET, amount=1_500)),
     )
     consumer = PublicEventBeliefConsumer()
     visible = ("As", "Qd")
@@ -172,7 +271,7 @@ def test_v2_six_max_current_decision_latency_gate():
     p50 = median(samples_ms)
     p95 = quantiles(samples_ms, n=100, method="inclusive")[94]
     print(
-        "range_v2_latency scope=6-seat-update+5-opponent-169-projection "
+        "range_v2_latency scope=16-event-preflop-flop-turn-replay+5-opponent-169-projection "
         f"warmup=10 samples=100 p50={p50:.3f}ms p95={p95:.3f}ms"
     )
     assert p50 < 25

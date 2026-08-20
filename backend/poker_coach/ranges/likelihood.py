@@ -79,6 +79,8 @@ def likelihood(
     """Return P(public action | combo features), clipped to a safe interval."""
     bucket = size_bucket(action, amount, context.pot_before)
     made, draw, preflop = _combo_features(combo, context.board)
+    if street is Street.RIVER:
+        draw = 0
     selectivity = {
         "small": Decimal("0.80"),
         "medium": Decimal("1.00"),
