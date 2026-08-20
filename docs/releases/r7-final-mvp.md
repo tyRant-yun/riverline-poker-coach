@@ -2,7 +2,7 @@
 
 ## 发布结论
 
-R7 源码 MVP 已达到验收标准：用户可在持续六人桌连续完成牌局，Hero 决策控件不会在 Bot 过渡后锁死；终局展示、复盘/统计与下一手状态切换可用；Advisor、Range V2 与 Fast Solver L1.5 在同一决策视图中同时提供信息。
+R7 源码 MVP 的功能验收已达到标准：用户可在持续六人桌连续完成牌局，Hero 决策控件不会在 Bot 过渡后锁死；终局展示、复盘/统计与下一手状态切换可用；Advisor、Range V2 与 Fast Solver L1.5 在同一决策视图中同时提供信息。PR #3 暴露的 CI 性能门已在本分支窄修复并通过 focused tests，但该修复仍需独立缓存/隐私窄审与 GitHub CI 复跑，完成前本修订不作为最终源码发布结论。
 
 本结论只覆盖 GitHub 源码候选。它不创建 GitHub Release、Docker image、wheel、安装包或包含 `node_modules` 的二进制制品。
 
