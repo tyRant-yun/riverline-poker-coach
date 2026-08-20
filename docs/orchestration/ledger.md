@@ -72,12 +72,12 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R8-02 Range Explorer | `/root/r8_02_range_explorer` | `completed` | `merged` | `codex/r8-02-range-explorer` | `3d2081b` | `fc957a8fe5d80aed876875fdbabc1449501c5a89` | [R8-02 handoff](handoffs/R8-02.md) | tsc; 15 focused Vitest; multi-viewport Playwright; build PASS | R8-05 | Integrated `0ac980f..96ef5da`; honest DTO-limited degradation preserved |
 | R8-03 Decision Reconciliation Contract | `/root/r8_03_reconciliation` | `completed` | `merged` | `codex/r8-03-reconciliation` | `ac72e2d` | `c3cfd55a69dc6629c3bb10773784a3ce21e20935` | [R8-03 handoff](handoffs/R8-03.md) | 23 focused backend tests; compileall PASS | R8-04/R8-05 | Integrated `708cc62..b870a31`; additive private-safe contract, no final arbitration |
 | R8-04 Solver Sizing Calibration | `/root/r8_04_solver_sizing` | `completed` | `merged` | `codex/r8-04-solver-sizing` | `3d2081b` | `ec1bb0b7fabdf4695acbe5b9f2b2f735b643612c` | [R8-04 handoff](handoffs/R8-04.md) | 35 focused tests; API/reconciliation 11 passed; compileall; p95 35.877ms | R8-05 | Integrated `69c4e16..b67e543`; uncertainty covers sampling, not heuristic-model error |
-| R8-05 Product Evaluation | `/root/r8_05_product_eval` | `in_progress` | `in_progress` | `codex/r8-05-product-eval` | `b67e543` | — | — | real local journey and focused product gates pending | final review | Real journey, four viewports, async/privacy and five-second tasks |
-| R8 Decision UX Productization | `/root` | `in_progress` | `in_progress` | `codex/r8-decision-ux` | `72696f5b764406869d58fff4e3b1b0170189a4c5` | — | [R8 plan](../plans/r8-decision-cockpit-and-range-explorer.md) | plan commits `6407d3a..ac72e2d` | R8-01/R8-03 | Controlled two-slot implementation; one final Standards/Spec review |
+| R8-05 Product Evaluation | `/root/r8_05_product_eval` | `completed` | `merged` | `codex/r8-05-product-eval` | `671caa6` | `d68b250aebc6b372ce9639af16153eacfd941e0a` | [R8-05 handoff](handoffs/R8-05.md) | backend 19; UI 20; focused Playwright 3; build PASS; reduced-motion 11 PASS | final release gate | Integrated `9a69c12..f5a578e`; controlled two-hand and 5-second evidence deferred to release gate |
+| R8 Decision UX Productization | `/root` | `in_progress` | `pending_acceptance` | `codex/r8-decision-ux` | `72696f5b764406869d58fff4e3b1b0170189a4c5` | `a1799c5` | [R8 plan](../plans/r8-decision-cockpit-and-range-explorer.md) | Standards hard findings 0; Spec P0/P1 0 after narrow repairs | release gate | R8-01..05 integrated; final full gate and real user journey remain |
 
 ## 下一入口
 
-`R8-05`：从已集成 R8-01/02/03/04 的 `b67e543` 进行真实产品旅程接线与验收；完成后只运行一次 Standards/Spec 整体审查和发布门。
+`R8 Release Gate`：从已完成整体双轴审查的集成 head 运行一次完整发布门，补齐受控两手牌与 5 秒任务证据；无 P0/P1 后生成发布报告并提交 GitHub。
 
 ## MVP 执行策略
 
