@@ -12,7 +12,6 @@ This stricter verdict applies only when publishing a Docker image, wheel, instal
 
 The bundled-artifact gate is fail-closed for:
 
-- `npm:@img/colour: binary/container artifact integrity hash is not locked`
 - `npm:@img/sharp-libvips-darwin-arm64: bundled binary/container release requires verification of the actual shipped binary, notices, and corresponding-source handling`
 - `npm:@img/sharp-libvips-darwin-x64: bundled binary/container release requires verification of the actual shipped binary, notices, and corresponding-source handling`
 - `npm:@img/sharp-libvips-linux-arm64: bundled binary/container release requires verification of the actual shipped binary, notices, and corresponding-source handling`
@@ -26,11 +25,7 @@ The bundled-artifact gate is fail-closed for:
 - `npm:@img/sharp-wasm32: bundled binary/container release requires verification of the actual shipped binary, notices, and corresponding-source handling`
 - `npm:@img/sharp-win32-arm64: bundled binary/container release requires verification of the actual shipped binary, notices, and corresponding-source handling`
 - `npm:@img/sharp-win32-ia32: bundled binary/container release requires verification of the actual shipped binary, notices, and corresponding-source handling`
-- `npm:@img/sharp-win32-x64: binary/container artifact integrity hash is not locked`
 - `npm:@img/sharp-win32-x64: bundled binary/container release requires verification of the actual shipped binary, notices, and corresponding-source handling`
-- `npm:@next/env: binary/container artifact integrity hash is not locked`
-- `npm:@next/swc-win32-x64-msvc: binary/container artifact integrity hash is not locked`
-- `npm:@swc/helpers: binary/container artifact integrity hash is not locked`
 - `npm:@types/node: binary/container artifact integrity hash is not locked`
 - `npm:@types/react-dom: binary/container artifact integrity hash is not locked`
 - `npm:@types/react: binary/container artifact integrity hash is not locked`
@@ -38,18 +33,13 @@ The bundled-artifact gate is fail-closed for:
 - `npm:caniuse-lite: binary/container artifact integrity hash is not locked`
 - `npm:client-only: binary/container artifact integrity hash is not locked`
 - `npm:csstype: binary/container artifact integrity hash is not locked`
-- `npm:detect-libc: binary/container artifact integrity hash is not locked`
 - `npm:nanoid: binary/container artifact integrity hash is not locked`
 - `npm:picocolors: binary/container artifact integrity hash is not locked`
-- `npm:postcss: binary/container artifact integrity hash is not locked`
 - `npm:react-dom: binary/container artifact integrity hash is not locked`
 - `npm:react: binary/container artifact integrity hash is not locked`
 - `npm:scheduler: binary/container artifact integrity hash is not locked`
-- `npm:semver: binary/container artifact integrity hash is not locked`
-- `npm:sharp: binary/container artifact integrity hash is not locked`
 - `npm:source-map-js: binary/container artifact integrity hash is not locked`
 - `npm:styled-jsx: binary/container artifact integrity hash is not locked`
-- `npm:tslib: binary/container artifact integrity hash is not locked`
 - `npm:typescript: binary/container artifact integrity hash is not locked`
 - `npm:undici-types: binary/container artifact integrity hash is not locked`
 - `pypi:alembic: binary/container artifact integrity hash is not locked`

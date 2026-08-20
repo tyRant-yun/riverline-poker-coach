@@ -291,6 +291,23 @@ test("R8 controlled product journey exposes decision evidence, readable Bot dwel
 
   for (const [width, height] of [[1366, 768], [1440, 900], [1920, 1080], [1280, 720]] as const) {
     await page.setViewportSize({ width, height });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const stage = page.getByLabel("六人德州扑克牌桌");
+    const hero = stage.locator('[data-seat="0"]');
+    const summary = page.getByLabel("Decision Summary");
+    const solverRows = page.getByLabel("Solver Action Ladder").locator("article");
+    const rangeSummary = page.getByRole("heading", { name: "Range 摘要" });
+    await expect(hero, `${width}x${height} Hero seat must be visible`).toBeInViewport();
+    await expect(page.getByTestId("hero-legal-actions"), `${width}x${height} Hero actions must be visible`).toBeInViewport();
+    await expect(summary, `${width}x${height} Decision Summary must be reachable in the initial viewport`).toBeInViewport();
+    await expect(solverRows, `${width}x${height} must retain the default top-three Solver candidates`).toHaveCount(3);
+    for (const row of await solverRows.all()) await expect(row, `${width}x${height} Solver candidate must be visible`).toBeInViewport();
+    await expect(rangeSummary, `${width}x${height} Range Summary must be reachable in the initial viewport`).toBeInViewport();
+    const stageBox = await stage.boundingBox();
+    const heroBox = await hero.boundingBox();
+    expect(stageBox).not.toBeNull();
+    expect(heroBox).not.toBeNull();
+    expect(Math.abs(heroBox!.x + heroBox!.width / 2 - (stageBox!.x + stageBox!.width / 2)), `${width}x${height} Hero must remain horizontally centered`).toBeLessThanOrEqual(8);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}x${height} must not horizontally scroll`).toBeTruthy();
   }
 
@@ -298,6 +315,7 @@ test("R8 controlled product journey exposes decision evidence, readable Bot dwel
     rangeExplorerMs: await measureProxy("locate/open Range Explorer", async () => {
       const range = page.getByLabel("Range Belief");
       await expect(range).toContainText("主要牌类");
+      await expect(range).toContainText("Top movers 暂不可用：需同手、同座位的上一公开行动 Range 快照。");
       await range.getByRole("button", { name: "展开矩阵" }).click();
       await expect(page.getByRole("dialog", { name: "Range Explorer" })).toBeVisible();
     }),
