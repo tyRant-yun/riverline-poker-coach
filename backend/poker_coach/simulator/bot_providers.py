@@ -18,6 +18,8 @@ from poker_coach.theory.policy_artifact import (
 
 from .bot_runtime import FixedPolicyProvider
 from .contracts import (
+    BotAttemptStatusV1,
+    BotAttemptV1,
     BotDecisionV1,
     LegalActionV1,
     ObservationV1,
@@ -146,6 +148,16 @@ class PolicyArtifactBot:
             provider=self.name,
             provider_version=self.version,
             latency_ms=0,
+            degraded=True,
+            fallback_reason=reason,
+            attempts=(BotAttemptV1(
+                provider=self.name,
+                provider_version=self.version,
+                status=BotAttemptStatusV1.POLICY_FALLBACK,
+                latency_ms=0,
+                error_code="artifact_coverage_fallback",
+                error_message=reason,
+            ),),
             metadata=self._metadata(
                 coverage_status="fallback",
                 node_id=None,

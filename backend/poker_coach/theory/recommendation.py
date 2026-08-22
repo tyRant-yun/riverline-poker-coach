@@ -164,7 +164,11 @@ class TheoryExplainer:
             match = self._artifact.match(observation, context)
             if match is not None:
                 frequencies, filtered = _artifact_frequencies(match.frequencies, match.raise_to, observation.legal_actions)
-                if frequencies:
+                # A policy artifact is B-grade only when every positive-mass
+                # action is legal in this exact authoritative action set.
+                # Re-normalizing the surviving actions would silently turn a
+                # partially inapplicable policy into a false B-grade answer.
+                if frequencies and not filtered:
                     return _result(
                         identity, formula, explanation, source_kind="policy_artifact", grade="B",
                         version=self._artifact.version, policy_fingerprint=self._artifact.fingerprint,
@@ -173,9 +177,13 @@ class TheoryExplainer:
                         coverage=TheoryCoverageV1(status="covered", players=observation.table_size, street=observation.street, tree_id=context.tree_fingerprint, sizing_abstraction="artifact_legal_sizings", effective_stack_bucket="100bb", rake="no_rake", ante=0),
                         frequencies=frequencies, oracle=oracle_ev_loss,
                         expected_tree=context.tree_fingerprint, expected_range=None, expected_utility=None,
-                        degradation=("artifact_illegal_action_filtered",) if filtered else (),
+                        degradation=(),
                     )
-                return self._formula_fallback(identity, formula, explanation, "artifact_no_legal_policy_action", oracle_ev_loss)
+                return self._formula_fallback(
+                    identity, formula, explanation,
+                    "artifact_policy_action_not_legal" if filtered else "artifact_no_legal_policy_action",
+                    oracle_ev_loss,
+                )
             return self._formula_fallback(
                 identity, formula, explanation,
                 "artifact_miss:" + policy_miss_reason(observation, context, self._artifact), oracle_ev_loss,
@@ -229,14 +237,26 @@ class TheoryExplainer:
 
 
 def _result(identity, formula, explanation, *, source_kind, grade, version, policy_fingerprint, source_license, provenance, status, coverage, frequencies, oracle, expected_tree, expected_range, expected_utility, degradation):
+    strategy_available = grade == "B"
+    if not strategy_available:
+        # C Formula is explanatory math, not a strategy source.  Keep its
+        # factual pot-odds text, but never serialize selected actions, action
+        # sizes, frequencies, ranges, or oracle EV as a pseudo-policy.
+        frequencies = ()
+        explanation = explanation.model_copy(update={
+            "legal_action_bounds": (),
+            "break_even_fold_equity": None,
+            "break_even_fold_equity_basis": None,
+            "limitations": (*explanation.limitations, "No theory policy, sizing, frequency, range, or EV is available at this evidence grade."),
+        })
     return TheoryRecommendationV1(
         status=status, available=True, decision=identity,
         evidence=TheoryEvidenceV1(source_kind=source_kind, evidence_grade=grade, version=version,
             policy_fingerprint=policy_fingerprint, source_license=source_license, provenance=provenance,
             coverage=coverage, degradation_reason=coverage.reason),
         recommended_action=max(frequencies, key=lambda item: item.frequency) if frequencies else None, action_frequencies=frequencies,
-        legal_action_bounds=formula.legal_action_bounds,
-        same_oracle_ev_loss=_ev_loss(oracle, expected_tree, expected_range, expected_utility), explanation=explanation,
+        legal_action_bounds=formula.legal_action_bounds if strategy_available else (),
+        same_oracle_ev_loss=_ev_loss(oracle, expected_tree, expected_range, expected_utility) if strategy_available else TheoryEvLossV1(unavailable_reason="evidence_grade_has_no_policy_ev"), explanation=explanation,
         assumptions=explanation.assumptions, degradation=degradation,
     )
 

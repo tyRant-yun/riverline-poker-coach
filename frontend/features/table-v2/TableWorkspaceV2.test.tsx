@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ActionPlaybackQueue, HeroActionDockV2, InsightRailV2, PokerTableStageV2, type ActionDelta } from "./TableWorkspaceV2";
+import { ActionPlaybackQueue, HeroActionDockV2, InsightRailV2, PokerTableStageV2, TableTimelineV2, type ActionDelta } from "./TableWorkspaceV2";
 
 const actions: ActionDelta[] = [{ id: "a", actor: "Bot 2", label: "跟注", kind: "action" }, { id: "b", actor: "Bot 3", label: "全下", kind: "all-in" }];
 const table = {
@@ -85,6 +85,12 @@ describe("Table V2 visual contracts", () => {
     render(<InsightRailV2 theory={{ status: "degraded", available: true, decision: { fingerprint: "f", handId: "h", sequence: 1, street: "river", observerSeat: 0 }, evidence: { sourceKind: "formula", evidenceGrade: "C", version: "formula/v1", provenance: "formula", coverage: { status: "fallback", reason: "tree_unsupported", players: 2, street: "river", sizingAbstraction: "formula_only", rake: "unknown" } }, actionFrequencies: [], sameOracleEvLoss: { unavailableReason: "oracle_not_provided" }, explanation: { formulaVersion: "formula/v1", potOdds: "0.2", assumptions: [], limitations: [] }, degradation: [] }} />);
     expect(screen.getByLabelText("Theory 推荐")).toHaveTextContent("公式倾向／无策略频率");
     expect(screen.getByLabelText("Theory 推荐")).not.toHaveTextContent("100%");
+  });
+  it("renders a C-grade policy fallback rather than implying B artifact coverage", () => {
+    render(<TableTimelineV2 table={{ actionHistory: [{ sequence: 4, street: "preflop", actorSeat: 1, action: "fold", amount: null }], botDecisionProvenance: [{ sequence: 4, actorSeat: 1, profileId: "theory", provider: "policy-artifact-bot", degraded: true, fallbackReason: "legal_sizing_miss", evidenceGrade: "C", coverageStatus: "fallback" }] } as never} />);
+    expect(screen.getByLabelText("行动时间线")).toHaveTextContent("C 级／fallback");
+    expect(screen.getByLabelText("行动时间线")).toHaveTextContent("降级：legal_sizing_miss");
+    expect(screen.getByLabelText("行动时间线")).not.toHaveTextContent("B 级／covered");
   });
   it("retains the previous same-hand snapshot for verifiable Top movers", async () => {
     const table = { sessionId: "s", handId: "h", fingerprint: "a", street: "flop", pot: 100 };

@@ -168,7 +168,8 @@ def test_theory_profile_falls_back_for_an_illegal_artifact_sizing_without_breaki
     )
     decision = asyncio.run(BotRuntime().decide(PolicyArtifactBot(), observation, time_budget_ms=20, rng_seed=4))
 
-    assert decision.degraded is False
+    assert decision.degraded is True
+    assert decision.fallback_reason == "legal_sizing_miss"
     assert decision.metadata["coverageStatus"] == "fallback"
     assert decision.metadata["degradeReason"] == "legal_sizing_miss"
     assert decision.metadata["evidenceGrade"] == "C"

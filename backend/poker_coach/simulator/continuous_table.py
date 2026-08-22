@@ -111,10 +111,20 @@ class ContinuousTableService:
                 provider_version TEXT NOT NULL,
                 degraded INTEGER NOT NULL,
                 fallback_reason TEXT,
+                evidence_grade TEXT NOT NULL DEFAULT 'C',
+                coverage_status TEXT NOT NULL DEFAULT 'fallback',
                 PRIMARY KEY (hand_id, action_sequence)
             );
             """
         )
+        # Existing local MVP databases predate the explicit evidence fields.
+        # These additive columns preserve their history while allowing current
+        # projections to distinguish B artifact play from a C fallback.
+        columns = {row["name"] for row in self._connection.execute("PRAGMA table_info(continuous_table_bot_decisions)")}
+        if "evidence_grade" not in columns:
+            self._connection.execute("ALTER TABLE continuous_table_bot_decisions ADD COLUMN evidence_grade TEXT NOT NULL DEFAULT 'C'")
+        if "coverage_status" not in columns:
+            self._connection.execute("ALTER TABLE continuous_table_bot_decisions ADD COLUMN coverage_status TEXT NOT NULL DEFAULT 'fallback'")
         self._connection.commit()
 
     @classmethod
@@ -587,7 +597,7 @@ class ContinuousTableService:
             for event in events if isinstance(event.payload, ActionTakenPayloadV1)
         ]
         bot_rows = self._connection.execute(
-            "SELECT action_sequence, actor_seat, profile_id, provider, provider_version, degraded, fallback_reason "
+            "SELECT action_sequence, actor_seat, profile_id, provider, provider_version, degraded, fallback_reason, evidence_grade, coverage_status "
             "FROM continuous_table_bot_decisions WHERE hand_id = ? ORDER BY action_sequence", (hand_id,),
         ).fetchall() if hand_id else ()
         revision = stored.revision * 1_000_000 + (0 if state is None else state.applied_sequence)
@@ -615,7 +625,7 @@ class ContinuousTableService:
             "heroLegalActions": [item.to_dict() for item in legal], "actionHistory": actions,
             "handComplete": bool(state is not None and not state.hand_in_progress),
             "result": None if state is None or state.hand_in_progress else {"winnerSeats": list(state.winner_seats), "payouts": state.payouts},
-            "botDecisionProvenance": [{"sequence": row["action_sequence"], "actorSeat": row["actor_seat"], "profileId": row["profile_id"], "provider": row["provider"], "providerVersion": row["provider_version"], "degraded": bool(row["degraded"]), "fallbackReason": row["fallback_reason"]} for row in bot_rows],
+            "botDecisionProvenance": [{"sequence": row["action_sequence"], "actorSeat": row["actor_seat"], "profileId": row["profile_id"], "provider": row["provider"], "providerVersion": row["provider_version"], "degraded": bool(row["degraded"]), "fallbackReason": row["fallback_reason"], "evidenceGrade": row["evidence_grade"], "coverageStatus": row["coverage_status"]} for row in bot_rows],
         }
         safe["fingerprint"] = hashlib.sha256(json.dumps(safe, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         return safe
@@ -665,8 +675,8 @@ class ContinuousTableService:
 
     def _record_bot_decision(self, hand_id, sequence, actor, profile, decision) -> None:
         self._connection.execute(
-            "INSERT OR REPLACE INTO continuous_table_bot_decisions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (hand_id, sequence, actor, profile, decision.provider, decision.provider_version, int(decision.degraded), decision.fallback_reason),
+            "INSERT OR REPLACE INTO continuous_table_bot_decisions (hand_id, action_sequence, actor_seat, profile_id, provider, provider_version, degraded, fallback_reason, evidence_grade, coverage_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (hand_id, sequence, actor, profile, decision.provider, decision.provider_version, int(decision.degraded), decision.fallback_reason, str(decision.metadata.get("evidenceGrade", "C")), str(decision.metadata.get("coverageStatus", "fallback"))),
         )
         self._connection.commit()
 
@@ -717,9 +727,9 @@ def _live_hu_river_l2(*, events, observation, decision_fingerprint: str, cache: 
     street = observation.street.value if hasattr(observation.street, "value") else str(observation.street)
     if street != "river" or len(observation.active_seats) != 2 or len(observation.board) != 5:
         return None
-    # This is the only private value permitted across the solver boundary.  It
-    # came from the acting Hero's ObservationV1; the public event stream below
-    # explicitly removes every recorded hole-card and terminal event.
+    # This is the only private value permitted across the solver boundary. It
+    # is represented as the solver's exact Hero infoset, never injected into
+    # the public Range Belief snapshot or its externally visible projection.
     hero_hole_cards = tuple(observation.own_hole_cards)
     if len(hero_hole_cards) != 2:
         return None
@@ -729,7 +739,11 @@ def _live_hu_river_l2(*, events, observation, decision_fingerprint: str, cache: 
         return None
     players = (observation.observer_seat, next(seat for seat in observation.active_seats if seat != observation.observer_seat))
     stacks = dict(observation.stacks)
-    if bet.min_amount <= 0 or bet.min_amount > min(stacks[seat] for seat in players):
+    hero_stack, opponent_stack = (stacks[seat] for seat in players)
+    # The bounded tree models bet -> fold|call, with no raise branch.  A live
+    # B-grade claim is therefore valid only for a verified heads-up river jam
+    # that the opponent can cover; any non-jam sizing is typed fallback.
+    if bet.min_amount <= 0 or bet.min_amount != hero_stack or bet.min_amount > opponent_stack:
         return None
     try:
         beliefs = PublicEventBeliefConsumer().beliefs_at(
@@ -738,6 +752,11 @@ def _live_hu_river_l2(*, events, observation, decision_fingerprint: str, cache: 
         projected: list[tuple[int, tuple[RangeCombo, ...]]] = []
         material: list[object] = []
         for seat in players:
+            if seat == observation.observer_seat:
+                # Exact private Hero holding is internal solver state only.
+                projected.append((seat, (RangeCombo(cards=hero_hole_cards, weight=1.0),)))
+                material.append((seat, "private_exact_hero"))
+                continue
             result = beliefs.get(seat)
             snapshot = None if result is None else result.current
             if snapshot is None:
@@ -745,7 +764,11 @@ def _live_hu_river_l2(*, events, observation, decision_fingerprint: str, cache: 
             # Range snapshots are already public-event conditioned and contain
             # Hero-visible blockers. Never substitute recorded holes here.
             ranked = sorted(snapshot.combos.items(), key=lambda item: (-item[1].probability, item[0]))[:16]
-            combos = tuple(RangeCombo(cards=cards_from_key(key), weight=float(combo.probability)) for key, combo in ranked if float(combo.probability) > 0)
+            combos = tuple(
+                RangeCombo(cards=cards_from_key(key), weight=float(combo.probability))
+                for key, combo in ranked
+                if float(combo.probability) > 0 and not (set(cards_from_key(key)) & set(hero_hole_cards))
+            )
             if not combos:
                 return None
             projected.append((seat, combos))

@@ -44,15 +44,17 @@ def test_verified_preflop_artifact_is_the_only_b_grade_truth_and_formula_is_expl
     assert result.same_oracle_ev_loss.unavailable_reason == "oracle_not_provided"
 
 
-def test_illegal_artifact_actions_are_filtered_then_normalized_without_changing_source():
+def test_illegal_positive_artifact_action_downgrades_instead_of_re_normalizing_to_b_grade():
     result = TheoryExplainer().recommend(
         _preflop(actions=(LegalActionV1(action="fold", amountSemantics="none"),)),
         decision_fingerprint="decision-2", preflop_context=PreflopPolicyContext(big_blind=100),
     )
 
-    assert result.evidence.source_kind == "policy_artifact"
-    assert [(item.action.value, item.frequency) for item in result.action_frequencies] == [("fold", 1.0)]
-    assert result.degradation == ("artifact_illegal_action_filtered",)
+    assert result.evidence.source_kind == "formula"
+    assert result.evidence.evidence_grade == "C"
+    assert result.evidence.coverage.reason == "artifact_policy_action_not_legal"
+    assert result.recommended_action is None
+    assert result.action_frequencies == ()
 
 
 def test_artifact_miss_honestly_uses_c_formula():
@@ -66,6 +68,12 @@ def test_artifact_miss_honestly_uses_c_formula():
     assert missed.degradation[0].startswith("artifact_miss:")
     assert missed.action_frequencies == ()
     assert missed.recommended_action is None
+    assert missed.legal_action_bounds == ()
+    assert missed.explanation.legal_action_bounds == ()
+    assert missed.explanation.break_even_fold_equity is None
+    assert missed.same_oracle_ev_loss.chips is None
+    assert missed.same_oracle_ev_loss.definition is None
+    assert missed.same_oracle_ev_loss.unavailable_reason == "evidence_grade_has_no_policy_ev"
 
 
 def test_ev_loss_never_claims_an_oracle_when_tree_or_range_identity_does_not_match():
@@ -185,7 +193,7 @@ def test_live_hu_river_adapter_isolates_hero_infosets_and_ignores_opponent_priva
     assert "'qd'" not in str(other.result).lower()
 
 
-def test_live_l2_adapter_falls_back_without_authorized_hero_combo(monkeypatch):
+def test_live_l2_adapter_uses_private_hero_infoset_not_public_hero_range(monkeypatch):
     public = {
         0: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-hero", combos={"4c5d": SimpleNamespace(probability=1)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
         1: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-villain", combos={"6c7d": SimpleNamespace(probability=1)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
@@ -199,14 +207,31 @@ def test_live_l2_adapter_falls_back_without_authorized_hero_combo(monkeypatch):
     )
     result = _live_hu_river_l2(events=(), observation=observation, decision_fingerprint="decision-public", cache=L2Cache())
     assert result is not None
-    assert result.result.recommendation_available is False
+    assert result.result.recommendation_available is True
     recommendation = TheoryExplainer().recommend(observation, decision_fingerprint="decision-public", l2=result)
-    assert recommendation.evidence.evidence_grade == "C"
+    assert recommendation.evidence.evidence_grade == "B"
+    assert "'2c'" not in str(recommendation.to_dict()).lower()
+    assert "'3d'" not in str(recommendation.to_dict()).lower()
 
 
 def test_live_l2_adapter_returns_none_for_multiway_or_unsupported_tree():
     multiway = _preflop().model_copy(update={"street": "river", "table_size": 3, "active_seats": (0, 1, 2), "board": ("As", "Ks", "Qs", "Js", "Ts")})
     assert _live_hu_river_l2(events=(), observation=multiway, decision_fingerprint="multiway", cache=L2Cache()) is None
+
+
+def test_live_l2_adapter_refuses_non_jam_tree_that_could_include_an_opponent_raise(monkeypatch):
+    public = {
+        0: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-hero", combos={"4c5d": SimpleNamespace(probability=1)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
+        1: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-villain", combos={"6c7d": SimpleNamespace(probability=1)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
+    }
+    monkeypatch.setattr("poker_coach.simulator.continuous_table.PublicEventBeliefConsumer.beliefs_at", lambda *_args, **_kwargs: public)
+    observation = ObservationV1(
+        handId="river-non-jam", sequence=9, observerSeat=0, tableSize=2, buttonSeat=0, street="river",
+        ownHoleCards=("2c", "3d"), board=("As", "Ks", "Qs", "Js", "Ts"), pot=100,
+        stacks={0: 100, 1: 100}, streetCommitments={0: 0, 1: 0}, activeSeats=(0, 1),
+        legalActions=(LegalActionV1(action="check", amountSemantics="none"), LegalActionV1(action="bet", amountSemantics="by", minAmount=50, maxAmount=50)),
+    )
+    assert _live_hu_river_l2(events=(), observation=observation, decision_fingerprint="non-jam", cache=L2Cache()) is None
 
 
 def _client(tmp_path):

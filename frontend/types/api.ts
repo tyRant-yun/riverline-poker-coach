@@ -42,7 +42,7 @@ export type ContinuousTable = {
   actionHistory: { sequence: number; street: string; actorSeat: number; action: string; amount: number | null }[];
   handComplete: boolean;
   result: { winnerSeats: number[]; payouts: Record<string, number> } | null;
-  botDecisionProvenance: { sequence: number; actorSeat: number; profileId: string; provider: string; degraded: boolean; fallbackReason: string | null }[];
+  botDecisionProvenance: { sequence: number; actorSeat: number; profileId: string; provider: string; degraded: boolean; fallbackReason: string | null; evidenceGrade?: "B" | "C" | "unsupported"; coverageStatus?: "covered" | "fallback" | "unsupported" }[];
   fingerprint: string;
 };
 

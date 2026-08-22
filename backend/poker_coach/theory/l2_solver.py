@@ -128,6 +128,15 @@ class L2RiverInput:
 
     @property
     def fingerprint(self) -> str:
+        return self._fingerprint(include_hero=True, include_private_hero_range=True)
+
+    def _fingerprint(self, *, include_hero: bool, include_private_hero_range: bool) -> str:
+        ranges = tuple(
+            (seat, tuple((combo.cards, combo.weight) for combo in combos))
+            if include_private_hero_range or seat != self.acting_seat
+            else (seat, "private_exact_hero")
+            for seat, combos in self.ranges
+        )
         material = {
             "game": self.game_fingerprint,
             "tree": self.tree_fingerprint,
@@ -138,13 +147,13 @@ class L2RiverInput:
             "pot": self.pot,
             "stacks": self.stacks,
             "board": self.board,
-            "ranges": tuple((seat, tuple((combo.cards, combo.weight) for combo in combos)) for seat, combos in self.ranges),
+            "ranges": ranges,
             "bet": self.tree.bet_amount,
             "seed": self.seed,
             "budget": asdict(self.budget),
             "street": self.street,
             "scope": self.projection_scope,
-            "hero": self.hero_hole_cards,
+            "hero": self.hero_hole_cards if include_hero else None,
             "solver_artifact": self.solver_artifact_fingerprint,
         }
         encoded = json.dumps(material, sort_keys=True, separators=(",", ":"))
@@ -153,7 +162,7 @@ class L2RiverInput:
     @property
     def tree_cache_key(self) -> str:
         """Cache identity for the whole solved tree, intentionally hero-free."""
-        return replace(self, hero_hole_cards=None).fingerprint
+        return self._fingerprint(include_hero=False, include_private_hero_range=False)
 
 
 @dataclass(frozen=True)

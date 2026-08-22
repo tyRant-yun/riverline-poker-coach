@@ -187,6 +187,7 @@ class BotAttemptStatusV1(str, Enum):
     TIMEOUT = "timeout"
     EXCEPTION = "exception"
     INVALID_ACTION = "invalid_action"
+    POLICY_FALLBACK = "policy_fallback"
 
 
 class BotAttemptV1(DomainModel):

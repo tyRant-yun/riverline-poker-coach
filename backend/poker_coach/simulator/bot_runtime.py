@@ -102,6 +102,11 @@ class BotRuntime:
             )
             elapsed = _elapsed_ms(started)
             _require_legal(raw, observation.legal_actions)
+            # A policy provider can legally return a lightweight fallback when
+            # its claimed coverage does not apply.  That is not a runtime
+            # failure, but it must survive as a top-level degraded decision so
+            # persistence and the UI cannot imply the primary policy was used.
+            attempts.extend(raw.attempts)
             attempts.append(
                 BotAttemptV1(
                     provider=provider.name,
@@ -115,6 +120,8 @@ class BotRuntime:
                 provider_name=provider.name,
                 provider_version=provider.version,
                 latency_ms=elapsed,
+                degraded=raw.degraded,
+                fallback_reason=raw.fallback_reason,
                 attempts=tuple(attempts),
             )
         except asyncio.CancelledError:
