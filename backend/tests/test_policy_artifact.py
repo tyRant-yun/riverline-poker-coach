@@ -130,29 +130,44 @@ def test_observed_non_100bb_stack_cannot_be_claimed_as_covered_even_with_default
     assert decision.metadata["degradeReason"] == "non_100bb"
 
 
-def test_seeded_mixed_policy_is_reproducible_legal_and_tracks_artifact_frequency():
+def test_seeded_mixed_policy_is_reproducible_legal_and_tracks_artifact_frequency(monkeypatch):
+    loop_creations = 0
+    original_new_event_loop = asyncio.events.new_event_loop
+
+    def counted_new_event_loop():
+        nonlocal loop_creations
+        loop_creations += 1
+        return original_new_event_loop()
+
+    monkeypatch.setattr(asyncio.events, "new_event_loop", counted_new_event_loop)
     observation = _observation(
         public_actions=[
             {"sequence": 1, "street": "preflop", "actorSeat": 3, "action": "raise", "amount": 250, "amountSemantics": "to"}
         ]
     )
     provider = PolicyArtifactBot()
-    first = asyncio.run(provider.decide(observation, observation.legal_actions, 20, 817))
-    second = asyncio.run(provider.decide(observation, observation.legal_actions, 20, 817))
+
+    async def decisions_for_seeds():
+        first = await provider.decide(observation, observation.legal_actions, 20, 817)
+        second = await provider.decide(observation, observation.legal_actions, 20, 817)
+        counts = Counter()
+        for seed in range(10_000):
+            decision = await provider.decide(observation, observation.legal_actions, 20, seed)
+            counts[decision.action.value] += 1
+        return first, second, counts
+
+    first, second, counts = asyncio.run(decisions_for_seeds())
     assert first == second
     assert first.metadata["coverageStatus"] == "covered"
     assert first.metadata["policyFingerprint"] == provider.artifact.fingerprint
     assert first.metadata["sourceLicense"] == "Riverline-first-party"
     assert any(legal.accepts(action=first.action, amount=first.amount) for legal in observation.legal_actions)
 
-    counts = Counter(
-        asyncio.run(provider.decide(observation, observation.legal_actions, 20, seed)).action.value
-        for seed in range(10_000)
-    )
     observed = {action: counts[action] / 10_000 for action in ("fold", "call", "raise")}
     assert observed["fold"] == pytest.approx(0.3, abs=0.02)
     assert observed["call"] == pytest.approx(0.4, abs=0.02)
     assert observed["raise"] == pytest.approx(0.3, abs=0.02)
+    assert loop_creations == 1
 
 
 def test_theory_profile_falls_back_for_an_illegal_artifact_sizing_without_breaking_runtime_fallbacks():
