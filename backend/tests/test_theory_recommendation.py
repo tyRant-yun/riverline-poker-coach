@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from time import perf_counter
 
 from fastapi.testclient import TestClient
 
@@ -124,6 +125,16 @@ def test_live_hu_river_adapter_uses_public_posteriors_and_cache_without_private_
     assert first.result.evidence_grade == "B"
     assert second.result.cache_hit is True
     assert "2c3d" not in str(first.result)
+    samples = []
+    for _ in range(20):
+        started = perf_counter()
+        cached = _live_hu_river_l2(events=(), observation=observation, decision_fingerprint="decision-public", cache=cache)
+        samples.append((perf_counter() - started) * 1_000)
+        assert cached is not None and cached.result.cache_hit is True
+    samples.sort()
+    p95 = samples[18]
+    print(f"live_l2_cache_hit_p95_ms={p95:.3f}")
+    assert p95 < 500
 
 
 def test_live_l2_adapter_returns_none_for_multiway_or_unsupported_tree():

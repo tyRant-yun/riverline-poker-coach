@@ -55,6 +55,10 @@ test("continuous table create, legal action, completion, next hand, reconnect, a
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, table: current }) });
       return;
     }
+    if (request.method() === "GET" && url.pathname === `/v1/tables/${sessionId}/insights`) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, insights: { available: true, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, rangeWidthCombos: 214, evidenceGrade: "B", coverageStatus: "covered", policyFingerprint: "sha256:0123456789abcdef", matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 } } }], stats: { available: false, bySeat: [] } } }) });
+      return;
+    }
     if (request.method() === "POST" && url.pathname === `/v1/tables/${sessionId}/actions`) {
       if (actionError) {
         actionError = false;
@@ -98,11 +102,26 @@ test("continuous table create, legal action, completion, next hand, reconnect, a
   await expect(page.getByTestId("bot-provenance")).toContainText("aggressive");
   await expect(page.getByLabel("Decision Summary")).toContainText("策略真相来源");
   await expect(page.getByLabel("Theory 推荐")).toContainText("混合频率");
+  for (const viewport of [{ width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 1920, height: 1080 }, { width: 1024, height: 768 }]) {
+    await page.setViewportSize(viewport);
+    await expect(page.getByTestId("hero-legal-actions")).toBeVisible();
+    await expect(page.getByLabel("Theory 推荐")).toContainText("B 级");
+    await expect(page.getByLabel("Theory 推荐")).toContainText("混合频率");
+    await expect(page.getByLabel("Range Belief")).toContainText("B 级 · 同源 PolicyArtifact");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  }
 
   await page.getByTestId("hero-action-call").click();
   await expect(page.locator("p.warning[role='alert']")).toContainText("table revision is stale");
   await page.getByTestId("hero-action-call").click();
   await expect(page.getByTestId("next-hand")).toBeVisible();
+  await expect(page.getByTestId("training-feedback")).toBeVisible();
+  for (const viewport of [{ width: 1366, height: 768 }, { width: 1440, height: 900 }, { width: 1920, height: 1080 }, { width: 1024, height: 768 }]) {
+    await page.setViewportSize(viewport);
+    await expect(page.getByLabel("Hero 操作区")).toBeVisible();
+    await expect(page.getByTestId("training-feedback")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  }
   await page.getByTestId("next-hand").click();
   await expect(page.getByTestId("continuous-table-status")).toContainText("第 2 手");
 
