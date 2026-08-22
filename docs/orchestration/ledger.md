@@ -82,8 +82,8 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R9-04 Bounded Solver L2 | `/root/r9_04_solver_l2` | `completed` | `merged` | `codex/r9-04-solver-l2` | `d11bd4e` | `c79d891f2316d428e8d597979b62b44acf01a9dc` | [R9-04 handoff](handoffs/R9-04.md) | 20 focused tests; compileall; corpus verify PASS | R9-05/R9-06 | Integrated `760346a..5db4198`; HU river CFR, turn/multiway unsupported |
 | R9-05 Theory Explainer | `/root/r9_05_theory_explainer` | `completed` | `merged` | `codex/r9-05-theory-explainer` | `2dbeb63` | `69bdf8e3f11cf10ba423c81af4a2fdc5e156eff9` | [R9-05 handoff](handoffs/R9-05.md) | 66 focused tests; compileall; corpus smoke PASS | R9-06 | Integrated `2ae71f1..0cb7d25`; live HU L2 waits for permission-safe projected ranges |
 | R9-06 Product Integration | `/root/r9_06_product_integration` | `completed` | `merged` | `codex/r9-06-product-integration` | `accd318` | `35d18b2700629f5aa887a2757af68ee4aeaed1d9` | [R9-06 handoff](handoffs/R9-06.md) | backend 23; frontend 22; build; real two-hand; four-viewports; L2 cache p95 0.058ms | final audit/R9-07 | Integrated `a6d0d6f..cd6b374`; real service and deterministic fixture evidence separated |
-| R9-07 Release Gate | `/root/r9_07_release` | `completed` | `merged` | `codex/r9-07-release` | `bcedde1` | `58d9cfc` | [R9-07 handoff](handoffs/R9-07.md) | backend 696/10 skip; frontend 178/tsc/build; provider 13/13; Playwright 7/7; SQLite smoke 15; provenance/npm audit PASS | final GitHub CI | Source repository READY; binary/container NOT READY because bundled SBOM verdict FAIL |
-| R9 Theory Engine | `/root` | `completed` | `accepted` | `codex/r9-theory-engine` | `1dac59f` | `58d9cfc` | [R9 release](../releases/r9-theory-engine.md) | local release gate PASS; final Standards/Spec/Theory-Privacy P0/P1=0 | push/PR/CI/main | B preflop artifact, bounded HU river jam L2, honest C/unsupported fallback, unified explainer and training journey |
+| R9-07 Release Gate | `/root/r9_07_release` | `completed` | `merged` | `codex/r9-07-release` | `bcedde1` | `58d9cfc` | [R9-07 handoff](handoffs/R9-07.md) | backend 696/10 skip; frontend 178/tsc/build; provider 13/13; Playwright 7/7; SQLite smoke 15; provenance/npm audit PASS | completed | Source repository READY; GitHub CI `32555470533` green; binary/container NOT READY because bundled SBOM verdict FAIL |
+| R9 Theory Engine | `/root` | `completed` | `merged` | `codex/r9-theory-engine` | `1dac59f` | `8c0c3f0` | [R9 release](../releases/r9-theory-engine.md) | local release gate PASS; final audits P0/P1=0; GitHub CI both jobs green | completed | PR #7 merged to `main` at `8c0c3f044ef980889f35dc83f97dadf57551611b` |
 | R9 Final Audit | `/root/r9_audit_*` | `completed` | `accepted` | `codex/r9-theory-engine` | `1dac59f` | `58d9cfc` | [R9 plan](../plans/r9-theory-engine.md) | Standards PASS; Spec PASS; Theory/Privacy PASS; remaining P0/P1=0 | GitHub CI | Final verdict covers full fixed diff; no full-suite rerun by reviewers |
 | R9-FIX-A Benchmark/Artifact/Bot | `/root/r9_02_policy_bot` | `completed` | `merged` | `codex/r9-fix-policy-benchmark` | `38e6032` | `c792a81` | [R9-FIX-A handoff](handoffs/R9-FIX-A.md) | focused tests PASS; provenance/schema/fallback accepted after re-review | R9-FIX-E | Integrated production `47bc643` and handoff `6d906cd` |
 | R9-FIX-B L2 Correctness | `/root/r9_04_solver_l2` | `completed` | `merged` | `codex/r9-fix-l2` | `38e6032` | `c4af4d2` | [R9-FIX-B handoff](handoffs/R9-FIX-B.md) | focused L2 tests PASS; canonical cards and Hero infoset accepted | R9-FIX-D | Integrated production `8c5f4d1` and handoff `1f4d6bb` |
@@ -98,7 +98,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 
 ## 下一入口
 
-`R9 GitHub release`：推送 `codex/r9-theory-engine`，创建 PR，等待精确 Node 24.15.0 与 live PostgreSQL/Redis CI 全绿后合并 `main`；binary/container 保持禁止发布。
+`R9` 已完成并通过 source repository 发布门；下一入口由用户体验反馈或新阶段计划决定。Binary/container 仍保持禁止发布。
 
 ## MVP 执行策略
 
