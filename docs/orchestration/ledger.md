@@ -77,10 +77,10 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R9-PLAN Theory Engine Plan | `/root/r9_master_plan` | `completed` | `merged` | `codex/r9-theory-engine` | `1dac59f` | `f5484d9288b62cb492a3ef2882265f914ac722dd` | [R9 plan handoff](handoffs/R9-PLAN.md) | documentation diff-check PASS | R9-00/R9-01 | Training-grade A/B/C evidence plan; no full 6-max GTO claim |
 | R9-00 Theory Benchmark | `/root/r9_00_benchmark` | `completed` | `merged` | `codex/r9-00-benchmark` | `a8256a3` | `33bb05656cbe00af8fb388684ddbcecf526ad20a` | [R9-00 handoff](handoffs/R9-00.md) | 9 focused tests; corpus CLI; compileall PASS | R9-02/R9-04 | Integrated `ccbe84e..21ef6f8`; first-party calibration fixtures, not production policy |
 | R9-01 Range Visual Semantics | `/root/r9_01_range_visual` | `completed` | `merged` | `codex/r9-01-range-visual` | `a8256a3` | `d9c901523cf1c0770f85f277f83463679a536b86` | [R9-01 handoff](handoffs/R9-01.md) | 11 Vitest; tsc; Playwright 2; build PASS | R9-06 | Integrated `d6bfadc..31db0ad`; current DTO remains honestly C-grade |
-| R9-02 Preflop Artifact + Mixed Bot | `/root/r9_02_policy_bot` | `in_progress` | `in_progress` | `codex/r9-02-policy-bot` | `21ef6f8` | — | — | focused artifact/mixing/legal/privacy benchmark pending | R9-03/R9-05 | Riverline-owned B-grade artifact; no external unlicensed strategy data |
-| R9-03 Same-source Range | planned | `planned` | `planned` | `codex/r9-03-policy-range` | — | — | — | waits for R9-02 | R9-06 | Same policy fingerprint; independent marginal remains explicit |
-| R9-04 Bounded Solver L2 | `/root/r9_04_solver_l2` | `in_progress` | `in_progress` | `codex/r9-04-solver-l2` | `21ef6f8` | — | — | focused HU oracle/convergence/privacy/budget benchmark pending | R9-05/R9-06 | Separate internal contract; no shared benchmark-contract writes during R9-02 |
-| R9-05 Theory Explainer | planned | `planned` | `planned` | `codex/r9-05-theory-explainer` | — | — | — | waits for R9-02 and R9-04 contract | R9-06 | Formula is explanation, not competing policy truth |
+| R9-02 Preflop Artifact + Mixed Bot | `/root/r9_02_policy_bot` | `completed` | `merged` | `codex/r9-02-policy-bot` | `d11bd4e` | `0e7562ddb9923e7c0b755e02a4dc9fa55f565cf2` | [R9-02 handoff](handoffs/R9-02.md) | 41 focused tests; compileall; corpus smoke PASS | R9-03/R9-05 | Integrated `839174e..6dd35d4`; B-grade RFI/single-RFI coverage with C fallback |
+| R9-03 Same-source Range | `/root/r9_03_policy_range` | `in_progress` | `in_progress` | `codex/r9-03-policy-range` | `6dd35d4` | — | — | policy fingerprint/mass/privacy benchmark pending | R9-06 | Same policy fingerprint; independent marginal remains explicit |
+| R9-04 Bounded Solver L2 | `/root/r9_04_solver_l2` | `completed` | `merged` | `codex/r9-04-solver-l2` | `d11bd4e` | `c79d891f2316d428e8d597979b62b44acf01a9dc` | [R9-04 handoff](handoffs/R9-04.md) | 20 focused tests; compileall; corpus verify PASS | R9-05/R9-06 | Integrated `760346a..5db4198`; HU river CFR, turn/multiway unsupported |
+| R9-05 Theory Explainer | `/root/r9_05_theory_explainer` | `in_progress` | `in_progress` | `codex/r9-05-theory-explainer` | `6dd35d4` | — | — | unified policy truth/explanation/EV-loss gates pending | R9-06 | Formula is explanation, not competing policy truth |
 | R9-06 Product Integration | planned | `planned` | `planned` | `codex/r9-06-product-integration` | — | — | — | waits for R9-01/02/03/05 | R9-07 | Continuous-table training journey and honest downgrade |
 | R9-07 Release Gate | planned | `planned` | `planned` | `codex/r9-07-release` | — | — | — | waits for R9-06 | final audit/release | One final full gate after implementation batch |
 | R9 Theory Engine | `/root` | `in_progress` | `in_progress` | `codex/r9-theory-engine` | `1dac59f` | — | [R9 plan](../plans/r9-theory-engine.md) | plan committed; implementation pending | R9-00/R9-01 | Default: B-grade owned preflop artifact, first-party L2, frequency-deviation scoring |
@@ -88,7 +88,7 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 
 ## 下一入口
 
-`R9-02 + R9-04`：从已集成 benchmark/Range 的 `21ef6f8` 并行实现 B 级翻前 artifact/mixed Bot 与 first-party bounded HU L2。两任务文件所有权分离，均只能通过 R9-00 证据门升级等级。
+`R9-03 + R9-05`：从已集成 PolicyArtifact/L2 的 `6dd35d4` 并行实现同源 Range prior/likelihood 与统一 Theory Explainer；Range 与 Advisor/API 文件所有权分离。完成后进入单一 R9-06 产品接线。
 
 ## MVP 执行策略
 
