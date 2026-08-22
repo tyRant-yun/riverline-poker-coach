@@ -1,8 +1,8 @@
-# 德州扑克策略教学产品
+# Riverline：可观测的德州扑克认知模拟器
 
-当前状态：已完成一个可本地运行的 HU NLHE MVP 核心切片，并已接入整手逐决策复盘工作台；同时已集成可观察 6-max 持续牌桌的 MVP 基础（权威 session、事件恢复、Bot、连续牌桌 API 与轮询 UI）。当前覆盖事件重放、合法动作、牌力与牌面分析、精确/模拟 Equity、证据汇总、策略目录匹配、FastAPI、SQLite 场景/修订/分析历史、验证练习和 Next.js 场景编辑器；教学层支持证据约束、三档解释深度和合法动作边界，外部模型 Agent、Redis 多进程任务、翻后 Solver，以及按行动更新范围、按节点求解和整手教学均已有实现。自适应训练仍在后续迭代。
+Riverline v0.2.0 是一个可本地运行的 6-max 人机训练 MVP：玩家可以连续打牌，观察座位级 Range Belief，获得与同一 Theory Truth Source 对齐的决策建议，并在牌局结束后进入自动复盘和会话统计。牌桌包含随机发牌、摊牌、Bot 策略分层、清台补码、断线恢复，以及带可读动作节奏的交互界面。
 
-持续牌桌当前支持创建、断线重连、合法操作、下一手、Advisor 摘要、Range Belief、Fast Solver 与完成手牌复盘入口；Stats 与自动复盘闭环仍是后续范围。当前阶段和验证证据见 [`PROJECT_STATE.md`](PROJECT_STATE.md) 与 [`docs/orchestration/ledger.md`](docs/orchestration/ledger.md)。
+理论层当前提供 B 级的受支持翻前策略节点和受限 HU river jam L2；其余复杂翻后、多路底池或未验证尺度会明确降级为 C/unsupported，不伪造 GTO 频率、EV、推荐尺度或完整范围。它是可验证、可迭代的教学产品基线，不是完整 6-max GTO/Nash Solver。发布状态和实测证据见 [`docs/releases/v0.2.0.md`](docs/releases/v0.2.0.md)。
 
 ## 本地验证
 
@@ -65,7 +65,9 @@ API 默认限制单请求体为 1 MiB、单次分析超时为 120 秒、匿名�
 
 启动器会检查 8000/3000 端口、等待 `/health` 和网页 ready，并把 PID、进程启动时间、端口与日志位置写入被 Git 忽略的 `.data/local-runtime.json`；重复启动会复用现有实例，停止器只结束身份匹配的 Riverline 进程树。无需自动打开浏览器时加 `-NoOpen`；端口冲突时可指定 `-ApiPort 8100 -WebPort 3100`。只有已启动外部 PostgreSQL/Redis 时才给启动器加 `-UseExternalServices`。`run-local.ps1` 保留为底层启动实现，不建议日常直接调用。
 
-## Docker 部署（API + 独立 worker + PostgreSQL + Redis）
+## Docker 集成环境（尚未达到发布门）
+
+以下 Compose 配置仅供本地开发和集成验证。当前 SBOM 对源码仓库判定为 PASS，但捆绑二进制/容器判定为 FAIL，因此 v0.2.0 不发布容器镜像，也不应将此配置视为生产部署基线。
 
 ```powershell
 docker compose up -d            # 构建并启动 4 个容器
@@ -91,10 +93,15 @@ curl http://127.0.0.1:8000/health
 - [Hand Review Workbench 执行台账](docs/hand-review-workbench-execution.md)
 - [BYO DeepSeek Key 端到端加密设计](docs/design-bring-your-own-key.md)
 - [依赖与许可证清单](docs/dependency-inventory.md)
-- [开发规范](AGENT.MD)
+- [v0.2.0 发布说明](docs/releases/v0.2.0.md)
+- [人机协作与 Token 纪律](docs/orchestration/human-ai-token-collaboration-guide.md)
+- [Riverline 执行复盘](docs/orchestration/riverline-execution-retrospective.md)
+- [Agent 执行规范](AGENTS.md)
 
 ## 当前边界
 
-PostgreSQL 适配已通过真实实例部署回归（PostgreSQL 16，见 `backend/tests/test_postgres_live.py`：schema 迁移、场景/修订/分析/学习记录与 SQLite 对拍、完整 HTTP 流程）；连接池和迁移回滚仍待生产化。Redis 异步任务已实现（`poker_coach.jobs`：进程内线程池兜底 + Redis 队列 + 协作式跨进程取消，fakeredis 单测 + 真实 Redis 跨进程 E2E 验证）。外部模型 Agent 适配器已实现（`coach/external.py`：只读 Gateway 事实注入、非法行动过滤、证据引用净化、失败降级到本地 principle-only 教师），通过 `POKER_COACH_LLM_API_KEY` 等环境变量启用。前端 E2E 已覆盖保存、修订、历史重分析和导入流程。
+PostgreSQL 适配已通过真实实例部署回归（PostgreSQL 16，见 `backend/tests/test_postgres_live.py`）；连接池和迁移回滚仍待生产化。Redis 异步任务和外部模型 Agent 适配器已有安全降级，但 v0.2.0 的默认体验刻意使用 SQLite、无 Redis、本地确定性教师，以降低启动和恢复风险。
+
+当前只声明源码仓库发布可用。完整 6-max GTO、turn/multiway 翻后求解、生产级多租户 SaaS、计费、隔离运维以及可分发二进制/容器仍不在本版本承诺中。许可与供应链边界以 [`docs/provenance/sbom.json`](docs/provenance/sbom.json) 为准。
 
 示例场景见 [examples/scenario-flop.json](examples/scenario-flop.json)，安全和运维边界见 [安全、隐私与运维](docs/security-privacy-operations.md)。编辑器支持 ScenarioSpec JSON 导入/导出；教学层的只读工具边界和评测见 [教学 Agent 评测基线](docs/agent-evaluation.md)。
