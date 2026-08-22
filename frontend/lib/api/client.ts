@@ -24,6 +24,7 @@ import type {
   TableReviewResponse,
   TableReconciliationResponse,
   TableSolverResponse,
+  TableTheoryRecommendationResponse,
   TeachingResponse,
 } from "../../types/api";
 import type { RangeBeliefTraceResponse, RangeBeliefView } from "../../types/rangeBelief";
@@ -165,6 +166,8 @@ export const continuousTableApi = {
   nextHand: (sessionId: string, payload: { commandId: string; expectedRevision: number }) =>
     request<ContinuousTableResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/hands`, { schemaVersion: 1, ...payload }),
   insights: (sessionId: string) => requestGet<TableInsightsResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/insights`),
+  theoryRecommendation: (sessionId: string, payload: { handId: string; decisionFingerprint: string }) =>
+    request<TableTheoryRecommendationResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/theory-recommendation`, { schemaVersion: 1, ...payload }),
   solver: (sessionId: string, payload: { handId: string; decisionFingerprint: string; budgetTier?: "quick" | "standard" | "deep" }) =>
     request<TableSolverResponse>(`/v1/tables/${encodeURIComponent(sessionId)}/solver`, { schemaVersion: 1, ...payload }),
   reconciliation: (sessionId: string, payload: { handId: string; decisionFingerprint: string; budgetTier?: "quick" | "standard" | "deep" }) =>

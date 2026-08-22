@@ -48,18 +48,20 @@ describe("Table V2 visual contracts", () => {
 
   it("keeps Range summary and Solver evidence visible together without a tab switch", () => {
     render(<InsightRailV2 insights={{ available: true, advisor: { available: true, result: { status: "ready", recommendedAction: { action: "call", amountSemantics: "cost", reason: "price" }, source: "deterministic_formula", version: "v1", confidence: "high", explanationKey: "price", limitations: [], decision: { fingerprint: "fp", handId: "h1", sequence: 3, street: "flop" } } }, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, confidence: "heuristic", source: "riverline.heuristic_seed", version: "heuristic_seed_v2", approximate: true, approximationReason: "nearest_stack_bucket:100bb", changeReason: "公开行动：加注", limitations: ["这是独立边际估计，不含对手私牌。"], decision: { handId: "h1", afterSequence: 3 }, matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 }, AKs: { probabilityMass: "0.05", comboCount: 4 } }, topClasses: [{ hand: "AA", probabilityMass: "0.08" }] }], stats: { available: true, bySeat: [{ seatId: 1, vpip: 0.25, pfr: 0.18, threeBet: 0.07 }] } }} solver={{ status: "degraded", recommendedAction: null, candidates: [{ action: "call", approximateEvChips: "12.5" }], equity: "0.42", iterations: 80, source: "monte_carlo", version: "v1", limitations: ["uniform opponents"] }} solverElapsedMs={24} />);
-    expect(screen.getByLabelText("Range Belief")).toBeVisible(); expect(screen.getByLabelText("Solver 结果")).toBeVisible(); expect(screen.getByLabelText("Decision Summary")).toHaveTextContent("规则基线");
+    expect(screen.getByLabelText("Range Belief")).toBeVisible(); expect(screen.getByLabelText("Solver 结果")).toBeVisible(); expect(screen.getByLabelText("Decision Summary")).toHaveTextContent("策略真相来源");
     expect(screen.getByText(/范围宽度 28.5%/)).toBeInTheDocument(); expect(screen.getByText(/近似：100BB 最近档/)).toBeInTheDocument();
     expect(screen.getByLabelText("Range Belief")).toHaveTextContent("C 级 · 公开行动启发式");
-    expect(screen.getByLabelText("Range Belief")).toHaveTextContent("覆盖：近似");
+    expect(screen.getByLabelText("Range Belief")).toHaveTextContent("覆盖：fallback");
     fireEvent.click(screen.getByRole("button", { name: /座位 2/ })); expect(screen.getByLabelText("Range Belief")).toHaveTextContent("最近变化：公开行动：加注");
     expect(screen.getAllByText(/模拟估计/).length).toBeGreaterThanOrEqual(1); expect(screen.getAllByText(/跟注/).length).toBeGreaterThanOrEqual(1);
   });
   it("shows the additive Range V2 and Solver L1.5 provenance without requiring new fields from old responses", () => {
-    render(<InsightRailV2 insights={{ available: true, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, rangeWidthCombos: 214, confidenceScore: 0.8, dataVersion: "range-v2.1", changeReason: "公开行动：加注", approximate: true, approximationReason: "nearest_stack_bucket:100bb", matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 } } }] }} solver={{ status: "ready", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "call", amount: 100, approximateEvChips: "12.5", showdownEquity: "0.42", foldEquity: "0", sampleCount: 80, effectiveSampleSize: "80", confidenceInterval95: { lower: "8", upper: "17" }, responseMix: { fold: "0", call: "1", raise: "0" } }], equity: "0.42", iterations: 80, sampleCount: 80, effectiveSampleSize: "80", budgetTier: "standard", budgetMs: 150, confidence: "coarse", source: "range_weighted_public_beliefs", rangeStatus: "ready", version: "fast-ev-solver/v1", modelVersion: "fast-ev-solver/v1.5", limitations: ["not GTO"] }} />);
+    render(<InsightRailV2 insights={{ available: true, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, rangeWidthCombos: 214, confidenceScore: 0.8, dataVersion: "range-v2.1", evidenceGrade: "B", coverageStatus: "covered", policyFingerprint: "sha256:0123456789abcdef", changeReason: "公开行动：加注", approximate: true, approximationReason: "nearest_stack_bucket:100bb", matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 } } }] }} solver={{ status: "ready", recommendedAction: { action: "call", amount: 100 }, candidates: [{ action: "call", amount: 100, approximateEvChips: "12.5", showdownEquity: "0.42", foldEquity: "0", sampleCount: 80, effectiveSampleSize: "80", confidenceInterval95: { lower: "8", upper: "17" }, responseMix: { fold: "0", call: "1", raise: "0" } }], equity: "0.42", iterations: 80, sampleCount: 80, effectiveSampleSize: "80", budgetTier: "standard", budgetMs: 150, confidence: "coarse", source: "range_weighted_public_beliefs", rangeStatus: "ready", version: "fast-ev-solver/v1", modelVersion: "fast-ev-solver/v1.5", limitations: ["not GTO"] }} />);
     expect(screen.getByText(/214 weighted combos/)).toBeInTheDocument();
     expect(screen.getByLabelText("Range Belief")).toHaveTextContent("范围宽度 28.5%");
-    expect(screen.getByLabelText("Decision Summary")).toHaveTextContent("Advisor：暂不可用");
+    expect(screen.getByLabelText("Range Belief")).toHaveTextContent("B 级 · 同源 PolicyArtifact");
+    expect(screen.getByLabelText("Range Belief")).toHaveTextContent("覆盖：covered · fingerprint sha256:012…");
+    expect(screen.getByLabelText("Decision Summary")).toHaveTextContent("等待统一 theory-recommendation");
     expect(screen.getByLabelText("Solver Action Ladder")).toHaveTextContent("跟注 100");
   });
   it("renders backend-calibrated ΔEV, uncertainty, close, and extreme sizing facts without declaring GTO", () => {
@@ -75,9 +77,9 @@ describe("Table V2 visual contracts", () => {
     expect(ladder).toHaveTextContent(/^下注 · 50.0% pot · 200/); expect(ladder).not.toHaveTextContent("弃牌");
     fireEvent.click(screen.getByRole("button", { name: "全部尺度（4）" })); expect(ladder).toHaveTextContent("弃牌");
   });
-  it("shows reconciliation amountChips, pot percentage, and available SPR without browser arbitration", () => {
+  it("keeps legacy reconciliation out of the policy-truth summary", () => {
     render(<InsightRailV2 table={{ heroSeat: 0, pot: 500, seats: [{ seatId: 0, stack: 5_000 }] } as never} reconciliation={{ status: "ready", decision: { fingerprint: "f", handId: "h", sequence: 1, street: "flop" }, ruleBaseline: { role: "rule_baseline", status: "ready", action: { action: "bet", amountSemantics: "to", amountChips: 330, potPct: "66" }, provenance: {}, limitations: [] }, simulationEstimate: { role: "simulation_estimate", status: "ready", action: { action: "call", amountSemantics: "cost", amountChips: 100, potPct: "20" }, provenance: {}, limitations: [] }, agreement: { kind: "different_action", reasonCodes: ["model_limitations"], confidenceInterval: { status: "available" }, sizingRobustness: "close" } }} />);
-    const summary = screen.getByLabelText("Decision Summary"); expect(summary).toHaveTextContent("下注 · 66.0% pot · 330"); expect(summary).toHaveTextContent("跟注 · 20.0% pot · 100"); expect(summary).toHaveTextContent("SPR 10.0"); expect(summary).toHaveTextContent("存在分歧 · 模型限制");
+    const summary = screen.getByLabelText("Decision Summary"); expect(summary).toHaveTextContent("等待统一 theory-recommendation"); expect(summary).toHaveTextContent("SPR 10.0"); expect(summary).not.toHaveTextContent("模型限制");
   });
   it("retains the previous same-hand snapshot for verifiable Top movers", async () => {
     const table = { sessionId: "s", handId: "h", fingerprint: "a", street: "flop", pot: 100 };

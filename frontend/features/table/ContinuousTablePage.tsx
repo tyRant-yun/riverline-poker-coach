@@ -4,9 +4,9 @@ import { useEffect, useRef, useState } from "react";
 
 import { TableWorkspaceV2, type ActionDelta, type PlaybackSpeed } from "../table-v2/TableWorkspaceV2";
 import { continuousTableApi } from "../../lib/api/client";
-import type { ContinuousTable, TableInsightsResponse, TableReconciliationResponse, TableReviewResponse, TableSolverResponse } from "../../types/api";
+import type { ContinuousTable, TableInsightsResponse, TableReconciliationResponse, TableReviewResponse, TableSolverResponse, TheoryRecommendation } from "../../types/api";
 
-const profiles = ["cautious", "balanced", "aggressive"] as const;
+const profiles = ["theory", "cautious", "balanced", "aggressive"] as const;
 const actionLabels: Record<string, string> = { fold: "弃牌", check: "过牌", call: "跟注", bet: "下注", raise: "加注", raise_to: "加注", all_in: "全下" };
 
 function commandId(prefix: string) { return `${prefix}-${crypto.randomUUID()}`; }
@@ -21,13 +21,16 @@ function botDeltas(previous: ContinuousTable | null, next: ContinuousTable): Act
     actor: `Bot ${action.actorSeat + 1}`,
     actorSeat: String(action.actorSeat),
     label: actionLabels[action.action] ?? action.action,
+    botProfile: next.botDecisionProvenance.find((item) => item.sequence === action.sequence)?.profileId,
+    botProvider: next.botDecisionProvenance.find((item) => item.sequence === action.sequence)?.provider,
+    botDegraded: next.botDecisionProvenance.find((item) => item.sequence === action.sequence)?.degraded,
     kind: next.handComplete && index === delta.length - 1 ? "showdown" : action.action === "all_in" ? "all-in" : action.action === "raise" || action.action === "raise_to" ? "raise" : "action",
     ...(action.amount != null ? { potDelta: String(action.amount) } : {}),
   }));
 }
 
 export default function ContinuousTablePage() {
-  const [profile, setProfile] = useState<(typeof profiles)[number]>("balanced");
+  const [profile, setProfile] = useState<(typeof profiles)[number]>("theory");
   const [table, setTable] = useState<ContinuousTable | null>(null);
   const [amounts, setAmounts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -36,6 +39,8 @@ export default function ContinuousTablePage() {
   const [review, setReview] = useState<TableReviewResponse["review"] | null>(null);
   const [solver, setSolver] = useState<TableSolverResponse["solver"] | null>(null);
   const [reconciliation, setReconciliation] = useState<TableReconciliationResponse["reconciliation"] | null>(null);
+  const [theory, setTheory] = useState<TheoryRecommendation | null>(null);
+  const [trainingFeedback, setTrainingFeedback] = useState<{ identity: string; action: string; frequency: number | null; common: boolean; evLossUnavailable: string | null } | null>(null);
   const [solverLoading, setSolverLoading] = useState(false);
   const [solverElapsedMs, setSolverElapsedMs] = useState<number | null>(null);
   const [playbackActions, setPlaybackActions] = useState<readonly ActionDelta[]>([]);
@@ -50,9 +55,11 @@ export default function ContinuousTablePage() {
   const solverIdentity = useRef<string | null>(null);
   const reconciliationRequest = useRef(0);
   const reconciliationIdentity = useRef<string | null>(null);
+  const theoryRequest = useRef(0);
+  const theoryIdentity = useRef<string | null>(null);
 
   function identityFor(next: ContinuousTable) {
-    return `${next.sessionId}:${next.handId ?? "none"}:${next.fingerprint}`;
+    return `${next.sessionId}:${next.handId ?? "none"}:${next.revision}:${next.fingerprint}`;
   }
 
   function cancelPlayback() { setPlaybackActions([]); setPlaybackIdentity((value) => `${value}:cancel`); setPlaying(false); }
@@ -92,6 +99,16 @@ export default function ContinuousTablePage() {
       .then((response) => { if (request === reconciliationRequest.current && identity === reconciliationIdentity.current) setReconciliation(response.reconciliation); })
       .catch(() => { if (request === reconciliationRequest.current && identity === reconciliationIdentity.current) setReconciliation(null); });
   }
+  function loadTheory(next: ContinuousTable) {
+    const request = ++theoryRequest.current;
+    const identity = next.handId && !next.handComplete && next.currentActor === next.heroSeat ? identityFor(next) : null;
+    theoryIdentity.current = identity;
+    setTheory(null);
+    if (!identity || !next.handId) return;
+    continuousTableApi.theoryRecommendation(next.sessionId, { handId: next.handId, decisionFingerprint: next.fingerprint })
+      .then((response) => { if (request === theoryRequest.current && identity === theoryIdentity.current && response.recommendation.decision.fingerprint === next.fingerprint) setTheory(response.recommendation); })
+      .catch(() => { if (request === theoryRequest.current && identity === theoryIdentity.current) setTheory(null); });
+  }
   function hydrate(next: ContinuousTable, mode: "snapshot" | "transition") {
     const actions = mode === "transition" ? botDeltas(tableRef.current, next) : [];
     tableRef.current = next;
@@ -99,7 +116,8 @@ export default function ContinuousTablePage() {
     setPlaybackActions(actions);
     setPlaybackIdentity(`${next.sessionId}:${next.handId ?? "none"}:${next.revision}:${actions.map((action) => action.id).join("/")}`);
     setPlaying(actions.length > 0 && playbackSpeed !== "skip" && playbackSpeed !== "instant");
-    loadInsights(next); loadSolver(next); loadReconciliation(next); loadReview(next);
+    if (mode === "snapshot" || next.currentActor === next.heroSeat) setTrainingFeedback(null);
+    loadInsights(next); loadTheory(next); loadSolver(next); loadReconciliation(next); loadReview(next);
   }
 
   useEffect(() => {
@@ -118,25 +136,30 @@ export default function ContinuousTablePage() {
   async function submit(legal: ContinuousTable["heroLegalActions"][number]) {
     const current = tableRef.current;
     if (!current?.handId || busy || playing) return;
+    const currentTheory = theory && theoryIdentity.current === identityFor(current) ? theory : null;
     setBusy(true); setError(null);
     try {
       const response = await continuousTableApi.action(current.sessionId, { commandId: commandId("hero"), handId: current.handId, expectedRevision: current.revision, action: legal.action, amountSemantics: legal.amountSemantics, ...(legal.minAmount != null ? { amount: Number(amounts[legal.action] || legal.minAmount) } : {}) });
       hydrate(response.table, "transition");
+      if (currentTheory) {
+        const selected = currentTheory.actionFrequencies.find((item) => item.action === legal.action);
+        setTrainingFeedback({ identity: identityFor(current), action: legal.action, frequency: selected?.frequency ?? null, common: (selected?.frequency ?? 0) >= 0.2, evLossUnavailable: currentTheory.sameOracleEvLoss.chips == null ? (currentTheory.sameOracleEvLoss.unavailableReason ?? "same_oracle_ev_unavailable") : null });
+      }
     } catch (cause) { setError(cause instanceof Error ? cause.message : "行动未被接受"); }
     finally { setBusy(false); }
   }
   async function nextHand() {
     const current = tableRef.current;
     if (!current || busy) return;
-    cancelPlayback(); setBusy(true); setError(null); setReview(null); setSolver(null); setReconciliation(null); setInsights(null);
+    cancelPlayback(); setBusy(true); setError(null); setReview(null); setTheory(null); setTrainingFeedback(null); setSolver(null); setReconciliation(null); setInsights(null);
     try { const response = await continuousTableApi.nextHand(current.sessionId, { commandId: commandId("next"), expectedRevision: current.revision }); hydrate(response.table, "snapshot"); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "无法开始下一手"); }
     finally { setBusy(false); }
   }
 
   return <section className="continuous-table" data-testid="continuous-table-page">
-    {!table && <div className="panel-heading"><div><h2>持续牌桌</h2><p>Hero + 5 bots · 6-max · 100BB</p></div><label>Bot profile <select value={profile} disabled={busy} onChange={(event) => setProfile(event.target.value as typeof profile)} data-testid="bot-profile">{profiles.map((item) => <option key={item} value={item}>{item}</option>)}</select></label><button className="primary" onClick={create} disabled={busy} data-testid="create-continuous-table">{busy ? "连接中…" : "开始牌桌"}</button></div>}
+    {!table && <div className="panel-heading"><div><h2>持续牌桌</h2><p>Hero + 5 bots · 6-max · 100BB</p></div><label>Bot profile <select value={profile} disabled={busy} onChange={(event) => setProfile(event.target.value as typeof profile)} data-testid="bot-profile">{profiles.map((item) => <option key={item} value={item}>{item === "theory" ? "theory · B artifact / C fallback" : item}</option>)}</select></label><button className="primary" onClick={create} disabled={busy} data-testid="create-continuous-table">{busy ? "连接中…" : "开始牌桌"}</button></div>}
     {error && <p className="warning" role="alert">{error}</p>}
-    {table && <><div className="tv2-toolbar"><p data-testid="continuous-table-status">第 {table.handSequence} 手 · {table.street ?? "等待开局"} · {table.currentActor == null ? "本手结束" : `座位 ${table.currentActor + 1} 行动`}</p><label>Bot 节奏 <select aria-label="Bot 播放速度" value={playbackSpeed} onChange={(event) => setPlaybackSpeed(event.target.value as PlaybackSpeed)}><option value="comfort">舒适</option><option value="fast">快速</option><option value="instant">即时</option></select></label><button type="button" onClick={cancelPlayback} disabled={!playing}>跳过播放</button></div><TableWorkspaceV2 table={table} insights={insights} solver={solver} reconciliation={reconciliation} solverLoading={solverLoading} solverElapsedMs={solverElapsedMs} playbackActions={playbackActions} playbackIdentity={playbackIdentity} playbackSpeed={playbackSpeed} onPlaybackComplete={() => setPlaying(false)} actionDisabled={busy || playing} amounts={amounts} onAmountChange={(action, amount) => setAmounts((current) => ({ ...current, [action]: amount }))} onAction={submit} onNextHand={nextHand} review={review} /></>}
+    {table && <><div className="tv2-toolbar"><p data-testid="continuous-table-status">第 {table.handSequence} 手 · {table.street ?? "等待开局"} · {table.currentActor == null ? "本手结束" : `座位 ${table.currentActor + 1} 行动`}</p><label>Bot 节奏 <select aria-label="Bot 播放速度" value={playbackSpeed} onChange={(event) => setPlaybackSpeed(event.target.value as PlaybackSpeed)}><option value="comfort">舒适</option><option value="fast">快速</option><option value="instant">即时</option></select></label><button type="button" onClick={cancelPlayback} disabled={!playing}>跳过播放</button></div><TableWorkspaceV2 table={table} insights={insights} theory={theory} trainingFeedback={trainingFeedback} solver={solver} reconciliation={reconciliation} solverLoading={solverLoading} solverElapsedMs={solverElapsedMs} playbackActions={playbackActions} playbackIdentity={playbackIdentity} playbackSpeed={playbackSpeed} onPlaybackComplete={() => setPlaying(false)} actionDisabled={busy || playing} amounts={amounts} onAmountChange={(action, amount) => setAmounts((current) => ({ ...current, [action]: amount }))} onAction={submit} onNextHand={nextHand} review={review} /></>}
   </section>;
 }

@@ -23,7 +23,7 @@ from poker_coach.persistence.session_store import (
 from poker_coach.ranges.event_beliefs import PublicEventBeliefConsumer
 from poker_coach.theory import PreflopPolicyContext, TheoryDecisionIdentityV1, TheoryExplainer
 
-from .bot_providers import BLUEPRINT_PROFILE_IDS, build_bot_provider
+from .bot_providers import BOT_PROFILE_IDS, build_bot_provider
 from .bot_runtime import BotRuntime
 from .auto_review import AutomaticReviewProjectionService
 from .contracts import ActionTakenPayloadV1, HandCompletedPayloadV1, HoleCardsRecordedPayloadV1
@@ -137,8 +137,8 @@ class ContinuousTableService:
         )
         hero_seat = _seat(request.get("heroSeat", 0), "heroSeat")
         profile = request.get("botProfile", "balanced")
-        if profile not in BLUEPRINT_PROFILE_IDS:
-            raise ContinuousTableError("invalid_bot_profile", "botProfile must be cautious, balanced, or aggressive")
+        if profile not in BOT_PROFILE_IDS:
+            raise ContinuousTableError("invalid_bot_profile", "botProfile is not a supported profile")
         session_id = request.get("sessionId") or f"table-{uuid4().hex}"
         if not isinstance(session_id, str):
             raise ContinuousTableError("invalid_payload", "sessionId must be a string")

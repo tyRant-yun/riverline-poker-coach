@@ -290,7 +290,7 @@ def test_three_hands_reconnect_idempotency_and_information_isolation(tmp_path):
 
 def test_profiles_conflicts_and_bot_fallback_are_stable(tmp_path):
     client, service = _client(tmp_path)
-    for profile in ("cautious", "balanced", "aggressive"):
+    for profile in ("cautious", "balanced", "aggressive", "theory"):
         table = _create(client, command_id=f"create-{profile}", profile=profile)
         assert {item["profileId"] for item in table["botDecisionProvenance"]} == {profile}
 

@@ -76,6 +76,12 @@ test("continuous table create, legal action, completion, next hand, reconnect, a
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, reconciliation: { status: "ready", decision: { fingerprint: current.fingerprint, handId: current.handId, sequence: 8, street: "flop" }, ruleBaseline: { role: "rule_baseline", status: "ready", action: { action: "call", amountSemantics: "cost", amountChips: 100, potPct: "22.2" }, provenance: {}, limitations: [] }, simulationEstimate: { role: "simulation_estimate", status: "ready", action: { action: "call", amountSemantics: "cost", amountChips: 100, potPct: "22.2" }, provenance: {}, limitations: [] }, agreement: { kind: "exact_action", reasonCodes: [], confidenceInterval: { status: "available", overlap: false }, sizingRobustness: "robust" } } }) });
       return;
     }
+    if (request.method() === "POST" && url.pathname === `/v1/tables/${sessionId}/theory-recommendation`) {
+      const body = request.postDataJSON();
+      expect(body.decisionFingerprint).toBe(current.fingerprint);
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ schemaVersion: 1, recommendation: { status: "ready", available: true, decision: { fingerprint: current.fingerprint, handId: current.handId, sequence: 8, street: "flop", observerSeat: 0 }, evidence: { sourceKind: "policy_artifact", evidenceGrade: "B", version: "artifact/v1", policyFingerprint: "sha256:0123456789abcdef", provenance: "first-party", coverage: { status: "covered", players: 6, street: "preflop" } }, recommendedAction: { action: "call", amountSemantics: "cost", amount: 100, frequency: 0.7 }, actionFrequencies: [{ action: "call", amountSemantics: "cost", amount: 100, frequency: 0.7 }, { action: "fold", amountSemantics: "none", frequency: 0.3 }], sameOracleEvLoss: { unavailableReason: "source_has_no_same_oracle_identity" }, explanation: { formulaVersion: "formula/v1", potOdds: "0.2", assumptions: [], limitations: [] }, degradation: [] } }) });
+      return;
+    }
     await route.continue();
   });
 
@@ -90,6 +96,8 @@ test("continuous table create, legal action, completion, next hand, reconnect, a
   await expect(page.getByLabel("Q♠")).toBeVisible();
   expect(await page.getByLabel("card back").count()).toBe(0);
   await expect(page.getByTestId("bot-provenance")).toContainText("aggressive");
+  await expect(page.getByLabel("Decision Summary")).toContainText("策略真相来源");
+  await expect(page.getByLabel("Theory 推荐")).toContainText("混合频率");
 
   await page.getByTestId("hero-action-call").click();
   await expect(page.locator("p.warning[role='alert']")).toContainText("table revision is stale");
@@ -106,4 +114,5 @@ test("continuous table create, legal action, completion, next hand, reconnect, a
   expect(calls).toContain(`POST /v1/tables/${sessionId}/actions`);
   expect(calls).toContain(`POST /v1/tables/${sessionId}/hands`);
   expect(calls).toContain(`POST /v1/tables/${sessionId}/reconciliation`);
+  expect(calls).toContain(`POST /v1/tables/${sessionId}/theory-recommendation`);
 });
