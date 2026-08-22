@@ -47,6 +47,7 @@ from .seat_priors import (
     default_seat_prior_provider,
 )
 from .event_beliefs import PublicEventBeliefConsumer, SeatBeliefProvenanceV1, SeatBeliefResultV1, SeatBeliefUnavailableReason
+from .policy_artifact import PolicyArtifactRangeAdapter, default_policy_artifact_range_adapter
 from .trace import RangeBeliefTrace, board_at_sequence, build_range_trace, dead_cards_for_belief
 from .update import apply_dead_cards, snapshot_from_range, update_range_belief
 from .views import RangeBeliefComboView, RangeBeliefView, build_belief_view
@@ -61,6 +62,7 @@ __all__ = [
     "PolicySequenceMismatchError",
     "NoPriorRangeError",
     "PolicyActionSpec",
+    "PolicyArtifactRangeAdapter",
     "PolicyResult",
     "PolicySource",
     "PREFLOP_POLICY_VERSION",
@@ -92,6 +94,7 @@ __all__ = [
     "board_at_sequence",
     "dead_cards_for_belief",
     "default_seat_prior_provider",
+    "default_policy_artifact_range_adapter",
     "cards_from_key",
     "combo_key",
     "match_observed_action",

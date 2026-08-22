@@ -43,9 +43,11 @@ def test_six_max_unopened_prior_covers_every_position_and_is_normalized():
         assert len(result.snapshot.combos) == 1326
         assert abs(sum(combo.probability for combo in result.snapshot.combos.values()) - Decimal("1")) < Decimal("1e-24")
         assert result.provenance is not None
-        assert result.provenance.provider == "riverline.position_stack_heuristic"
-        assert result.provenance.version == "heuristic_seed_v2"
-        assert result.provenance.trust_level == "heuristic"
+        assert result.provenance.provider == "riverline.policy_artifact_range"
+        assert result.provenance.evidence_grade == "B"
+        assert result.provenance.coverage_status == "covered"
+        assert result.provenance.policy_fingerprint.startswith("sha256:")
+        assert result.provenance.trust_level == "policy_artifact"
 
 
 def test_button_rotation_and_sparse_stable_seats_never_dense_renumber():

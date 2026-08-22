@@ -20,8 +20,10 @@ from poker_coach.simulator.contracts import (
     HandStartedPayloadV1, HoleCardsRecordedPayloadV1, SimulatorActionV1,
 )
 
-from .belief import RangeBeliefCombo, RangeBeliefSnapshot, RangeUpdateMetadata, combo_overlaps, snapshot_id_for
+from .belief import NoPolicyError, PolicySource, RangeBeliefCombo, RangeBeliefSnapshot, RangeUpdateMetadata, combo_overlaps, snapshot_id_for
 from .likelihood import PublicActionContext, change_reason, likelihood, size_bucket, spr_bucket
+from .policy import PolicyResult
+from .policy_artifact import default_policy_artifact_range_adapter
 from .seat_priors import SeatPriorQueryV1, SeatPriorResultV1, SeatPriorUnavailableReason, default_seat_prior_provider
 
 _VERSION = "heuristic_likelihood_v2"
@@ -107,6 +109,10 @@ class SeatBeliefProvenanceV1(DomainModel):
     trust_level: str = "heuristic"
     confidence: Decimal = Field(default=Decimal("0.20"), ge=0, le=1)
     independent_marginal_only: bool = True
+    evidence_grade: str = "C"
+    coverage_status: str = "fallback"
+    fallback_reason: str | None = None
+    policy_fingerprint: str | None = None
 
 
 class SeatBeliefResultV1(DomainModel):
@@ -179,6 +185,8 @@ class PublicEventBeliefConsumer:
         assert all(snapshots.values())
         prior_snapshots = dict(snapshots)
         inactive_seats: set[int] = set()
+        preflop_public_actions: list[ActionTakenPayloadV1] = []
+        artifact_adapter = default_policy_artifact_range_adapter()
         board: list[Card] = []
         street_contributions = {seat: 0 for seat in started.active_seat_ids}
         stacks = dict(started.starting_stacks)
@@ -213,26 +221,119 @@ class PublicEventBeliefConsumer:
                 )
                 likelihood_amount = contribution if payload.amount is not None else None
                 cache_transition = event.sequence < target
+                policy: PolicyResult | None = None
+                policy_action: str | None = None
+                fallback_reason: str | None = None
+                if payload.street is Street.PREFLOP:
+                    try:
+                        policy, artifact_use = artifact_adapter.policy_for_action(
+                            started,
+                            tuple(preflop_public_actions),
+                            payload,
+                            tuple(snapshots[payload.actor_seat].combos),
+                        )
+                        policy_action = artifact_use.policy_action
+                    except NoPolicyError as exc:
+                        fallback_reason = str(exc)
+                else:
+                    fallback_reason = "street"
                 if payload.action is SimulatorActionV1.FOLD:
                     inactive_seats.add(payload.actor_seat)
                     snapshots[payload.actor_seat] = _mark_inactive(
                         snapshots[payload.actor_seat], payload, event.sequence, context,
-                        likelihood_amount, cache_transition,
+                        likelihood_amount, cache_transition, policy, policy_action,
+                        fallback_reason,
                     )
                 else:
                     snapshots[payload.actor_seat] = _apply_action(
                         snapshots[payload.actor_seat], payload, event.sequence, context,
-                        likelihood_amount, cache_transition,
+                        likelihood_amount, cache_transition, policy, policy_action,
+                        fallback_reason,
                     )
                 pot = _advance_public_state(
                     payload, pot, stacks, street_contributions, contribution
                 )
+                if payload.street is Street.PREFLOP:
+                    preflop_public_actions.append(payload)
         results = {seat: SeatBeliefResultV1(seat_id=seat, after_sequence=target, available=True, prior=prior_snapshots[seat],
-            current=snapshots[seat], provenance=SeatBeliefProvenanceV1(), inactive=seat in inactive_seats,
+            current=snapshots[seat], provenance=_provenance_for(snapshots[seat], priors[seat]), inactive=seat in inactive_seats,
             approximate=True, approximation_reason=priors[seat].coverage.approximation_reason or "bounded_public_likelihood_v2") for seat in snapshots}
         immutable_results = _immutable_beliefs(results)
         _belief_cache_put(belief_cache_key, immutable_results)
         return dict(immutable_results)
+
+
+def _policy_fingerprint(policy: PolicyResult | None) -> str | None:
+    if policy is None:
+        return None
+    return next(
+        (
+            item.removeprefix("policy_fingerprint:")
+            for item in policy.assumptions
+            if item.startswith("policy_fingerprint:")
+        ),
+        None,
+    )
+
+
+def _action_likelihood(
+    combo: str,
+    action: ActionTakenPayloadV1,
+    likelihood_amount: int | None,
+    context: PublicActionContext,
+    policy: PolicyResult | None,
+    policy_action: str | None,
+) -> Decimal:
+    if policy is not None:
+        if policy_action is None:
+            return Decimal("0")
+        return policy.frequencies.get(combo, {}).get(policy_action, Decimal("0"))
+    return likelihood(combo, action.action, action.street, likelihood_amount, context)
+
+
+def _provenance_for(
+    snapshot: RangeBeliefSnapshot, prior: SeatPriorResultV1
+) -> SeatBeliefProvenanceV1:
+    update = snapshot.update
+    fingerprint = _policy_fingerprint_from_assumptions(update.assumptions if update else ())
+    if snapshot.source is PolicySource.PREFLOP_POLICY and fingerprint is not None:
+        return SeatBeliefProvenanceV1(
+            provider="riverline.policy_artifact_range",
+            version=update.policy_version if update and update.policy_version else "unknown",
+            artifact_fingerprint=fingerprint.removeprefix("sha256:"),
+            policy_fingerprint=fingerprint,
+            trust_level="policy_artifact",
+            confidence=Decimal("0.70"),
+            evidence_grade="B",
+            coverage_status="covered",
+            independent_marginal_only=True,
+        )
+    fallback = next(
+        (
+            item.removeprefix("policy_artifact_fallback:")
+            for item in (update.assumptions if update else ())
+            if item.startswith("policy_artifact_fallback:")
+        ),
+        None,
+    )
+    if fallback is None and prior.provenance is not None and prior.provenance.coverage_status == "fallback":
+        fallback = "non_100bb" if prior.coverage.approximate or prior.coverage.effective_stack_bucket != "100bb" else "prior_not_covered"
+    return SeatBeliefProvenanceV1(
+        coverage_status="fallback",
+        fallback_reason=fallback,
+        independent_marginal_only=True,
+    )
+
+
+def _policy_fingerprint_from_assumptions(assumptions: tuple[str, ...]) -> str | None:
+    return next(
+        (
+            item.removeprefix("policy_fingerprint:")
+            for item in assumptions
+            if item.startswith("policy_fingerprint:")
+        ),
+        None,
+    )
 
 
 def _apply_action(
@@ -242,11 +343,16 @@ def _apply_action(
     context: PublicActionContext,
     likelihood_amount: int | None,
     cache_transition: bool,
+    policy: PolicyResult | None = None,
+    policy_action: str | None = None,
+    fallback_reason: str | None = None,
 ) -> RangeBeliefSnapshot:
+    policy_fingerprint = _policy_fingerprint(policy)
     cache_key = (
         id(snapshot), action.street, action.actor_seat, action.action,
         action.amount, action.amount_semantics, sequence, context,
-        likelihood_amount,
+        likelihood_amount, policy_fingerprint, policy.node if policy else None,
+        policy_action,
     )
     if cache_transition:
         with _ACTION_CACHE_LOCK:
@@ -257,11 +363,12 @@ def _apply_action(
     distribution_key = (
         id(snapshot), action.action, action.street,
         size_bucket(action.action, likelihood_amount, context.pot_before),
-        context.board, context.position, spr_bucket(context.spr),
+        context.board, context.position, spr_bucket(context.spr), policy_fingerprint,
+        policy.node if policy else None, policy_action,
     )
     probe_key = next(iter(snapshot.combos))
-    probe_likelihood = likelihood(
-        probe_key, action.action, action.street, likelihood_amount, context
+    probe_likelihood = _action_likelihood(
+        probe_key, action, likelihood_amount, context, policy, policy_action
     )
     with _ACTION_DISTRIBUTION_CACHE_LOCK:
         distribution = _ACTION_DISTRIBUTION_CACHE.get(distribution_key)
@@ -277,8 +384,8 @@ def _apply_action(
     if distribution is None:
         weighted = {
             key: combo.reach * (
-                probe_likelihood if key == probe_key else likelihood(
-                    key, action.action, action.street, likelihood_amount, context
+                probe_likelihood if key == probe_key else _action_likelihood(
+                    key, action, likelihood_amount, context, policy, policy_action
                 )
             )
             for key, combo in snapshot.combos.items()
@@ -299,19 +406,27 @@ def _apply_action(
     else:
         combos = distribution[1]
         mass = distribution[2]
-    reason = change_reason(action.action, action.street, likelihood_amount, context)
+    reason = (
+        f"policy_artifact:{policy.node}:{policy_action}"
+        if policy is not None else change_reason(action.action, action.street, likelihood_amount, context)
+    )
     result = RangeBeliefSnapshot.model_construct(snapshot_id=snapshot_id_for(snapshot.seat_id, action.street, sequence), seat_id=snapshot.seat_id,
-        street=action.street, after_sequence=sequence, source=snapshot.source, confidence="heuristic",
+        street=action.street, after_sequence=sequence,
+        source=policy.source if policy is not None else PolicySource.HEURISTIC,
+        confidence=policy.confidence if policy is not None else "heuristic",
         prior_mass=snapshot.retained_mass, retained_mass=mass, combos=combos, parent_snapshot_id=snapshot.snapshot_id,
         update=RangeUpdateMetadata(action_type=action.action.value, action_label=reason,
-            observed_size=action.amount, mapped_size=likelihood_amount, policy_source=snapshot.source,
-            node=f"public-event/{reason}", policy_version=_VERSION,
-            assumptions=(
+            observed_size=action.amount, mapped_size=likelihood_amount,
+            policy_source=policy.source if policy is not None else PolicySource.HEURISTIC,
+            node=policy.node if policy is not None else f"public-event/{reason}",
+            policy_version=policy.version if policy is not None else _VERSION,
+            assumptions=policy.assumptions if policy is not None else (
                 "bounded heuristic likelihood", "actor-only update",
                 f"size_bucket:{size_bucket(action.action, likelihood_amount, context.pot_before)}",
                 f"street:{action.street.value}", f"position:{context.position}",
                 f"spr_bucket:{spr_bucket(context.spr)}", "hand_features:made-hand/draw-aware",
                 "not solver/GTO, player profile, or joint distribution",
+                *((f"policy_artifact_fallback:{fallback_reason}",) if fallback_reason else ()),
             )))
     if cache_transition:
         with _ACTION_CACHE_LOCK:
@@ -329,10 +444,14 @@ def _mark_inactive(
     context: PublicActionContext,
     likelihood_amount: int | None,
     cache_transition: bool,
+    policy: PolicyResult | None = None,
+    policy_action: str | None = None,
+    fallback_reason: str | None = None,
 ) -> RangeBeliefSnapshot:
     """A fold updates the final marginal and removes the seat from future action."""
     folded = _apply_action(
-        snapshot, action, sequence, context, likelihood_amount, cache_transition
+        snapshot, action, sequence, context, likelihood_amount, cache_transition,
+        policy, policy_action, fallback_reason,
     )
     cache_key = id(folded)
     if cache_transition:
@@ -429,6 +548,7 @@ def _belief_cache_key(
     observer_visible_cards: tuple[Card, ...],
     target: int,
 ) -> tuple[object, ...]:
+    artifact = default_policy_artifact_range_adapter()
     public_payloads: list[tuple[object, ...]] = []
     for event in prefix[1:]:
         payload = event.payload
@@ -442,7 +562,8 @@ def _belief_cache_key(
                 "board", event.sequence, payload.street.value, payload.cards,
             ))
     return (
-        "public-belief-v2", target, tuple(sorted(observer_visible_cards)),
+        "public-belief-v2", artifact.fingerprint, artifact.version, target,
+        tuple(sorted(observer_visible_cards)),
         started.table_size, started.button_seat, started.small_blind,
         started.big_blind, started.ante, started.rake_bps,
         started.active_seat_ids, tuple(sorted(started.starting_stacks.items())),
