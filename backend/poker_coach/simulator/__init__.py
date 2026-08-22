@@ -47,7 +47,9 @@ from .bot_runtime import (
 from .bot_providers import (
     BLUEPRINT_PROFILE_IDS,
     BOT_PROFILE_IDS,
+    THEORY_PROFILE_IDS,
     LightweightBlueprintProvider,
+    PolicyArtifactBot,
     build_bot_provider,
 )
 from .session import (
@@ -158,7 +160,9 @@ __all__ = [
     "InvalidBotAction",
     "BLUEPRINT_PROFILE_IDS",
     "BOT_PROFILE_IDS",
+    "THEORY_PROFILE_IDS",
     "LightweightBlueprintProvider",
+    "PolicyArtifactBot",
     "build_bot_provider",
     "DEFAULT_BIG_BLIND",
     "DEFAULT_SMALL_BLIND",

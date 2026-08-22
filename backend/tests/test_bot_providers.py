@@ -10,6 +10,7 @@ from poker_coach.simulator import (
     BotRuntime,
     LegalActionV1,
     LightweightBlueprintProvider,
+    PolicyArtifactBot,
     build_bot_provider,
 )
 
@@ -90,7 +91,7 @@ def test_blueprint_profiles_have_explainable_distinct_facing_wager_behavior():
         [_legal("fold"), _legal("call", 125, 125), _legal("raise", 400, 1500)],
     ],
 )
-@pytest.mark.parametrize("profile_id", ["fixed", "cautious", "balanced", "aggressive"])
+@pytest.mark.parametrize("profile_id", ["fixed", "cautious", "balanced", "aggressive", "theory"])
 def test_every_profile_decision_is_runtime_accepted_and_uses_legal_amounts(legal_actions, profile_id):
     observation = _observation(legal_actions)
     decision = asyncio.run(
@@ -118,6 +119,13 @@ def test_blueprint_sizing_respects_minimum_midpoint_and_maximum_boundaries():
 def test_factory_rejects_unknown_profile_id():
     with pytest.raises(ValueError, match="unknown bot profile"):
         build_bot_provider("solver-gto")
+
+
+def test_theory_factory_exposes_the_policy_artifact_bot_without_relabeling_it_as_gto():
+    provider = build_bot_provider("theory")
+    assert isinstance(provider, PolicyArtifactBot)
+    assert provider.artifact.source["evidenceGrade"] == "B"
+    assert "GTO" not in provider.artifact.source["provenance"]
 
 
 def test_balanced_blueprint_has_deterministic_passive_fold_bet_and_raise_spots():
