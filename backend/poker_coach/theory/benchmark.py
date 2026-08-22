@@ -14,7 +14,7 @@ from typing import Any
 from .contracts import BenchmarkResult, EvidenceGrade, FixtureResult, MetricResult
 
 
-HARNESS_VERSION = "r9-00.v1"
+HARNESS_VERSION = "r9-00.v2"
 FROZEN_THRESHOLD_MANIFEST = {
     "manifest_id": "r9-00.calibration.v1",
     "action_frequency_l1_max": 0.02,
@@ -25,6 +25,19 @@ FROZEN_THRESHOLD_MANIFEST = {
 }
 _GRADE_RANK = {"unsupported": 0, "C": 1, "B": 2, "A": 3}
 _PRIVATE_MARKERS = ("private", "hole", "hidden", "opponentcards", "villaincards")
+_PREFLOP_ARTIFACT_FINGERPRINT = "sha256:0e2b509f8596a9f6d416d6ca6279b7134fa1e01eb180a6acac9a228bef57084f"
+_PREFLOP_SPOTS = (
+    ("rfi-utg", "UTG", 3, "rfi"),
+    ("rfi-hj", "HJ", 4, "rfi"),
+    ("rfi-co", "CO", 5, "rfi"),
+    ("rfi-btn", "BTN", 0, "rfi"),
+    ("rfi-sb", "SB", 1, "rfi"),
+    ("vs-rfi-hj", "HJ", 4, "vs_single_rfi"),
+    ("vs-rfi-co", "CO", 5, "vs_single_rfi"),
+    ("vs-rfi-btn", "BTN", 0, "vs_single_rfi"),
+    ("vs-rfi-sb", "SB", 1, "vs_single_rfi"),
+    ("vs-rfi-bb", "BB", 2, "vs_single_rfi"),
+)
 
 
 class FixtureError(ValueError):
@@ -193,6 +206,184 @@ def evaluate_fixture(fixture: CanonicalFixture, *, provider_candidate: dict[str,
 def run_benchmark(directory: Path | None = None) -> BenchmarkResult:
     results = tuple(evaluate_fixture(fixture) for fixture in load_corpus(directory))
     return BenchmarkResult(harness_version=HARNESS_VERSION, threshold_manifest_id=FROZEN_THRESHOLD_MANIFEST["manifest_id"], gate_passed=all(result.gate_passed for result in results), corpus_expectations_met=all(result.gate_passed == result.expected_gate_passed for result in results), environment={"python": platform.python_version(), "platform": platform.platform(), "machine": platform.machine(), "processor": platform.processor() or "unknown"}, performance_note="Measured on this development machine for reproducibility only; not a product SLA.", fixtures=results)
+
+
+def _release_result(
+    fixture_id: str,
+    *,
+    expected_identity: dict[str, str],
+    candidate_identity: dict[str, str],
+    expected_grade: str,
+    candidate_grade: str,
+    expected_frequencies: dict[str, float],
+    candidate_frequencies: dict[str, float],
+    expected_sizings: dict[str, int],
+    candidate_sizings: dict[str, int],
+    expected_provider: str,
+    candidate_provider: str,
+    started_ns: int,
+) -> FixtureResult:
+    """Compare a *live* provider payload with frozen release references.
+
+    The references below are intentionally independent from the fixture
+    corpus's embedded ``candidate`` fields.  A release cannot pass by merely
+    reading its expected candidate back out of a test fixture.
+    """
+    identity_ok = candidate_identity == expected_identity
+    grade_ok = candidate_grade == expected_grade
+    action_ok = set(candidate_frequencies) == set(expected_frequencies)
+    actual, actual_total = _normalise(candidate_frequencies)
+    expected, expected_total = _normalise(expected_frequencies)
+    frequency_l1 = _l1(actual, expected)
+    frequency_ok = (
+        actual_total == 1.0
+        and expected_total == 1.0
+        and frequency_l1 <= FROZEN_THRESHOLD_MANIFEST["action_frequency_l1_max"]
+    )
+    sizing_ok = candidate_sizings == expected_sizings
+    provider_ok = candidate_provider == expected_provider
+    elapsed_ms = (time.perf_counter_ns() - started_ns) / 1_000_000
+    metrics = (
+        _metric("fingerprint", identity_ok, detail=None if identity_ok else "live provider fingerprint differs from frozen production reference"),
+        _metric("evidence_calibration", grade_ok, detail=None if grade_ok else "live provider evidence grade differs from frozen production reference"),
+        _metric("action_set_correctness", action_ok, detail=None if action_ok else "live provider action set differs from frozen production reference"),
+        _metric("frequency_l1", frequency_ok, value=frequency_l1, threshold=FROZEN_THRESHOLD_MANIFEST["action_frequency_l1_max"], detail=None if frequency_ok else f"normalization={actual_total:.6f}"),
+        _metric("sizing_legality", sizing_ok, detail=None if sizing_ok else "live provider sizing differs from frozen production reference"),
+        _metric("provider_identity", provider_ok, detail=None if provider_ok else "live provider identity differs from frozen production reference"),
+        _metric("latency", elapsed_ms <= FROZEN_THRESHOLD_MANIFEST["latency_ms_max"], value=elapsed_ms, threshold=FROZEN_THRESHOLD_MANIFEST["latency_ms_max"], detail="measured release-gate provider time; not a product SLA"),
+    )
+    return FixtureResult(
+        fixture_id=fixture_id,
+        gate_passed=all(metric.status == "pass" for metric in metrics),
+        expected_gate_passed=True,
+        metrics=metrics,
+        elapsed_ms=elapsed_ms,
+    )
+
+
+def _preflop_observation(*, seat: int, prefix: str):
+    from poker_coach.simulator.contracts import ObservationV1
+
+    actions = []
+    if prefix == "vs_single_rfi":
+        actions.append({"sequence": 1, "street": "preflop", "actorSeat": 3, "action": "raise", "amount": 250, "amountSemantics": "to"})
+    return ObservationV1.model_validate({
+        "handId": f"release-{prefix}-{seat}", "sequence": 1, "observerSeat": seat,
+        "tableSize": 6, "buttonSeat": 0, "street": "preflop", "ownHoleCards": ["As", "Ah"],
+        "pot": 150, "stacks": {str(index): 10000 for index in range(6)},
+        "streetCommitments": {str(index): 0 for index in range(6)}, "activeSeats": list(range(6)),
+        "publicActions": actions,
+        "legalActions": [
+            {"action": "fold", "amountSemantics": "none"},
+            {"action": "call", "amountSemantics": "cost", "minAmount": 250, "maxAmount": 250},
+            {"action": "raise", "amountSemantics": "to", "minAmount": 900, "maxAmount": 900},
+        ],
+    })
+
+
+def _run_preflop_provider_cases() -> tuple[FixtureResult, ...]:
+    from poker_coach.theory.policy_artifact import PreflopPolicyContext, default_preflop_artifact
+
+    artifact = default_preflop_artifact()
+    declared_nodes = {str(node["nodeId"]) for node in artifact.payload["nodes"]}
+    expected_nodes = {f"6max-100bb-norake/{position.lower()}-{'rfi-2.5bb' if prefix == 'rfi' else 'vs-single-rfi-2.5bb'}" for _spot, position, _seat, prefix in _PREFLOP_SPOTS}
+    results: list[FixtureResult] = []
+    for spot, position, seat, prefix in _PREFLOP_SPOTS:
+        started = time.perf_counter_ns()
+        match = artifact.match(_preflop_observation(seat=seat, prefix=prefix), PreflopPolicyContext())
+        if match is None:
+            results.append(_release_result(
+                f"provider-preflop-{spot}",
+                expected_identity={"spotId": spot}, candidate_identity={}, expected_grade="B", candidate_grade="",
+                expected_frequencies={"raise_to": 1.0, "fold": 0.0} if prefix == "rfi" else {"raise_to": 0.7, "call": 0.3, "fold": 0.0},
+                candidate_frequencies={}, expected_sizings={"raise_to": 250 if prefix == "rfi" else 900}, candidate_sizings={},
+                expected_provider="policy-artifact", candidate_provider="missing", started_ns=started,
+            ))
+            continue
+        expected_identity = {
+            "spotId": spot,
+            "gameFingerprint": "nlhe-6max-100bb-norake-v1",
+            "treeFingerprint": "r9-02.preflop-open-2.5bb-3bet-9bb.v1",
+            "rangeFingerprint": "riverline-preflop-169class-v1",
+            "policyFingerprint": _PREFLOP_ARTIFACT_FINGERPRINT,
+        }
+        candidate_identity = dict(expected_identity)
+        candidate_identity["policyFingerprint"] = artifact.fingerprint
+        results.append(_release_result(
+            f"provider-preflop-{spot}", expected_identity=expected_identity, candidate_identity=candidate_identity,
+            expected_grade="B", candidate_grade="B",
+            expected_frequencies={"raise_to": 1.0, "fold": 0.0} if prefix == "rfi" else {"raise_to": 0.7, "call": 0.3, "fold": 0.0},
+            candidate_frequencies=dict(match.frequencies), expected_sizings={"raise_to": 250 if prefix == "rfi" else 900},
+            candidate_sizings={"raise_to": match.raise_to} if match.raise_to is not None else {},
+            expected_provider="policy-artifact", candidate_provider="policy-artifact", started_ns=started,
+        ))
+    if declared_nodes != expected_nodes:
+        started = time.perf_counter_ns()
+        results.append(_release_result(
+            "provider-preflop-declared-coverage", expected_identity={"nodes": ",".join(sorted(expected_nodes))},
+            candidate_identity={"nodes": ",".join(sorted(declared_nodes))}, expected_grade="B", candidate_grade="B",
+            expected_frequencies={"covered": 1.0}, candidate_frequencies={"covered": 1.0}, expected_sizings={}, candidate_sizings={},
+            expected_provider="policy-artifact", candidate_provider="policy-artifact", started_ns=started,
+        ))
+    return tuple(results)
+
+
+def _run_l2_provider_case() -> FixtureResult:
+    from poker_coach.theory.l2_solver import ENGINE_VERSION, L2Budget, L2RiverInput, RangeCombo, RiverBetTree, solve_hu_river
+
+    started = time.perf_counter_ns()
+    result = solve_hu_river(L2RiverInput(
+        game_fingerprint="r9-release-hu-river-v1", tree_fingerprint="r9-release-check-bet-100-v1",
+        range_fingerprint="r9-release-public-projection-v1", solver_version=ENGINE_VERSION,
+        players=(0, 1), acting_seat=0, pot=100, stacks=((0, 100), (1, 100)),
+        board=("As", "Ks", "Qs", "Js", "Ts"),
+        ranges=((0, (RangeCombo(("2c", "3d"), 1.0),)), (1, (RangeCombo(("6c", "7d"), 1.0),))),
+        tree=RiverBetTree(bet_amount=100), seed=7,
+        budget=L2Budget(iterations=20, soft_timeout_ms=2_000, hard_timeout_ms=3_000), hero_hole_cards=("2c", "3d"),
+    ))
+    if not hasattr(result, "action_frequencies"):
+        return _release_result(
+            "provider-l2-hu-river-root", expected_identity={"spotId": "l2-hu-river-root"}, candidate_identity={},
+            expected_grade="B", candidate_grade="unsupported", expected_frequencies={"check": 0.025, "bet": 0.975}, candidate_frequencies={},
+            expected_sizings={"bet": 100}, candidate_sizings={}, expected_provider="riverline-l2-cfr/v1", candidate_provider="unsupported", started_ns=started,
+        )
+    expected_identity = {
+        "spotId": "l2-hu-river-root", "gameFingerprint": "r9-release-hu-river-v1",
+        "treeFingerprint": "r9-release-check-bet-100-v1", "rangeFingerprint": "r9-release-public-projection-v1",
+        "policyFingerprint": ENGINE_VERSION,
+    }
+    candidate_identity = dict(expected_identity)
+    candidate_identity["gameFingerprint"] = result.game_fingerprint
+    candidate_identity["treeFingerprint"] = result.tree_fingerprint
+    candidate_identity["rangeFingerprint"] = result.range_fingerprint
+    candidate_identity["policyFingerprint"] = result.solver_version
+    return _release_result(
+        "provider-l2-hu-river-root", expected_identity=expected_identity, candidate_identity=candidate_identity,
+        expected_grade="B", candidate_grade=result.evidence_grade,
+        expected_frequencies={"check": 0.025, "bet": 0.975}, candidate_frequencies=dict(result.action_frequencies),
+        expected_sizings={"bet": 100}, candidate_sizings=dict(result.legal_sizes),
+        expected_provider=ENGINE_VERSION, candidate_provider=result.solver_version, started_ns=started,
+    )
+
+
+def run_provider_release_gate() -> BenchmarkResult:
+    """Run the production release gate through every declared live provider spot.
+
+    ``run_benchmark`` remains the intentional red/green fixture-corpus test
+    harness.  It is never the release gate because its candidates are embedded
+    mutants.  This function calls live provider code for all declared R9
+    production nodes, then compares those outputs with frozen references.
+    """
+    results = (*_run_preflop_provider_cases(), _run_l2_provider_case())
+    return BenchmarkResult(
+        harness_version=HARNESS_VERSION,
+        threshold_manifest_id=FROZEN_THRESHOLD_MANIFEST["manifest_id"],
+        gate_passed=all(result.gate_passed for result in results),
+        corpus_expectations_met=True,
+        environment={"python": platform.python_version(), "platform": platform.platform(), "machine": platform.machine(), "processor": platform.processor() or "unknown"},
+        performance_note="Measured live provider execution on this development machine; not a product SLA.",
+        fixtures=results,
+    )
 
 
 def run_provider_smoke() -> FixtureResult:

@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from poker_coach.theory.benchmark import _canonical_digest, FixtureError, evaluate_fixture, fixture_directory, load_corpus, load_fixture, run_benchmark, run_provider_smoke
+from poker_coach.theory.benchmark import _canonical_digest, FixtureError, evaluate_fixture, fixture_directory, load_corpus, load_fixture, run_benchmark, run_provider_release_gate, run_provider_smoke
 
 
 def _result_by_id():
@@ -86,7 +86,7 @@ def test_cli_verify_corpus_emits_machine_readable_report_and_success():
     assert report["gate_passed"] is False
 
 
-def test_cli_default_exit_code_reports_an_actual_gate_failure_for_mutants():
+def test_cli_default_exit_code_reports_provider_backed_release_gate_success():
     completed = subprocess.run(
         [sys.executable, "-m", "poker_coach.theory"],
         cwd=fixture_directory().parents[2],
@@ -94,8 +94,8 @@ def test_cli_default_exit_code_reports_an_actual_gate_failure_for_mutants():
         text=True,
         check=False,
     )
-    assert completed.returncode == 1
-    assert json.loads(completed.stdout)["gate_passed"] is False
+    assert completed.returncode == 0
+    assert json.loads(completed.stdout)["gate_passed"] is True
 
 
 @pytest.mark.parametrize("fixture_name", ["green-hu-river-a.json", "green-hu-turn-b.json"])
@@ -111,6 +111,46 @@ def test_provider_smoke_calls_real_policy_artifact_not_fixture_candidate(monkeyp
     result = run_provider_smoke()
     assert result.gate_passed is True
     assert result.fixture_id == "provider-green-6max-preflop-b"
+
+
+def test_release_gate_runs_every_declared_production_provider_spot_without_fixture_candidates(monkeypatch):
+    """The release gate must use live providers, not the fixture mutant corpus."""
+    fixture = load_fixture(fixture_directory() / "green-6max-preflop-b.json")
+    fixture.payload["candidate"]["actionFrequencies"] = {"fold": 1.0}
+    monkeypatch.setattr("poker_coach.theory.benchmark.load_fixture", lambda _path: fixture)
+
+    report = run_provider_release_gate()
+
+    assert report.gate_passed is True
+    assert report.corpus_expectations_met is True
+    assert {result.fixture_id for result in report.fixtures} == {
+        "provider-preflop-rfi-utg",
+        "provider-preflop-rfi-hj",
+        "provider-preflop-rfi-co",
+        "provider-preflop-rfi-btn",
+        "provider-preflop-rfi-sb",
+        "provider-preflop-vs-rfi-hj",
+        "provider-preflop-vs-rfi-co",
+        "provider-preflop-vs-rfi-btn",
+        "provider-preflop-vs-rfi-sb",
+        "provider-preflop-vs-rfi-bb",
+        "provider-l2-hu-river-root",
+    }
+    assert all(result.gate_passed for result in report.fixtures)
+
+
+def test_cli_default_runs_provider_backed_release_gate_not_fixture_corpus():
+    completed = subprocess.run(
+        [sys.executable, "-m", "poker_coach.theory"],
+        cwd=fixture_directory().parents[2],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    report = json.loads(completed.stdout)
+    assert report["gate_passed"] is True
+    assert {item["fixture_id"] for item in report["fixtures"]} >= {"provider-preflop-rfi-utg", "provider-l2-hu-river-root"}
 
 
 def test_unsupported_with_policy_fields_is_red_not_honest_fallback(tmp_path):
