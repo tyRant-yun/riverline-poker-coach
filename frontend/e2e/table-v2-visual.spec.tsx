@@ -24,14 +24,16 @@ test("V2 workspace preserves table, rail, and dock geometry across desktop viewp
     const cards = await page.getByLabel("Hero 手牌").locator("i").first().boundingBox();
     const dock = await page.getByLabel("Hero 操作区").boundingBox();
     const rail = await page.getByLabel("决策驾驶舱").boundingBox();
+    const rangeSummary = await page.getByLabel("Range Belief").boundingBox();
     const board = await page.locator(".tv2-board").boundingBox();
-    expect(safe).not.toBeNull(); expect(stage).not.toBeNull(); expect(hero).not.toBeNull(); expect(cards).not.toBeNull(); expect(dock).not.toBeNull(); expect(rail).not.toBeNull(); expect(board).not.toBeNull();
+    expect(safe).not.toBeNull(); expect(stage).not.toBeNull(); expect(hero).not.toBeNull(); expect(cards).not.toBeNull(); expect(dock).not.toBeNull(); expect(rail).not.toBeNull(); expect(board).not.toBeNull(); expect(rangeSummary).not.toBeNull();
     expect(Math.abs(hero!.x + hero!.width / 2 - (stage!.x + stage!.width / 2))).toBeLessThanOrEqual(8);
     expect(cards!.width).toBeGreaterThanOrEqual(width === 1366 ? 72 : 68); expect(cards!.height).toBeGreaterThanOrEqual(width === 1366 ? 100 : 94);
     expect(safe!.y + safe!.height + 16).toBeLessThan(hero!.y);
     expect(board!.y + board!.height + 16).toBeLessThan(hero!.y);
     expect(dock!.y).toBeGreaterThan(cards!.y + cards!.height + 8);
     expect(rail!.x).toBeGreaterThan(safe!.x + safe!.width);
+    expect(rangeSummary!.y).toBeLessThan(height);
     expect(await page.getByLabel("Decision Summary").isVisible()).toBeTruthy(); expect(await page.getByLabel("Solver Action Ladder").isVisible()).toBeTruthy(); expect(await page.getByText("Player 思考中…").isVisible()).toBeTruthy();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
     const tokens = await page.evaluate(() => ["--tv2-text", "--tv2-ink", "--tv2-line", "--tv2-graphite"].map((token) => getComputedStyle(document.documentElement).getPropertyValue(token).trim().replace("#", "")));
@@ -43,7 +45,7 @@ test("V2 workspace preserves table, rail, and dock geometry across desktop viewp
 
 test("Range Explorer overlay keeps a 13×13 matrix readable without horizontal page scrolling", async ({ page }) => {
   const grid = Array.from({ length: 169 }, (_, index) => `<button class="tv2-range-cell">${index % 14 === 0 ? "AA" : "AKs"}</button>`).join("");
-  const explorer = `<section class="tv2-range-explorer" role="dialog" aria-label="Range Explorer"><header><h2>Range Explorer</h2><button>关闭矩阵</button></header><div class="tv2-range-controls"><fieldset><legend>显示</legend><button>当前权重</button></fieldset></div><div class="tv2-range-grid mode-weight" aria-label="座位 2 Range 矩阵">${grid}</div><footer class="tv2-range-legend"><span>权重低→高</span></footer></section>`;
+  const explorer = `<section class="tv2-range-explorer" role="dialog" aria-label="Range Explorer"><header><h2>Range Explorer</h2><button>关闭矩阵</button></header><div class="tv2-range-controls"><fieldset><legend>显示</legend><button>当前权重</button></fieldset></div><div class="tv2-range-grid mode-weight" aria-label="座位 2 Range 矩阵">${grid}</div><footer class="tv2-range-legend"><span>权重 0–1.7%</span><span>变化：负↓ 减少</span><span>变化：零— 不变</span><span>变化：正↑ 增加</span></footer></section>`;
   await page.setContent(`<style>${css}</style>${explorer}`);
   for (const [width, height] of [[1366, 768], [1440, 900], [1920, 1080]] as const) {
     await page.setViewportSize({ width, height });
@@ -53,6 +55,8 @@ test("Range Explorer overlay keeps a 13×13 matrix readable without horizontal p
     expect(dialog).not.toBeNull(); expect(matrix).not.toBeNull(); expect(cell).not.toBeNull();
     expect(matrix!.width).toBeGreaterThanOrEqual(520); expect(cell!.width).toBeGreaterThanOrEqual(28);
     expect(dialog!.x).toBeGreaterThanOrEqual(0); expect(dialog!.x + dialog!.width).toBeLessThanOrEqual(width);
+    expect(await page.getByRole("button", { name: "关闭矩阵" }).isVisible()).toBeTruthy();
+    expect(await page.getByText("变化：负↓ 减少").isVisible()).toBeTruthy();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   }
 });

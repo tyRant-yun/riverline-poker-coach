@@ -50,6 +50,8 @@ describe("Table V2 visual contracts", () => {
     render(<InsightRailV2 insights={{ available: true, advisor: { available: true, result: { status: "ready", recommendedAction: { action: "call", amountSemantics: "cost", reason: "price" }, source: "deterministic_formula", version: "v1", confidence: "high", explanationKey: "price", limitations: [], decision: { fingerprint: "fp", handId: "h1", sequence: 3, street: "flop" } } }, seatBeliefs: [{ seatId: 1, available: true, rangeWidthPct: 28.5, confidence: "heuristic", source: "riverline.heuristic_seed", version: "heuristic_seed_v2", approximate: true, approximationReason: "nearest_stack_bucket:100bb", changeReason: "公开行动：加注", limitations: ["这是独立边际估计，不含对手私牌。"], decision: { handId: "h1", afterSequence: 3 }, matrix169: { AA: { probabilityMass: "0.08", comboCount: 6 }, AKs: { probabilityMass: "0.05", comboCount: 4 } }, topClasses: [{ hand: "AA", probabilityMass: "0.08" }] }], stats: { available: true, bySeat: [{ seatId: 1, vpip: 0.25, pfr: 0.18, threeBet: 0.07 }] } }} solver={{ status: "degraded", recommendedAction: null, candidates: [{ action: "call", approximateEvChips: "12.5" }], equity: "0.42", iterations: 80, source: "monte_carlo", version: "v1", limitations: ["uniform opponents"] }} solverElapsedMs={24} />);
     expect(screen.getByLabelText("Range Belief")).toBeVisible(); expect(screen.getByLabelText("Solver 结果")).toBeVisible(); expect(screen.getByLabelText("Decision Summary")).toHaveTextContent("规则基线");
     expect(screen.getByText(/范围宽度 28.5%/)).toBeInTheDocument(); expect(screen.getByText(/近似：100BB 最近档/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Range Belief")).toHaveTextContent("C 级 · 公开行动启发式");
+    expect(screen.getByLabelText("Range Belief")).toHaveTextContent("覆盖：近似");
     fireEvent.click(screen.getByRole("button", { name: /座位 2/ })); expect(screen.getByLabelText("Range Belief")).toHaveTextContent("最近变化：公开行动：加注");
     expect(screen.getAllByText(/模拟估计/).length).toBeGreaterThanOrEqual(1); expect(screen.getAllByText(/跟注/).length).toBeGreaterThanOrEqual(1);
   });
@@ -94,8 +96,10 @@ describe("Table V2 visual contracts", () => {
     expect(screen.getByTestId("range-cell-AKs")).toHaveAttribute("data-kind", "suited");
     expect(screen.getByTestId("range-cell-AKo")).toHaveAttribute("data-kind", "offsuit");
     expect(screen.getByTestId("range-cell-AKo")).toHaveAccessibleName(/已阻断/);
+    expect(screen.getByTestId("range-cell-AA")).toHaveAttribute("class", expect.stringMatching(/density-[0-6]/));
     fireEvent.click(screen.getByRole("button", { name: "相对上一公开行动" }));
     expect(screen.getByText(/变化基线不可用/)).toBeInTheDocument();
+    expect(screen.getByText(/变化：负↓/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "同花" }));
     expect(screen.getByTestId("range-cell-AA")).toHaveClass("is-filtered");
     expect(screen.getByTestId("range-cell-AKs")).not.toHaveClass("is-filtered");
