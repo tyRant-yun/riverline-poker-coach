@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from poker_coach.api import AppConfig, create_app
 from poker_coach.persistence import SQLiteGameSessionStore, SQLiteHandEventStore
 from poker_coach.simulator.contracts import LegalActionV1, ObservationV1
 from poker_coach.simulator.continuous_table import ContinuousTableService
+from poker_coach.simulator.continuous_table import _live_hu_river_l2
 from poker_coach.theory import L2RecommendationInput, OracleEvLossInput, PreflopPolicyContext, TheoryExplainer
-from poker_coach.theory.l2_solver import L2Budget, L2RiverInput, RangeCombo, RiverBetTree, solve_hu_river
+from poker_coach.theory.l2_solver import L2Budget, L2Cache, L2RiverInput, RangeCombo, RiverBetTree, solve_hu_river
 
 
 def _preflop(*, actions=None) -> ObservationV1:
@@ -100,6 +103,32 @@ def test_permission_safe_l2_has_priority_on_hu_river_and_ev_loss_needs_all_three
     assert recommendation.same_oracle_ev_loss.chips is None
     assert recommendation.same_oracle_ev_loss.unavailable_reason == "oracle_tree_or_range_fingerprint_mismatch"
     assert "2c" not in str(recommendation.to_dict()).lower()
+
+
+def test_live_hu_river_adapter_uses_public_posteriors_and_cache_without_private_poison(monkeypatch):
+    observation = ObservationV1(
+        handId="river-live", sequence=9, observerSeat=0, tableSize=2, buttonSeat=0, street="river",
+        ownHoleCards=("2c", "3d"), board=("As", "Ks", "Qs", "Js", "Ts"), pot=100,
+        stacks={0: 100, 1: 100}, streetCommitments={0: 0, 1: 0}, activeSeats=(0, 1),
+        legalActions=(LegalActionV1(action="check", amountSemantics="none"), LegalActionV1(action="bet", amountSemantics="by", minAmount=100, maxAmount=100)),
+    )
+    public = {
+        0: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-hero", combos={"4c5d": SimpleNamespace(probability=1)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
+        1: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-villain", combos={"6c7d": SimpleNamespace(probability=1)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
+    }
+    monkeypatch.setattr("poker_coach.simulator.continuous_table.PublicEventBeliefConsumer.beliefs_at", lambda *_args, **_kwargs: public)
+    cache = L2Cache()
+    first = _live_hu_river_l2(events=(), observation=observation, decision_fingerprint="decision-public", cache=cache)
+    second = _live_hu_river_l2(events=(), observation=observation, decision_fingerprint="decision-public", cache=cache)
+    assert first is not None and second is not None
+    assert first.result.evidence_grade == "B"
+    assert second.result.cache_hit is True
+    assert "2c3d" not in str(first.result)
+
+
+def test_live_l2_adapter_returns_none_for_multiway_or_unsupported_tree():
+    multiway = _preflop().model_copy(update={"street": "river", "table_size": 3, "active_seats": (0, 1, 2), "board": ("As", "Ks", "Qs", "Js", "Ts")})
+    assert _live_hu_river_l2(events=(), observation=multiway, decision_fingerprint="multiway", cache=L2Cache()) is None
 
 
 def _client(tmp_path):

@@ -20,8 +20,10 @@ from poker_coach.persistence.session_store import (
     SQLiteGameSessionStore,
     StoredGameSession,
 )
+from poker_coach.ranges.belief import cards_from_key
 from poker_coach.ranges.event_beliefs import PublicEventBeliefConsumer
-from poker_coach.theory import PreflopPolicyContext, TheoryDecisionIdentityV1, TheoryExplainer
+from poker_coach.theory import L2RecommendationInput, PreflopPolicyContext, TheoryDecisionIdentityV1, TheoryExplainer
+from poker_coach.theory.l2_solver import L2Budget, L2Cache, L2Result, L2RiverInput, RangeCombo, RiverBetTree, solve_hu_river
 
 from .bot_providers import BOT_PROFILE_IDS, build_bot_provider
 from .bot_runtime import BotRuntime
@@ -81,6 +83,7 @@ class ContinuousTableService:
         self._review_store = SQLiteReviewProjectionStore(self.path)
         self._review_service = AutomaticReviewProjectionService(event_store, self._review_store)
         self._fast_solver = FastSolver()
+        self._l2_cache = L2Cache(max_entries=16)
         self._lock = RLock()
         self._connection = sqlite3.connect(self.path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
@@ -279,12 +282,17 @@ class ContinuousTableService:
                 return explainer.unavailable(
                     decision=identity, reason="hero_observation_unavailable"
                 ).to_dict()
+        l2 = _live_hu_river_l2(
+            events=events, observation=observation, decision_fingerprint=fingerprint,
+            cache=self._l2_cache,
+        )
         # The continuous table is intentionally fixed at its authoritative
         # 100-chip BB/no-rake configuration.  The artifact rechecks stack,
         # position and public prefix before it can claim B coverage.
         return explainer.recommend(
             observation, decision_fingerprint=fingerprint,
             preflop_context=PreflopPolicyContext(big_blind=100),
+            l2=l2,
         ).to_dict()
 
     def solver(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
@@ -694,6 +702,69 @@ def _advisor_projection_fallback(
         "limitations": ["L0 fallback uses only current public facts, Hero visibility, and legal actions."],
         "decision": {"fingerprint": fingerprint, "handId": hand_id, "sequence": sequence, "street": street},
     }
+
+
+def _live_hu_river_l2(*, events, observation, decision_fingerprint: str, cache: L2Cache) -> L2RecommendationInput | None:
+    """Build a bounded L2 input from public-event posteriors only.
+
+    This adapter deliberately never reads recorded opponent holes, terminal
+    reveals, or future events.  Both seats receive the current public range
+    snapshot after the Hero-visible blockers have been removed.  A small,
+    deterministic top-support projection keeps a cache miss within the live
+    decision budget; its exact support is part of the range fingerprint.
+    """
+
+    street = observation.street.value if hasattr(observation.street, "value") else str(observation.street)
+    if street != "river" or len(observation.active_seats) != 2 or len(observation.board) != 5:
+        return None
+    legal = {item.action.value: item for item in observation.legal_actions}
+    bet = legal.get("bet")
+    if "check" not in legal or bet is None or bet.min_amount is None:
+        return None
+    players = (observation.observer_seat, next(seat for seat in observation.active_seats if seat != observation.observer_seat))
+    stacks = dict(observation.stacks)
+    if bet.min_amount <= 0 or bet.min_amount > min(stacks[seat] for seat in players):
+        return None
+    try:
+        beliefs = PublicEventBeliefConsumer().beliefs_at(
+            _public_stream(events), observer_visible_cards=observation.own_hole_cards,
+        )
+        projected: list[tuple[int, tuple[RangeCombo, ...]]] = []
+        material: list[object] = []
+        for seat in players:
+            result = beliefs.get(seat)
+            snapshot = None if result is None else result.current
+            if snapshot is None:
+                return None
+            # Range snapshots are already public-event conditioned and contain
+            # Hero-visible blockers. Never substitute recorded holes here.
+            ranked = sorted(snapshot.combos.items(), key=lambda item: (-item[1].probability, item[0]))[:16]
+            combos = tuple(RangeCombo(cards=cards_from_key(key), weight=float(combo.probability)) for key, combo in ranked if float(combo.probability) > 0)
+            if not combos:
+                return None
+            projected.append((seat, combos))
+            material.append((seat, snapshot.snapshot_id, [(combo.cards, combo.weight) for combo in combos], result.provenance.policy_fingerprint if result.provenance else None))
+    except Exception:
+        return None
+    tree_material = {"legal": [(name, item.min_amount, item.max_amount) for name, item in sorted(legal.items())], "bet": bet.min_amount}
+    tree_fingerprint = "sha256:" + hashlib.sha256(json.dumps(tree_material, sort_keys=True).encode()).hexdigest()
+    range_fingerprint = "sha256:" + hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
+    source = L2RiverInput(
+        game_fingerprint=decision_fingerprint,
+        tree_fingerprint=tree_fingerprint,
+        range_fingerprint=range_fingerprint,
+        solver_version="riverline-l2-cfr/v1",
+        players=players,
+        acting_seat=players[0], pot=observation.pot,
+        stacks=tuple((seat, stacks[seat]) for seat in players), board=tuple(observation.board),
+        ranges=tuple(projected), tree=RiverBetTree(bet_amount=bet.min_amount),
+        seed=int(hashlib.sha256(decision_fingerprint.encode()).hexdigest()[:12], 16),
+        budget=L2Budget(iterations=8, soft_timeout_ms=250, hard_timeout_ms=400),
+    )
+    result = solve_hu_river(source, cache=cache)
+    if not isinstance(result, L2Result):
+        return None
+    return L2RecommendationInput(result=result, decision_fingerprint=decision_fingerprint, utility_fingerprint="chips-v1")
 
 
 def _not_ready_reconciliation(identity: ReconciliationIdentityV1):
