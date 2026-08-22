@@ -21,6 +21,10 @@ from threading import Event
 from types import MappingProxyType
 from typing import Callable, Literal, Mapping
 
+from pydantic import TypeAdapter, ValidationError
+
+from poker_coach.domain.models import Card, RangeCombo as DomainRangeCombo
+
 
 ENGINE_VERSION = "riverline-l2-cfr/v1"
 _ACTIONS: dict[str, tuple[str, ...]] = {
@@ -29,6 +33,7 @@ _ACTIONS: dict[str, tuple[str, ...]] = {
     "b": ("fold", "call"),
     "cb": ("fold", "call"),
 }
+_CARD_ADAPTER = TypeAdapter(Card)
 
 
 @dataclass(frozen=True)
@@ -39,12 +44,10 @@ class RangeCombo:
     weight: float
 
     def __post_init__(self) -> None:
-        if len(self.cards) != 2 or len(set(self.cards)) != 2:
-            raise ValueError("range combo must contain two distinct cards")
+        if len(self.cards) != 2:
+            raise ValueError("range combo must contain exactly two cards")
         if self.weight <= 0:
             raise ValueError("range combo weight must be positive")
-        for card in self.cards:
-            _parse_card(card)
 
 
 @dataclass(frozen=True)
@@ -95,6 +98,8 @@ class L2RiverInput:
     budget: L2Budget
     street: str = "river"
     projection_scope: Literal["public_range_projection"] = "public_range_projection"
+    hero_hole_cards: tuple[str, str] | None = None
+    solver_artifact_fingerprint: str = ENGINE_VERSION
 
     def __post_init__(self) -> None:
         if not all((self.game_fingerprint, self.tree_fingerprint, self.range_fingerprint, self.solver_version)):
@@ -106,10 +111,8 @@ class L2RiverInput:
             raise ValueError("the root actor must be players[0]")
         if self.pot < 0:
             raise ValueError("pot cannot be negative")
-        if len(self.board) != 5 or len(set(self.board)) != 5:
-            raise ValueError("river input requires five unique public board cards")
-        for card in self.board:
-            _parse_card(card)
+        if len(self.board) != 5:
+            raise ValueError("river input requires five public board cards")
         stacks = dict(self.stacks)
         projections = dict(self.ranges)
         # Incomplete public projections are a normal product-boundary miss.
@@ -119,13 +122,9 @@ class L2RiverInput:
             return
         if any(stack < 0 for stack in stacks.values()):
             raise ValueError("stacks cannot be negative")
-        board = set(self.board)
         for combos in projections.values():
             if not combos:
                 raise ValueError("every player needs a non-empty projected range")
-            for combo in combos:
-                if board & set(combo.cards):
-                    raise ValueError("range combo collides with board")
 
     @property
     def fingerprint(self) -> str:
@@ -145,9 +144,16 @@ class L2RiverInput:
             "budget": asdict(self.budget),
             "street": self.street,
             "scope": self.projection_scope,
+            "hero": self.hero_hole_cards,
+            "solver_artifact": self.solver_artifact_fingerprint,
         }
         encoded = json.dumps(material, sort_keys=True, separators=(",", ":"))
         return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    @property
+    def tree_cache_key(self) -> str:
+        """Cache identity for the whole solved tree, intentionally hero-free."""
+        return replace(self, hero_hole_cards=None).fingerprint
 
 
 @dataclass(frozen=True)
@@ -156,12 +162,17 @@ class L2Result:
     tree_fingerprint: str
     range_fingerprint: str
     solver_version: str
+    solver_artifact_fingerprint: str
     cache_key: str
+    tree_cache_key: str
     players: tuple[int, int]
     street: str
     pot: int
     legal_sizes: Mapping[str, int]
+    aggregate_action_frequencies: Mapping[str, float]
     action_frequencies: Mapping[str, float]
+    recommendation_available: bool
+    hero_decision_identity: str | None
     approximate_ev_chips: float
     ev_definition: str
     regret_bound_chips: float
@@ -248,6 +259,11 @@ def solve_hu_river(
     chance support.  Card pairs incompatible with board or with each other are
     excluded, so blocker mass is normalized over only feasible worlds.
     """
+    prepared, invalid = _prepare_input(source)
+    if invalid is not None:
+        return invalid
+    assert prepared is not None
+    source = prepared
     unsupported = _support_error(source)
     if unsupported is not None:
         return unsupported
@@ -283,20 +299,27 @@ def solve_hu_river(
     elapsed_ms = (time.perf_counter() - start) * 1_000
     if completed == 0:
         return _fallback(source, elapsed_ms, degradation or "soft_timeout")
-    policy = _root_policy(source, worlds, regrets, strategy_sums)
-    root_ev = sum(chance * _expected_value(source, first, second, "", policy, regrets) for first, second, chance in worlds)
+    aggregate_policy = _root_policy(source, worlds, regrets, strategy_sums)
+    hero_policy = _hero_policy(source, strategy_sums)
+    usable_policy = hero_policy or {}
+    root_ev = sum(chance * _expected_value(source, first, second, "", aggregate_policy, regrets) for first, second, chance in worlds)
     max_regret = max((max(values.values(), default=0.0) for values in regrets.values()), default=0.0)
     result = L2Result(
         game_fingerprint=source.game_fingerprint,
         tree_fingerprint=source.tree_fingerprint,
         range_fingerprint=source.range_fingerprint,
         solver_version=source.solver_version,
+        solver_artifact_fingerprint=source.solver_artifact_fingerprint,
         cache_key=source.fingerprint,
+        tree_cache_key=source.tree_cache_key,
         players=(source.players[0], source.players[1]),
         street="river",
         pot=source.pot,
         legal_sizes=MappingProxyType({"bet": source.tree.bet_amount}),
-        action_frequencies=MappingProxyType(policy),
+        aggregate_action_frequencies=MappingProxyType(aggregate_policy),
+        action_frequencies=MappingProxyType(usable_policy),
+        recommendation_available=hero_policy is not None,
+        hero_decision_identity=_hero_identity(source),
         approximate_ev_chips=root_ev,
         ev_definition="zero_sum_chips_from_root_player",
         regret_bound_chips=max_regret / completed,
@@ -306,11 +329,11 @@ def solve_hu_river(
         seed=source.seed,
         elapsed_ms=elapsed_ms,
         evidence_grade="B",
-        coverage_status="fallback" if degradation else "covered",
+        coverage_status="covered" if degradation is None and hero_policy is not None else "fallback",
         source="Riverline first-party bounded full-tree CFR",
         license="LicenseRef-Riverline-Internal",
         tree_description="HU river: check->check|bet->fold|call; bet->fold|call",
-        degradation_reason=degradation,
+        degradation_reason=degradation or _hero_unavailable_reason(source),
     )
     if cache is not None and degradation is None:
         cache.put(source.fingerprint, result)
@@ -324,6 +347,8 @@ def to_benchmark_candidate(
     public_range: Mapping[str, float],
 ) -> dict[str, object]:
     """Adapt the safe aggregate output to R9-00's frozen benchmark payload."""
+    if not result.recommendation_available:
+        raise ValueError("L2 aggregate diagnostics cannot be used as a hero recommendation")
     if selected_action not in result.action_frequencies:
         raise ValueError("selected action is not present in L2 policy")
     return {
@@ -352,6 +377,65 @@ def _support_error(source: L2RiverInput) -> L2Unsupported | None:
     if source.tree.bet_amount > min(stacks.values()):
         return L2Unsupported(**common, reason="tree_or_stack_unsupported")
     return None
+
+
+def _invalid(source: L2RiverInput, reason: str) -> L2Unsupported:
+    return L2Unsupported(
+        game_fingerprint=source.game_fingerprint,
+        tree_fingerprint=source.tree_fingerprint,
+        range_fingerprint=source.range_fingerprint,
+        solver_version=source.solver_version,
+        street=source.street,
+        players=source.players,
+        reason=reason,
+    )
+
+
+def _canonical_card(card: str) -> str:
+    """Normalize through the domain's canonical deck validator."""
+    try:
+        canonical = _CARD_ADAPTER.validate_python(card)
+    except ValidationError as exc:
+        raise ValueError("card_invalid") from exc
+    return canonical
+
+
+def _canonical_combo(cards: tuple[str, str]) -> tuple[str, str]:
+    canonical = tuple(_canonical_card(card) for card in cards)
+    try:
+        combo = DomainRangeCombo(cards=canonical, weight="1")
+    except ValidationError as exc:
+        raise ValueError("card_collision_unsupported") from exc
+    if tuple(cards) != canonical:
+        # Check duplication on canonical physical cards first: ``2c`` +
+        # ``2C`` is a collision, not two distinct range/deck cards.
+        raise ValueError("card_not_canonical")
+    return combo.cards
+
+
+def _prepare_input(source: L2RiverInput) -> tuple[L2RiverInput | None, L2Unsupported | None]:
+    """Normalize through domain Card, then reject every physical collision."""
+    try:
+        board = tuple(_canonical_card(card) for card in source.board)
+        if len(set(board)) != len(board):
+            return None, _invalid(source, "card_collision_unsupported")
+        if tuple(source.board) != board:
+            return None, _invalid(source, "card_not_canonical")
+        normalized_ranges: list[tuple[int, tuple[RangeCombo, ...]]] = []
+        for seat, combos in source.ranges:
+            normalized_combos = tuple(
+                RangeCombo(cards=_canonical_combo(combo.cards), weight=combo.weight)
+                for combo in combos
+            )
+            if any(set(board) & set(combo.cards) for combo in normalized_combos):
+                return None, _invalid(source, "card_collision_unsupported")
+            normalized_ranges.append((seat, normalized_combos))
+        hero = None if source.hero_hole_cards is None else _canonical_combo(source.hero_hole_cards)
+        if hero is not None and set(board) & set(hero):
+            return None, _invalid(source, "card_collision_unsupported")
+    except ValueError as exc:
+        return None, _invalid(source, str(exc))
+    return replace(source, board=board, ranges=tuple(normalized_ranges), hero_hole_cards=hero), None
 
 
 def _compatible_worlds(source: L2RiverInput) -> tuple[tuple[RangeCombo, RangeCombo, float], ...]:
@@ -414,6 +498,37 @@ def _root_policy(source: L2RiverInput, worlds: tuple[tuple[RangeCombo, RangeComb
     return {action: weighted[action] / total for action in weighted}
 
 
+def _hero_policy(source: L2RiverInput, sums: Mapping) -> dict[str, float] | None:
+    if source.hero_hole_cards is None:
+        return None
+    hero = source.hero_hole_cards
+    root_combos = dict(source.ranges).get(source.acting_seat, ())
+    if hero not in {combo.cards for combo in root_combos}:
+        return None
+    values = sums.get((0, hero, ""), {})
+    total = sum(values.get(action, 0.0) for action in _ACTIONS[""])
+    if total <= 0:
+        return None
+    return {action: values.get(action, 0.0) / total for action in _ACTIONS[""]}
+
+
+def _hero_identity(source: L2RiverInput) -> str | None:
+    if source.hero_hole_cards is None:
+        return None
+    # Hashing keeps decision/cache binding without exposing hero cards in any
+    # output, repr, telemetry, benchmark candidate, or recommendation payload.
+    material = f"{source.fingerprint}|{source.hero_hole_cards[0]}|{source.hero_hole_cards[1]}"
+    return "sha256:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _hero_unavailable_reason(source: L2RiverInput) -> str | None:
+    if source.hero_hole_cards is None:
+        return "hero_combo_required"
+    if source.hero_hole_cards not in {combo.cards for combo in dict(source.ranges).get(source.acting_seat, ())}:
+        return "hero_combo_outside_projection"
+    return None
+
+
 def _expected_value(source: L2RiverInput, first: RangeCombo, second: RangeCombo, history: str, root_policy: Mapping[str, float], regrets: Mapping) -> float:
     terminal = _terminal_utility(source, first, second, history)
     if terminal is not None:
@@ -425,7 +540,7 @@ def _expected_value(source: L2RiverInput, first: RangeCombo, second: RangeCombo,
 
 
 def _fallback(source: L2RiverInput, elapsed_ms: float, reason: str) -> L2Result:
-    return L2Result(game_fingerprint=source.game_fingerprint, tree_fingerprint=source.tree_fingerprint, range_fingerprint=source.range_fingerprint, solver_version=source.solver_version, cache_key=source.fingerprint, players=(source.players[0], source.players[1]), street="river", pot=source.pot, legal_sizes=MappingProxyType({"bet": source.tree.bet_amount}), action_frequencies=MappingProxyType({}), approximate_ev_chips=0.0, ev_definition="zero_sum_chips_from_root_player", regret_bound_chips=0.0, regret_definition="not available: no CFR iteration completed", iterations_completed=0, iterations_requested=source.budget.iterations, seed=source.seed, elapsed_ms=elapsed_ms, evidence_grade="B", coverage_status="fallback", source="Riverline first-party bounded full-tree CFR", license="LicenseRef-Riverline-Internal", tree_description="HU river: check->check|bet->fold|call; bet->fold|call", degradation_reason=reason)
+    return L2Result(game_fingerprint=source.game_fingerprint, tree_fingerprint=source.tree_fingerprint, range_fingerprint=source.range_fingerprint, solver_version=source.solver_version, solver_artifact_fingerprint=source.solver_artifact_fingerprint, cache_key=source.fingerprint, tree_cache_key=source.tree_cache_key, players=(source.players[0], source.players[1]), street="river", pot=source.pot, legal_sizes=MappingProxyType({"bet": source.tree.bet_amount}), aggregate_action_frequencies=MappingProxyType({}), action_frequencies=MappingProxyType({}), recommendation_available=False, hero_decision_identity=_hero_identity(source), approximate_ev_chips=0.0, ev_definition="zero_sum_chips_from_root_player", regret_bound_chips=0.0, regret_definition="not available: no CFR iteration completed", iterations_completed=0, iterations_requested=source.budget.iterations, seed=source.seed, elapsed_ms=elapsed_ms, evidence_grade="B", coverage_status="fallback", source="Riverline first-party bounded full-tree CFR", license="LicenseRef-Riverline-Internal", tree_description="HU river: check->check|bet->fold|call; bet->fold|call", degradation_reason=reason)
 
 
 def _cancelled(cancel: Event | Callable[[], bool] | None) -> bool:
