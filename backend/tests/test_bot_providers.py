@@ -98,7 +98,17 @@ def test_every_profile_decision_is_runtime_accepted_and_uses_legal_amounts(legal
         BotRuntime().decide(build_bot_provider(profile_id), observation, time_budget_ms=20, rng_seed=99)
     )
 
-    assert decision.degraded is False
+    if profile_id == "theory":
+        # This fixture is outside the frozen six-player preflop artifact
+        # coverage.  A legal lightweight action is still returned, but the
+        # public decision must honestly retain its C-grade fallback state.
+        assert decision.degraded is True
+        assert decision.fallback_reason == "multiway_or_table_size"
+        assert decision.metadata["evidenceGrade"] == "C"
+        assert decision.metadata["coverageStatus"] == "fallback"
+        assert decision.metadata["degradeReason"] == "multiway_or_table_size"
+    else:
+        assert decision.degraded is False
     assert any(item.accepts(action=decision.action, amount=decision.amount) for item in observation.legal_actions)
 
 
