@@ -84,11 +84,15 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R9-06 Product Integration | `/root/r9_06_product_integration` | `completed` | `merged` | `codex/r9-06-product-integration` | `accd318` | `35d18b2700629f5aa887a2757af68ee4aeaed1d9` | [R9-06 handoff](handoffs/R9-06.md) | backend 23; frontend 22; build; real two-hand; four-viewports; L2 cache p95 0.058ms | final audit/R9-07 | Integrated `a6d0d6f..cd6b374`; real service and deterministic fixture evidence separated |
 | R9-07 Release Gate | planned | `planned` | `planned` | `codex/r9-07-release` | — | — | — | waits for R9-06 | final audit/release | One final full gate after implementation batch |
 | R9 Theory Engine | `/root` | `in_progress` | `pending_acceptance` | `codex/r9-theory-engine` | `1dac59f` | `cd6b374` | [R9 plan](../plans/r9-theory-engine.md) | R9-00..06 integrated; overall audit pending | final audit/R9-07 | B-grade owned preflop artifact, first-party HU river CFR, unified explainer and training journey |
+| R9 Final Audit | `/root/r9_audit_*` | `completed` | `rejected` | `codex/r9-theory-engine` | `1dac59f` | `38e6032` | [R9 plan](../plans/r9-theory-engine.md) | Standards 0; Spec 4 P1; Theory/Privacy 6 P1 | R9-FIX-A/B/C | No P0; overlapping findings deduplicated into three narrow repair chains |
+| R9-FIX-A Benchmark/Artifact/Bot | `/root/r9_02_policy_bot` | `in_progress` | `in_progress` | `codex/r9-fix-policy-benchmark` | `38e6032` | — | — | provider-backed benchmark, artifact provenance/schema, honest fallback pending | re-review | Owns benchmark/policy artifact/Bot only |
+| R9-FIX-B L2 Correctness | `/root/r9_04_solver_l2` | `in_progress` | `in_progress` | `codex/r9-fix-l2` | `38e6032` | — | — | card canonicalization and Hero infoset policy pending | product adapter/re-review | Owns L2 core/tests only |
+| R9-FIX-C Product Semantics | `/root/r9_06_product_integration` | `in_progress` | `in_progress` | `codex/r9-fix-product-semantics` | `38e6032` | — | — | C frequency, coverage UI, sizing feedback/tree coverage pending | re-review | Owns recommendation/adapter/frontend/tests; no L2 core |
 | R8-RELEASE Source MVP Release Gate | `/root/r8_release_gate` | `completed` | `merged` | `codex/r8-release` | `7ccbc2d` | `593294b` | [R8-RELEASE handoff](handoffs/R8-RELEASE.md) | Backend 621 passed/10 live-PG skipped；frontend 174 tests/tsc/build/Playwright 7/7；npm audit 0；独立窄审 PASS（无 P0/P1）；GitHub CI run `32389468721` 全绿（含 live PostgreSQL/Redis、Node 24.15.0 clean install） | main 合并 | PR #6 `codex/r8-release`→main；`source_release_ready=PASS`；binary/container 发布继续禁止（SBOM FAIL） |
 
 ## 下一入口
 
-`R9 Final Audit`：固定比较 `1dac59f...HEAD`，并行执行 Standards、R9 Spec、Theory/Privacy 三轴只读审计。只修阻塞 P0/P1；通过后进入一次 R9-07 完整发布门。
+`R9-FIX-A/B/C`：从审计 head `38e6032` 并行关闭 provider-backed benchmark/artifact/Bot、L2 core、产品证据语义三组 P1；文件所有权分离。集成后只复审相关修复 diff，再进入 R9-07。
 
 ## MVP 执行策略
 
