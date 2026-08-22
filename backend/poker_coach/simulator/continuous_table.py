@@ -719,7 +719,7 @@ def _live_hu_river_l2(*, events, observation, decision_fingerprint: str, cache: 
         return None
     legal = {item.action.value: item for item in observation.legal_actions}
     bet = legal.get("bet")
-    if "check" not in legal or bet is None or bet.min_amount is None:
+    if set(legal) != {"check", "bet"} or bet is None or bet.min_amount is None or bet.max_amount != bet.min_amount or bet.amount_semantics.value != "by":
         return None
     players = (observation.observer_seat, next(seat for seat in observation.active_seats if seat != observation.observer_seat))
     stacks = dict(observation.stacks)

@@ -53,7 +53,7 @@ export type TheoryRecommendation = {
   status: "ready" | "degraded" | "not_ready";
   available: boolean;
   decision: { fingerprint: string; handId: string; sequence: number; street: string; observerSeat: number };
-  evidence: { sourceKind: "policy_artifact" | "l2_bounded_solver" | "formula" | "unsupported"; evidenceGrade: "B" | "C" | "unsupported"; version: string; policyFingerprint?: string | null; provenance: string; coverage: { status: "covered" | "fallback" | "unsupported"; reason?: string | null; players: number; street: string }; degradationReason?: string | null };
+  evidence: { sourceKind: "policy_artifact" | "l2_bounded_solver" | "formula" | "unsupported"; evidenceGrade: "B" | "C" | "unsupported"; version: string; policyFingerprint?: string | null; provenance: string; coverage: { status: "covered" | "fallback" | "unsupported"; reason?: string | null; players: number; street: string; treeId?: string | null; sizingAbstraction?: string | null; effectiveStackBucket?: string | null; rake?: string | null; ante?: number | null }; degradationReason?: string | null };
   recommendedAction?: { action: string; amountSemantics: string; amount?: number | null; frequency: number } | null;
   actionFrequencies: { action: string; amountSemantics: string; amount?: number | null; frequency: number }[];
   sameOracleEvLoss: { chips?: number | null; definition?: string | null; unavailableReason?: string | null };

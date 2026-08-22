@@ -64,6 +64,8 @@ def test_artifact_miss_honestly_uses_c_formula():
     assert missed.evidence.evidence_grade == "C"
     assert missed.evidence.coverage.status == "fallback"
     assert missed.degradation[0].startswith("artifact_miss:")
+    assert missed.action_frequencies == ()
+    assert missed.recommended_action is None
 
 
 def test_ev_loss_never_claims_an_oracle_when_tree_or_range_identity_does_not_match():

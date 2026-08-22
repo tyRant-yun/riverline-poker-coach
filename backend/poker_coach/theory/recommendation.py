@@ -41,6 +41,11 @@ class TheoryCoverageV1(_TheoryContractV1):
     reason: str | None = None
     players: int = Field(ge=2, le=8)
     street: Street
+    tree_id: str | None = None
+    sizing_abstraction: str | None = None
+    effective_stack_bucket: str | None = None
+    rake: str | None = None
+    ante: int | None = None
 
 
 class TheoryEvidenceV1(_TheoryContractV1):
@@ -165,7 +170,7 @@ class TheoryExplainer:
                         version=self._artifact.version, policy_fingerprint=self._artifact.fingerprint,
                         source_license=str(self._artifact.source["license"]),
                         provenance=str(self._artifact.source["provenance"]), status="ready",
-                        coverage=TheoryCoverageV1(status="covered", players=observation.table_size, street=observation.street),
+                        coverage=TheoryCoverageV1(status="covered", players=observation.table_size, street=observation.street, tree_id=context.tree_fingerprint, sizing_abstraction="artifact_legal_sizings", effective_stack_bucket="100bb", rake="no_rake", ante=0),
                         frequencies=frequencies, oracle=oracle_ev_loss,
                         expected_tree=context.tree_fingerprint, expected_range=None, expected_utility=None,
                         degradation=("artifact_illegal_action_filtered",) if filtered else (),
@@ -185,7 +190,7 @@ class TheoryExplainer:
                     version=l2_result.solver_version, policy_fingerprint=l2_result.cache_key,
                     source_license=l2_result.license, provenance=l2_result.source,
                     status="ready" if l2_result.coverage_status == "covered" else "degraded",
-                    coverage=TheoryCoverageV1(status=l2_result.coverage_status, reason=l2_result.degradation_reason, players=2, street=observation.street),
+                    coverage=TheoryCoverageV1(status=l2_result.coverage_status, reason=l2_result.degradation_reason, players=2, street=observation.street, tree_id=l2_result.tree_fingerprint, sizing_abstraction=l2_result.tree_description, effective_stack_bucket="validated_hu_stack", rake="no_rake", ante=0),
                     frequencies=frequencies, oracle=oracle_ev_loss,
                     expected_tree=l2_result.tree_fingerprint, expected_range=l2_result.range_fingerprint,
                     expected_utility=l2.utility_fingerprint,
@@ -212,24 +217,12 @@ class TheoryExplainer:
         )
 
     def _formula_fallback(self, identity, formula, explanation, reason: str, oracle: OracleEvLossInput | None) -> TheoryRecommendationV1:
-        recommendation = formula.recommended_action
-        frequencies: tuple[TheoryFrequencyV1, ...] = () if recommendation is None else (TheoryFrequencyV1(
-            action=recommendation.action, amount_semantics=recommendation.amount_semantics,
-            amount=recommendation.amount, frequency=1.0,
-        ),)
-        if not frequencies:
-            return TheoryRecommendationV1(
-                status="not_ready", available=False, decision=identity,
-                evidence=TheoryEvidenceV1(source_kind="unsupported", evidence_grade="unsupported", version=self.version,
-                    provenance="Formula facts had no legal heuristic action", coverage=TheoryCoverageV1(status="unsupported", reason=reason, players=2, street=identity.street), degradation_reason=reason),
-                legal_action_bounds=formula.legal_action_bounds, same_oracle_ev_loss=TheoryEvLossV1(unavailable_reason="oracle_not_applicable"),
-                explanation=explanation, assumptions=explanation.assumptions, degradation=(reason,),
-            )
+        frequencies: tuple[TheoryFrequencyV1, ...] = ()
         return _result(
             identity, formula, explanation, source_kind="formula", grade="C", version=formula.version,
             policy_fingerprint=None, source_license=None,
             provenance="Deterministic formula heuristic; not GTO or a complete game-tree policy.", status="degraded" if formula.status != "ready" else "ready",
-            coverage=TheoryCoverageV1(status="fallback", reason=reason, players=2, street=identity.street),
+            coverage=TheoryCoverageV1(status="fallback", reason=reason, players=2, street=identity.street, tree_id=None, sizing_abstraction="formula_only", effective_stack_bucket=None, rake="unknown", ante=None),
             frequencies=frequencies, oracle=oracle, expected_tree=None, expected_range=None, expected_utility=None,
             degradation=(reason,),
         )
@@ -241,7 +234,7 @@ def _result(identity, formula, explanation, *, source_kind, grade, version, poli
         evidence=TheoryEvidenceV1(source_kind=source_kind, evidence_grade=grade, version=version,
             policy_fingerprint=policy_fingerprint, source_license=source_license, provenance=provenance,
             coverage=coverage, degradation_reason=coverage.reason),
-        recommended_action=max(frequencies, key=lambda item: item.frequency), action_frequencies=frequencies,
+        recommended_action=max(frequencies, key=lambda item: item.frequency) if frequencies else None, action_frequencies=frequencies,
         legal_action_bounds=formula.legal_action_bounds,
         same_oracle_ev_loss=_ev_loss(oracle, expected_tree, expected_range, expected_utility), explanation=explanation,
         assumptions=explanation.assumptions, degradation=degradation,
@@ -324,7 +317,8 @@ def _usable_l2(l2: L2RecommendationInput | None, observation: ObservationV1, dec
     if l2 is None or l2.projection_scope != "public_range_projection" or l2.decision_fingerprint != decision_fingerprint:
         return None
     result = l2.result
-    if observation.street is not Street.RIVER or len(observation.active_seats) != 2 or result.coverage_status not in {"covered", "fallback"}:
+    legal = {item.action.value: item for item in observation.legal_actions}
+    if observation.street is not Street.RIVER or len(observation.active_seats) != 2 or result.coverage_status not in {"covered", "fallback"} or set(legal) != {"check", "bet"}:
         return None
     if result.players[0] != observation.observer_seat or result.street != observation.street.value:
         return None

@@ -81,6 +81,11 @@ describe("Table V2 visual contracts", () => {
     render(<InsightRailV2 table={{ heroSeat: 0, pot: 500, seats: [{ seatId: 0, stack: 5_000 }] } as never} reconciliation={{ status: "ready", decision: { fingerprint: "f", handId: "h", sequence: 1, street: "flop" }, ruleBaseline: { role: "rule_baseline", status: "ready", action: { action: "bet", amountSemantics: "to", amountChips: 330, potPct: "66" }, provenance: {}, limitations: [] }, simulationEstimate: { role: "simulation_estimate", status: "ready", action: { action: "call", amountSemantics: "cost", amountChips: 100, potPct: "20" }, provenance: {}, limitations: [] }, agreement: { kind: "different_action", reasonCodes: ["model_limitations"], confidenceInterval: { status: "available" }, sizingRobustness: "close" } }} />);
     const summary = screen.getByLabelText("Decision Summary"); expect(summary).toHaveTextContent("等待统一 theory-recommendation"); expect(summary).toHaveTextContent("SPR 10.0"); expect(summary).not.toHaveTextContent("模型限制");
   });
+  it("labels C Formula as an explanation without a fabricated 100% strategy frequency", () => {
+    render(<InsightRailV2 theory={{ status: "degraded", available: true, decision: { fingerprint: "f", handId: "h", sequence: 1, street: "river", observerSeat: 0 }, evidence: { sourceKind: "formula", evidenceGrade: "C", version: "formula/v1", provenance: "formula", coverage: { status: "fallback", reason: "tree_unsupported", players: 2, street: "river", sizingAbstraction: "formula_only", rake: "unknown" } }, actionFrequencies: [], sameOracleEvLoss: { unavailableReason: "oracle_not_provided" }, explanation: { formulaVersion: "formula/v1", potOdds: "0.2", assumptions: [], limitations: [] }, degradation: [] }} />);
+    expect(screen.getByLabelText("Theory 推荐")).toHaveTextContent("公式倾向／无策略频率");
+    expect(screen.getByLabelText("Theory 推荐")).not.toHaveTextContent("100%");
+  });
   it("retains the previous same-hand snapshot for verifiable Top movers", async () => {
     const table = { sessionId: "s", handId: "h", fingerprint: "a", street: "flop", pot: 100 };
     const belief = (fingerprint: string, aa: string, aks: string) => ({ table: { ...table, fingerprint } as never, insights: { available: true, seatBeliefs: [{ seatId: 1, available: true, matrix169: { AA: { probabilityMass: aa, comboCount: 6 }, AKs: { probabilityMass: aks, comboCount: 4 } } }] } });

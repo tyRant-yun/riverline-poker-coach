@@ -141,8 +141,9 @@ export default function ContinuousTablePage() {
     try {
       const response = await continuousTableApi.action(current.sessionId, { commandId: commandId("hero"), handId: current.handId, expectedRevision: current.revision, action: legal.action, amountSemantics: legal.amountSemantics, ...(legal.minAmount != null ? { amount: Number(amounts[legal.action] || legal.minAmount) } : {}) });
       hydrate(response.table, "transition");
-      if (currentTheory) {
-        const selected = currentTheory.actionFrequencies.find((item) => item.action === legal.action);
+      if (currentTheory?.evidence.evidenceGrade === "B") {
+        const amount = legal.minAmount != null ? Number(amounts[legal.action] || legal.minAmount) : null;
+        const selected = currentTheory.actionFrequencies.find((item) => item.action === legal.action && item.amountSemantics === legal.amountSemantics && (item.amount ?? null) === amount);
         setTrainingFeedback({ identity: identityFor(current), action: legal.action, frequency: selected?.frequency ?? null, common: (selected?.frequency ?? 0) >= 0.2, evLossUnavailable: currentTheory.sameOracleEvLoss.chips == null ? (currentTheory.sameOracleEvLoss.unavailableReason ?? "same_oracle_ev_unavailable") : null });
       }
     } catch (cause) { setError(cause instanceof Error ? cause.message : "行动未被接受"); }
