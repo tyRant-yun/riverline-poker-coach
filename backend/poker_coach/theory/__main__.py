@@ -6,15 +6,20 @@ import argparse
 import json
 from pathlib import Path
 
-from .benchmark import FixtureError, run_benchmark
+from .benchmark import FixtureError, run_benchmark, run_provider_smoke
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run frozen theory benchmark fixtures")
     parser.add_argument("--fixtures", type=Path, default=None, help="fixture directory (defaults to bundled corpus)")
     parser.add_argument("--verify-corpus", action="store_true", help="exit zero when intentional red fixtures are rejected as declared")
+    parser.add_argument("--provider-smoke", action="store_true", help="run the live PolicyArtifact adapter against the frozen oracle fixture")
     args = parser.parse_args()
     try:
+        if args.provider_smoke:
+            result = run_provider_smoke()
+            print(json.dumps(result.model_dump(mode="json", by_alias=True), sort_keys=True))
+            raise SystemExit(0 if result.gate_passed else 1)
         result = run_benchmark(args.fixtures)
     except FixtureError as exc:
         print(json.dumps({"gatePassed": False, "error": str(exc)}, sort_keys=True))

@@ -114,8 +114,9 @@ def test_r9_00_fixture_gate_remains_a_b_grade_calibration_reference_for_the_adap
 def test_noncovered_stack_rake_ante_or_tree_returns_c_grade_fallback_with_reason(context):
     decision = asyncio.run(PolicyArtifactBot(context=context).decide(_observation(), _observation().legal_actions, 20, 7))
 
-    assert decision.metadata["evidenceGrade"] == "B"
+    assert decision.metadata["evidenceGrade"] == "C"
     assert decision.metadata["coverageStatus"] == "fallback"
+    assert decision.metadata["degraded"] is True
     assert decision.metadata["degradeReason"] in {"non_100bb", "rake", "ante", "unknown_tree"}
     assert decision.metadata["fallbackProvider"] == "lightweight-blueprint"
 
@@ -170,4 +171,29 @@ def test_theory_profile_falls_back_for_an_illegal_artifact_sizing_without_breaki
     assert decision.degraded is False
     assert decision.metadata["coverageStatus"] == "fallback"
     assert decision.metadata["degradeReason"] == "legal_sizing_miss"
+    assert decision.metadata["evidenceGrade"] == "C"
+    assert decision.metadata["degraded"] is True
     assert any(legal.accepts(action=decision.action, amount=decision.amount) for legal in observation.legal_actions)
+
+
+@pytest.mark.parametrize("field, value, message", [
+    ("handClass", "ZZ", "canonical 169"),
+    ("handClass", "a5s", "canonical 169"),
+    ("comboCount", 99, "combo count"),
+])
+def test_artifact_rejects_noncanonical_classes_and_combo_counts(field, value, message):
+    payload = _payload(default_preflop_artifact())
+    payload["nodes"][0]["classFrequencies"][0][field] = value
+    with pytest.raises(PolicyArtifactError, match=message):
+        PolicyArtifact.load(_resign(payload))
+
+
+def test_artifact_rejects_illegal_action_and_missing_b_grade_release_manifest():
+    payload = _payload(default_preflop_artifact())
+    payload["nodes"][0]["classFrequencies"][0]["frequencies"] = {"check": 1.0, "fold": 0.0}
+    with pytest.raises(PolicyArtifactError, match="frequencies"):
+        PolicyArtifact.load(_resign(payload))
+    payload = _payload(default_preflop_artifact())
+    payload["generation"].pop("command")
+    with pytest.raises(PolicyArtifactError, match="generation.command"):
+        PolicyArtifact.load(_resign(payload))

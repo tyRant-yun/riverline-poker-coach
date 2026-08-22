@@ -28,6 +28,8 @@ def build_preflop_payload() -> dict[str, Any]:
             "evidenceGrade": "B",
             "license": "Riverline-first-party",
             "provenance": "Riverline-authored transparent training blueprint; no imported chart, screenshot, or third-party strategy data.",
+            "releaseDecision": "approved_for_b_grade_training_only",
+            "verificationStatus": "verified-first-party-blueprint",
         },
         "coverage": {
             "players": 6,
@@ -41,6 +43,8 @@ def build_preflop_payload() -> dict[str, Any]:
         },
         "generation": {
             "generator": "poker_coach.theory.policy_artifact_data.build_preflop_payload",
+            "command": "py -3.13 -c \"from poker_coach.theory.policy_artifact import default_preflop_artifact; print(default_preflop_artifact().fingerprint)\"",
+            "patchState": "none",
             "configuration": {
                 "rfiSizingBb": 2.5,
                 "threeBetSizingBb": 9.0,

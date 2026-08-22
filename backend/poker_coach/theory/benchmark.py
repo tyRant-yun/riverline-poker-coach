@@ -127,10 +127,12 @@ def _metric(name: str, passed: bool, *, value: float | None = None, threshold: f
     return MetricResult(name=name, status="pass" if passed else "fail", value=value, threshold=threshold, detail=detail)
 
 
-def evaluate_fixture(fixture: CanonicalFixture) -> FixtureResult:
+def evaluate_fixture(fixture: CanonicalFixture, *, provider_candidate: dict[str, Any] | None = None) -> FixtureResult:
     started = time.perf_counter_ns()
     item = fixture.payload
-    candidate = item["candidate"]
+    # Production gates pass a separately produced provider payload.  The
+    # fixture candidate remains only a frozen calibration/mutant corpus input.
+    candidate = provider_candidate if provider_candidate is not None else item["candidate"]
     oracle = item["oracle"]
     metrics: list[MetricResult] = []
     identity_ok = candidate.get("fingerprints") == item["identity"]
@@ -191,3 +193,28 @@ def evaluate_fixture(fixture: CanonicalFixture) -> FixtureResult:
 def run_benchmark(directory: Path | None = None) -> BenchmarkResult:
     results = tuple(evaluate_fixture(fixture) for fixture in load_corpus(directory))
     return BenchmarkResult(harness_version=HARNESS_VERSION, threshold_manifest_id=FROZEN_THRESHOLD_MANIFEST["manifest_id"], gate_passed=all(result.gate_passed for result in results), corpus_expectations_met=all(result.gate_passed == result.expected_gate_passed for result in results), environment={"python": platform.python_version(), "platform": platform.platform(), "machine": platform.machine(), "processor": platform.processor() or "unknown"}, performance_note="Measured on this development machine for reproducibility only; not a product SLA.", fixtures=results)
+
+
+def run_provider_smoke() -> FixtureResult:
+    """Gate the live preflop provider against a frozen, oracle-only fixture.
+
+    This deliberately calls the loaded PolicyArtifact instead of reading the
+    fixture's embedded candidate.  Mutants belong in tests/providers, never in
+    an oracle fixture that could self-certify its own expected output.
+    """
+    from poker_coach.simulator.contracts import ObservationV1
+    from poker_coach.theory.policy_artifact import PreflopPolicyContext, default_preflop_artifact
+
+    fixture = load_fixture(fixture_directory() / "green-6max-preflop-b.json")
+    observation = ObservationV1.model_validate({"handId":"benchmark-policy","sequence":1,"observerSeat":0,"tableSize":6,"buttonSeat":0,"street":"preflop","ownHoleCards":["As","5s"],"pot":150,"stacks":{str(i):10000 for i in range(6)},"streetCommitments":{str(i):0 for i in range(6)},"activeSeats":list(range(6)),"publicActions":[{"sequence":1,"street":"preflop","actorSeat":3,"action":"raise","amount":250,"amountSemantics":"to"}],"legalActions":[{"action":"fold","amountSemantics":"none"},{"action":"call","amountSemantics":"cost","minAmount":250,"maxAmount":250},{"action":"raise","amountSemantics":"to","minAmount":900,"maxAmount":900}]})
+    started = time.perf_counter_ns()
+    artifact = default_preflop_artifact()
+    match = artifact.match(observation, PreflopPolicyContext())
+    if match is None:
+        raise FixtureError("live PolicyArtifact did not cover provider smoke node")
+    item = json.loads(json.dumps(fixture.payload))
+    item["identity"]["policyFingerprint"] = artifact.fingerprint
+    item["oracle"]["legalSizings"]["raise_to"] = {"min": 900, "max": 900, "target": 900}
+    candidate = {"fingerprints": dict(item["identity"]), "evidenceGrade": "B", "coverageStatus": "covered", "actionFrequencies": dict(match.frequencies), "sizings": {"raise_to": match.raise_to}, "selectedAction": "raise_to", "evDefinition": item["oracle"]["evDefinition"], "range": dict(item["oracle"]["range"]), "providerFingerprint": artifact.fingerprint}
+    result = evaluate_fixture(CanonicalFixture(path=fixture.path, payload=item), provider_candidate=candidate)
+    return FixtureResult(fixture_id="provider-" + result.fixture_id, gate_passed=result.gate_passed, expected_gate_passed=True, metrics=result.metrics, elapsed_ms=(time.perf_counter_ns()-started)/1_000_000)

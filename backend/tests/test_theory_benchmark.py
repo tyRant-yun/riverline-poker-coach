@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from poker_coach.theory.benchmark import _canonical_digest, FixtureError, evaluate_fixture, fixture_directory, load_corpus, load_fixture, run_benchmark
+from poker_coach.theory.benchmark import _canonical_digest, FixtureError, evaluate_fixture, fixture_directory, load_corpus, load_fixture, run_benchmark, run_provider_smoke
 
 
 def _result_by_id():
@@ -102,3 +102,22 @@ def test_cli_default_exit_code_reports_an_actual_gate_failure_for_mutants():
 def test_a_and_b_fixtures_have_distinct_declared_oracle_grades(fixture_name):
     fixture = load_fixture(fixture_directory() / fixture_name)
     assert fixture.payload["oracle"]["evidenceGrade"] in {"A", "B"}
+
+
+def test_provider_smoke_calls_real_policy_artifact_not_fixture_candidate(monkeypatch):
+    fixture = load_fixture(fixture_directory() / "green-6max-preflop-b.json")
+    fixture.payload["candidate"]["actionFrequencies"] = {"fold": 1.0}
+    monkeypatch.setattr("poker_coach.theory.benchmark.load_fixture", lambda _path: fixture)
+    result = run_provider_smoke()
+    assert result.gate_passed is True
+    assert result.fixture_id == "provider-green-6max-preflop-b"
+
+
+def test_unsupported_with_policy_fields_is_red_not_honest_fallback(tmp_path):
+    payload = json.loads((fixture_directory() / "green-unsupported-stack.json").read_text(encoding="utf-8"))
+    payload["candidate"]["actionFrequencies"] = {"fold": 1.0}
+    payload["candidate"]["selectedAction"] = "fold"
+    payload["provenance"]["digest"] = _canonical_digest(payload)
+    path = tmp_path / "unsupported-with-policy.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert evaluate_fixture(load_fixture(path)).gate_passed is False

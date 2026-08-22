@@ -162,10 +162,11 @@ class PolicyArtifactBot:
         hand_class: str | None,
         degrade_reason: str | None,
     ) -> dict[str, str | None]:
+        is_fallback = coverage_status != "covered"
         return {
             "kind": "policy-artifact",
             "sourceKind": str(self.artifact.source["sourceKind"]),
-            "evidenceGrade": str(self.artifact.source["evidenceGrade"]),
+            "evidenceGrade": "C" if is_fallback else str(self.artifact.source["evidenceGrade"]),
             "sourceLicense": str(self.artifact.source["license"]),
             "coverageStatus": coverage_status,
             "policyVersion": self.artifact.version,
@@ -174,6 +175,7 @@ class PolicyArtifactBot:
             "nodeId": node_id,
             "handClass": hand_class,
             "degradeReason": degrade_reason,
+            "degraded": is_fallback,
         }
 
 

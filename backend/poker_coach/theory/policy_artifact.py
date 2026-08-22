@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Mapping
 if TYPE_CHECKING:
     from poker_coach.simulator.contracts import ObservationV1
 
-from .policy_artifact_data import ARTIFACT_VERSION, TREE_VERSION, build_preflop_payload
+from .policy_artifact_data import ARTIFACT_VERSION, TREE_VERSION, _hand_classes, build_preflop_payload
 
 
 class PolicyArtifactError(ValueError):
@@ -177,20 +177,36 @@ def _validate_shape(payload: Mapping[str, Any]) -> None:
     source = payload["source"]
     if source.get("evidenceGrade") != "B" or source.get("license") != "Riverline-first-party":
         raise PolicyArtifactError("policy artifact must be a Riverline-first-party B-grade source")
+    for key in ("sourceKind", "provenance", "releaseDecision", "verificationStatus"):
+        if not source.get(key):
+            raise PolicyArtifactError(f"B-grade artifact source.{key} is required")
+    generation = payload["generation"]
+    for key in ("generator", "command", "configuration", "patchState"):
+        if key not in generation or generation[key] in (None, ""):
+            raise PolicyArtifactError(f"B-grade artifact generation.{key} is required")
 
 
 def _validate_nodes(payload: Mapping[str, Any]) -> None:
+    expected_classes = {hand_class: combos for hand_class, combos, _ordinal in _hand_classes()}
     for node in payload["nodes"]:
         entries = node.get("classFrequencies", [])
-        if len(entries) != 169 or sum(item.get("comboCount", 0) for item in entries) != 1326:
+        if len(entries) != 169:
             raise PolicyArtifactError("each policy node must trace 1326 combos to 169 hand classes")
-        classes = {item.get("handClass") for item in entries}
-        if len(classes) != 169:
-            raise PolicyArtifactError("policy node has duplicate hand classes")
+        classes = [item.get("handClass") for item in entries]
+        if set(classes) != set(expected_classes) or len(classes) != len(set(classes)):
+            raise PolicyArtifactError("policy node must contain exactly canonical 169 hand classes")
+        if any(item.get("comboCount") != expected_classes[item["handClass"]] for item in entries):
+            raise PolicyArtifactError("policy node has an invalid canonical combo count")
+        if sum(item.get("comboCount", 0) for item in entries) != 1326:
+            raise PolicyArtifactError("each policy node must trace 1326 combos to 169 hand classes")
+        allowed = {"raise_to", "fold"} if node.get("actionPrefix") == "rfi" else {"raise_to", "call", "fold"}
+        sizing = node.get("legalSizing", {}).get("raise_to", {})
+        if sizing.get("semantics") != "to" or not isinstance(sizing.get("amountBb"), (int, float)) or sizing["amountBb"] <= 0:
+            raise PolicyArtifactError("policy node has illegal raise sizing")
         for item in entries:
             frequencies = item.get("frequencies", {})
             total = sum(float(value) for value in frequencies.values())
-            if not frequencies or any(float(value) < 0 for value in frequencies.values()) or abs(total - 1.0) > 1e-9:
+            if set(frequencies) != allowed or not frequencies or any(not isinstance(value, (int, float)) or float(value) < 0 for value in frequencies.values()) or abs(total - 1.0) > 1e-9:
                 raise PolicyArtifactError("policy action frequencies must be non-negative and normalized")
 
 
