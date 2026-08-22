@@ -81,14 +81,14 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R9-03 Same-source Range | `/root/r9_03_policy_range` | `completed` | `merged` | `codex/r9-03-policy-range` | `2dbeb63` | `e1c1ea114f4c2930437dcb245b8940c7a6c1c10f` | [R9-03 handoff](handoffs/R9-03.md) | Range/Policy 90; API 14; p95 2.530ms; compileall/corpus PASS | R9-06 | Integrated `4546a4d..883440f`; artifact misses remain explicit C fallback |
 | R9-04 Bounded Solver L2 | `/root/r9_04_solver_l2` | `completed` | `merged` | `codex/r9-04-solver-l2` | `d11bd4e` | `c79d891f2316d428e8d597979b62b44acf01a9dc` | [R9-04 handoff](handoffs/R9-04.md) | 20 focused tests; compileall; corpus verify PASS | R9-05/R9-06 | Integrated `760346a..5db4198`; HU river CFR, turn/multiway unsupported |
 | R9-05 Theory Explainer | `/root/r9_05_theory_explainer` | `completed` | `merged` | `codex/r9-05-theory-explainer` | `2dbeb63` | `69bdf8e3f11cf10ba423c81af4a2fdc5e156eff9` | [R9-05 handoff](handoffs/R9-05.md) | 66 focused tests; compileall; corpus smoke PASS | R9-06 | Integrated `2ae71f1..0cb7d25`; live HU L2 waits for permission-safe projected ranges |
-| R9-06 Product Integration | `/root/r9_06_product_integration` | `in_progress` | `in_progress` | `codex/r9-06-product-integration` | `883440f` | — | — | live theory/range/bot/training journey pending | R9-07 | Continuous-table training journey and honest downgrade |
+| R9-06 Product Integration | `/root/r9_06_product_integration` | `completed` | `merged` | `codex/r9-06-product-integration` | `accd318` | `35d18b2700629f5aa887a2757af68ee4aeaed1d9` | [R9-06 handoff](handoffs/R9-06.md) | backend 23; frontend 22; build; real two-hand; four-viewports; L2 cache p95 0.058ms | final audit/R9-07 | Integrated `a6d0d6f..cd6b374`; real service and deterministic fixture evidence separated |
 | R9-07 Release Gate | planned | `planned` | `planned` | `codex/r9-07-release` | — | — | — | waits for R9-06 | final audit/release | One final full gate after implementation batch |
-| R9 Theory Engine | `/root` | `in_progress` | `in_progress` | `codex/r9-theory-engine` | `1dac59f` | — | [R9 plan](../plans/r9-theory-engine.md) | plan committed; implementation pending | R9-00/R9-01 | Default: B-grade owned preflop artifact, first-party L2, frequency-deviation scoring |
+| R9 Theory Engine | `/root` | `in_progress` | `pending_acceptance` | `codex/r9-theory-engine` | `1dac59f` | `cd6b374` | [R9 plan](../plans/r9-theory-engine.md) | R9-00..06 integrated; overall audit pending | final audit/R9-07 | B-grade owned preflop artifact, first-party HU river CFR, unified explainer and training journey |
 | R8-RELEASE Source MVP Release Gate | `/root/r8_release_gate` | `completed` | `merged` | `codex/r8-release` | `7ccbc2d` | `593294b` | [R8-RELEASE handoff](handoffs/R8-RELEASE.md) | Backend 621 passed/10 live-PG skipped；frontend 174 tests/tsc/build/Playwright 7/7；npm audit 0；独立窄审 PASS（无 P0/P1）；GitHub CI run `32389468721` 全绿（含 live PostgreSQL/Redis、Node 24.15.0 clean install） | main 合并 | PR #6 `codex/r8-release`→main；`source_release_ready=PASS`；binary/container 发布继续禁止（SBOM FAIL） |
 
 ## 下一入口
 
-`R9-06`：从已集成 R9-01..05 的 `883440f` 完成单一真实牌桌纵向接线；不得新增策略算法，只解决接口、异步、证据语义、训练反馈与体验阻塞。完成后进入最终整体审计和 R9-07 发布门。
+`R9 Final Audit`：固定比较 `1dac59f...HEAD`，并行执行 Standards、R9 Spec、Theory/Privacy 三轴只读审计。只修阻塞 P0/P1；通过后进入一次 R9-07 完整发布门。
 
 ## MVP 执行策略
 
