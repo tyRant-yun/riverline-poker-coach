@@ -21,6 +21,7 @@ from poker_coach.persistence.session_store import (
     StoredGameSession,
 )
 from poker_coach.ranges.event_beliefs import PublicEventBeliefConsumer
+from poker_coach.theory import PreflopPolicyContext, TheoryDecisionIdentityV1, TheoryExplainer
 
 from .bot_providers import BLUEPRINT_PROFILE_IDS, build_bot_provider
 from .bot_runtime import BotRuntime
@@ -232,6 +233,58 @@ class ContinuousTableService:
                 )
         return FormulaAdvisorFactory().create().evaluate(
             observation, decision_fingerprint=fingerprint
+        ).to_dict()
+
+    def theory_recommendation(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
+        """Return one current, source-prioritized theory truth plus L0 explanation.
+
+        No live L2 range projection exists at this seam yet.  Rather than derive
+        one from hidden cards or terminal state, non-preflop decisions honestly
+        take the C-grade Formula path.  This read-only method shares the normal
+        stale hand/fingerprint gate, so it cannot populate a cache across hands.
+        """
+
+        hand_id = request.get("handId")
+        fingerprint = request.get("decisionFingerprint")
+        if not isinstance(hand_id, str) or not isinstance(fingerprint, str):
+            raise ContinuousTableError(
+                "invalid_theory_recommendation_request",
+                "handId and decisionFingerprint are required strings",
+            )
+        explainer = TheoryExplainer()
+        with self._lock:
+            stored = self._recover(session_id)
+            metadata = self._metadata(session_id)
+            current = self._projection(stored, metadata)
+            if current["handId"] != hand_id:
+                raise ContinuousTableError("stale_decision", "theory request is not for the current hand", conflict=True)
+            if current["fingerprint"] != fingerprint:
+                raise ContinuousTableError("stale_decision", "theory request does not match the current decision", conflict=True)
+            hero = int(metadata["hero_seat"])
+            events = tuple(item.event for item in self.event_store.read(hand_id))
+            state = replay_hand(events).state
+            identity = TheoryDecisionIdentityV1(
+                fingerprint=fingerprint, hand_id=hand_id, sequence=events[-1].sequence,
+                street=state.street, observer_seat=hero,
+            )
+            if not state.hand_in_progress or self._actor(events) != hero:
+                return explainer.unavailable(
+                    decision=identity, reason="not_current_hero_decision"
+                ).to_dict()
+            try:
+                observation = build_observation(
+                    events, observer_seat=hero, after_sequence=events[-1].sequence
+                )
+            except Exception:
+                return explainer.unavailable(
+                    decision=identity, reason="hero_observation_unavailable"
+                ).to_dict()
+        # The continuous table is intentionally fixed at its authoritative
+        # 100-chip BB/no-rake configuration.  The artifact rechecks stack,
+        # position and public prefix before it can claim B coverage.
+        return explainer.recommend(
+            observation, decision_fingerprint=fingerprint,
+            preflop_context=PreflopPolicyContext(big_blind=100),
         ).to_dict()
 
     def solver(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
