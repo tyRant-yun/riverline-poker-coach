@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from poker_coach.api import AppConfig, create_app
 from poker_coach.persistence import SQLiteGameSessionStore, SQLiteHandEventStore
-from poker_coach.simulator.contracts import LegalActionV1, ObservationV1
+from poker_coach.simulator.contracts import HoleCardsRecordedPayloadV1, LegalActionV1, ObservationV1
 from poker_coach.simulator.continuous_table import ContinuousTableService
 from poker_coach.simulator.continuous_table import _live_hu_river_l2
 from poker_coach.theory import L2RecommendationInput, OracleEvLossInput, PreflopPolicyContext, TheoryExplainer
@@ -88,6 +88,7 @@ def test_permission_safe_l2_has_priority_on_hu_river_and_ev_loss_needs_all_three
         ranges=((0, (RangeCombo(("2c", "3d"), 1),)), (1, (RangeCombo(("6c", "7d"), 1),))),
         tree=RiverBetTree(bet_amount=100), seed=7,
         budget=L2Budget(iterations=20, soft_timeout_ms=2_000, hard_timeout_ms=3_000),
+        hero_hole_cards=("2c", "3d"),
     ))
     observation = ObservationV1(
         handId="river-hand", sequence=9, observerSeat=0, tableSize=2, buttonSeat=0, street="river",
@@ -105,10 +106,11 @@ def test_permission_safe_l2_has_priority_on_hu_river_and_ev_loss_needs_all_three
     assert sum(item.frequency for item in recommendation.action_frequencies) == 1.0
     assert recommendation.same_oracle_ev_loss.chips is None
     assert recommendation.same_oracle_ev_loss.unavailable_reason == "oracle_tree_or_range_fingerprint_mismatch"
-    assert "2c" not in str(recommendation.to_dict()).lower()
+    assert "'2c'" not in str(recommendation.to_dict()).lower()
+    assert "'3d'" not in str(recommendation.to_dict()).lower()
 
 
-def test_live_hu_river_adapter_uses_public_posteriors_and_cache_without_private_poison(monkeypatch):
+def test_live_hu_river_adapter_binds_authorized_hero_infoset_and_cache_without_private_poison(monkeypatch):
     observation = ObservationV1(
         handId="river-live", sequence=9, observerSeat=0, tableSize=2, buttonSeat=0, street="river",
         ownHoleCards=("2c", "3d"), board=("As", "Ks", "Qs", "Js", "Ts"), pot=100,
@@ -116,7 +118,7 @@ def test_live_hu_river_adapter_uses_public_posteriors_and_cache_without_private_
         legalActions=(LegalActionV1(action="check", amountSemantics="none"), LegalActionV1(action="bet", amountSemantics="by", minAmount=100, maxAmount=100)),
     )
     public = {
-        0: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-hero", combos={"4c5d": SimpleNamespace(probability=1)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
+        0: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-hero", combos={"2c3d": SimpleNamespace(probability=0.5), "4c5d": SimpleNamespace(probability=0.5)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
         1: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-villain", combos={"6c7d": SimpleNamespace(probability=1)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
     }
     monkeypatch.setattr("poker_coach.simulator.continuous_table.PublicEventBeliefConsumer.beliefs_at", lambda *_args, **_kwargs: public)
@@ -125,8 +127,11 @@ def test_live_hu_river_adapter_uses_public_posteriors_and_cache_without_private_
     second = _live_hu_river_l2(events=(), observation=observation, decision_fingerprint="decision-public", cache=cache)
     assert first is not None and second is not None
     assert first.result.evidence_grade == "B"
+    assert first.result.recommendation_available is True
+    assert first.result.hero_decision_identity is not None
     assert second.result.cache_hit is True
-    assert "2c3d" not in str(first.result)
+    assert "'2c'" not in str(first.result).lower()
+    assert "'3d'" not in str(first.result).lower()
     samples = []
     for _ in range(20):
         started = perf_counter()
@@ -137,6 +142,66 @@ def test_live_hu_river_adapter_uses_public_posteriors_and_cache_without_private_
     p95 = samples[18]
     print(f"live_l2_cache_hit_p95_ms={p95:.3f}")
     assert p95 < 500
+
+
+def test_live_hu_river_adapter_isolates_hero_infosets_and_ignores_opponent_private_poison(monkeypatch):
+    public = {
+        0: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-hero", combos={"2c3d": SimpleNamespace(probability=0.5), "4c5d": SimpleNamespace(probability=0.5)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
+        1: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-villain", combos={"6c7d": SimpleNamespace(probability=1)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
+    }
+    monkeypatch.setattr("poker_coach.simulator.continuous_table.PublicEventBeliefConsumer.beliefs_at", lambda *_args, **_kwargs: public)
+    base = ObservationV1(
+        handId="river-live", sequence=9, observerSeat=0, tableSize=2, buttonSeat=0, street="river",
+        ownHoleCards=("2c", "3d"), board=("As", "Ks", "Qs", "Js", "Ts"), pot=100,
+        stacks={0: 100, 1: 100}, streetCommitments={0: 0, 1: 0}, activeSeats=(0, 1),
+        legalActions=(LegalActionV1(action="check", amountSemantics="none"), LegalActionV1(action="bet", amountSemantics="by", minAmount=100, maxAmount=100)),
+    )
+    cache = L2Cache()
+    first = _live_hu_river_l2(events=(), observation=base, decision_fingerprint="decision-public", cache=cache)
+    other = _live_hu_river_l2(
+        events=(SimpleNamespace(payload=HoleCardsRecordedPayloadV1(seat_id=1, cards=("Qh", "Qd"))),),
+        observation=base.model_copy(update={"own_hole_cards": ("4c", "5d")}),
+        decision_fingerprint="decision-public", cache=cache,
+    )
+    repeated = _live_hu_river_l2(
+        events=(SimpleNamespace(payload=HoleCardsRecordedPayloadV1(seat_id=1, cards=("Ac", "Ad"))),),
+        observation=base, decision_fingerprint="decision-public", cache=cache,
+    )
+    next_decision = _live_hu_river_l2(
+        events=(), observation=base, decision_fingerprint="decision-next", cache=cache,
+    )
+    assert first is not None and other is not None and repeated is not None and next_decision is not None
+    assert first.result.recommendation_available is True
+    assert other.result.recommendation_available is True
+    assert first.result.hero_decision_identity != other.result.hero_decision_identity
+    assert first.result.cache_key != other.result.cache_key
+    assert first.result.tree_cache_key == other.result.tree_cache_key
+    assert other.result.cache_hit is False
+    assert repeated.result.cache_hit is True
+    assert repeated.result.cache_key == first.result.cache_key
+    assert next_decision.result.cache_hit is False
+    assert next_decision.result.cache_key != first.result.cache_key
+    assert "'qh'" not in str(other.result).lower()
+    assert "'qd'" not in str(other.result).lower()
+
+
+def test_live_l2_adapter_falls_back_without_authorized_hero_combo(monkeypatch):
+    public = {
+        0: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-hero", combos={"4c5d": SimpleNamespace(probability=1)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
+        1: SimpleNamespace(current=SimpleNamespace(snapshot_id="public-villain", combos={"6c7d": SimpleNamespace(probability=1)}), provenance=SimpleNamespace(policy_fingerprint="policy-public")),
+    }
+    monkeypatch.setattr("poker_coach.simulator.continuous_table.PublicEventBeliefConsumer.beliefs_at", lambda *_args, **_kwargs: public)
+    observation = ObservationV1(
+        handId="river-live", sequence=9, observerSeat=0, tableSize=2, buttonSeat=0, street="river",
+        ownHoleCards=("2c", "3d"), board=("As", "Ks", "Qs", "Js", "Ts"), pot=100,
+        stacks={0: 100, 1: 100}, streetCommitments={0: 0, 1: 0}, activeSeats=(0, 1),
+        legalActions=(LegalActionV1(action="check", amountSemantics="none"), LegalActionV1(action="bet", amountSemantics="by", minAmount=100, maxAmount=100)),
+    )
+    result = _live_hu_river_l2(events=(), observation=observation, decision_fingerprint="decision-public", cache=L2Cache())
+    assert result is not None
+    assert result.result.recommendation_available is False
+    recommendation = TheoryExplainer().recommend(observation, decision_fingerprint="decision-public", l2=result)
+    assert recommendation.evidence.evidence_grade == "C"
 
 
 def test_live_l2_adapter_returns_none_for_multiway_or_unsupported_tree():

@@ -322,4 +322,9 @@ def _usable_l2(l2: L2RecommendationInput | None, observation: ObservationV1, dec
         return None
     if result.players[0] != observation.observer_seat or result.street != observation.street.value:
         return None
+    # R9-FIX-B deliberately returns aggregate diagnostics when no authorized
+    # Hero combo was supplied.  Those aggregate numbers are not a policy for
+    # the current Hero decision and must stay on the C/unsupported path.
+    if not result.recommendation_available or result.hero_decision_identity is None or not result.action_frequencies:
+        return None
     return result

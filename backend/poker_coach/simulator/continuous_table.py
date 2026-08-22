@@ -241,10 +241,10 @@ class ContinuousTableService:
     def theory_recommendation(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
         """Return one current, source-prioritized theory truth plus L0 explanation.
 
-        No live L2 range projection exists at this seam yet.  Rather than derive
-        one from hidden cards or terminal state, non-preflop decisions honestly
-        take the C-grade Formula path.  This read-only method shares the normal
-        stale hand/fingerprint gate, so it cannot populate a cache across hands.
+        A supported live HU river may use a public-range L2 projection only when
+        the current Hero observation carries its authorized own cards.  This
+        read-only method shares the normal stale hand/fingerprint gate, so it
+        cannot populate a cache across hands.
         """
 
         hand_id = request.get("handId")
@@ -717,6 +717,12 @@ def _live_hu_river_l2(*, events, observation, decision_fingerprint: str, cache: 
     street = observation.street.value if hasattr(observation.street, "value") else str(observation.street)
     if street != "river" or len(observation.active_seats) != 2 or len(observation.board) != 5:
         return None
+    # This is the only private value permitted across the solver boundary.  It
+    # came from the acting Hero's ObservationV1; the public event stream below
+    # explicitly removes every recorded hole-card and terminal event.
+    hero_hole_cards = tuple(observation.own_hole_cards)
+    if len(hero_hole_cards) != 2:
+        return None
     legal = {item.action.value: item for item in observation.legal_actions}
     bet = legal.get("bet")
     if set(legal) != {"check", "bet"} or bet is None or bet.min_amount is None or bet.max_amount != bet.min_amount or bet.amount_semantics.value != "by":
@@ -760,6 +766,7 @@ def _live_hu_river_l2(*, events, observation, decision_fingerprint: str, cache: 
         ranges=tuple(projected), tree=RiverBetTree(bet_amount=bet.min_amount),
         seed=int(hashlib.sha256(decision_fingerprint.encode()).hexdigest()[:12], 16),
         budget=L2Budget(iterations=8, soft_timeout_ms=250, hard_timeout_ms=400),
+        hero_hole_cards=hero_hole_cards,
     )
     result = solve_hu_river(source, cache=cache)
     if not isinstance(result, L2Result):
