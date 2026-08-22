@@ -282,10 +282,15 @@ test("R8 controlled product journey exposes decision evidence, readable Bot dwel
   await page.getByTestId("create-continuous-table").click();
 
   await expect(page.getByTestId("hero-legal-actions")).toBeVisible();
-  await expect(page.getByLabel("Decision Summary")).toContainText("规则基线");
-  await expect(page.getByLabel("Decision Summary")).toContainText("模拟估计");
+  await expect(page.getByLabel("Decision Summary")).toContainText("策略真相来源");
+  await expect(page.getByLabel("Decision Summary")).toContainText("暂不可用");
+  await expect(page.getByLabel("Decision Summary")).toContainText("等待统一 theory-recommendation");
+  await expect(page.getByLabel("Theory 推荐")).toContainText("理论策略请求中或当前不是 Hero 决策");
+  await expect(page.getByLabel("Solver 结果")).toContainText("模拟估计");
   await expect(page.getByLabel("Solver Action Ladder").locator("article")).toHaveCount(3);
   await expect(page.getByLabel("Range Belief")).toContainText("范围宽度 22.4%");
+  await expect(page.getByLabel("Range Belief")).toContainText("C 级 · 公开行动启发式");
+  await expect(page.getByLabel("Range Belief")).toContainText("覆盖：fallback");
   expect(await page.getByLabel("六人德州扑克牌桌").locator(".tv2-holecards").count()).toBe(1);
   expect(await page.getByLabel("A♥").count()).toBe(0);
 
@@ -329,11 +334,12 @@ test("R8 controlled product journey exposes decision evidence, readable Bot dwel
     await page.getByRole("button", { name: "全部尺度（5）" }).click();
     await expect(ladder.locator("article")).toHaveCount(5);
   });
-  proxyTimings.reconciliationReasonMs = await measureProxy("locate Advisor/Solver agreement or disagreement reason", async () => {
+  proxyTimings.reconciliationReasonMs = await measureProxy("locate truth-source fallback and supplementary simulation evidence", async () => {
     const summary = page.getByLabel("Decision Summary");
-    await expect(summary).toContainText("Advisor：过牌");
-    await expect(summary).toContainText("Solver：加注 · 66.7% pot · 300");
-    await expect(summary).toContainText("存在分歧 · 模型限制");
+    await expect(summary).toContainText("策略真相来源");
+    await expect(summary).toContainText("等待统一 theory-recommendation");
+    await expect(page.getByLabel("Solver 结果")).toContainText("近似 EV 求解，不是 GTO");
+    await expect(page.getByLabel("Solver Action Ladder").locator("article").first()).toContainText("加注 · 66.7% pot · 300");
   });
   test.info().annotations.push({ type: "automated-interaction-proxy", description: JSON.stringify(proxyTimings) });
 
