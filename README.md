@@ -56,13 +56,14 @@ npm run dev
 
 API 默认限制单请求体为 1 MiB、单次分析超时为 120 秒、匿名会话每分钟 120 个请求；可用 `POKER_COACH_MAX_REQUEST_BYTES`、`POKER_COACH_MAX_TIMEOUT_SECONDS` 和 `POKER_COACH_RATE_LIMIT_PER_MINUTE` 调整，限流设为 `0` 可关闭（仅适合本地测试）。
 
-也可以使用 PowerShell 一键启动本地后端和前端。默认模式会只对它启动的子进程强制使用 SQLite 和无 Redis 降级，因此根 `.env` 中失效的 PostgreSQL/Redis 地址不会导致本地页面显示 `Failed to fetch`；它不会改写 `.env`：
+推荐使用 PowerShell 一键启动和停止本地后端与前端。默认模式会只对它启动的子进程强制使用 SQLite 和无 Redis 降级，因此根 `.env` 中失效的 PostgreSQL/Redis 地址不会导致本地页面显示 `Failed to fetch`；它不会改写 `.env`。启动成功后会自动打开浏览器：
 
 ```powershell
-.\scripts\run-local.ps1
+.\scripts\start-riverline.ps1
+.\scripts\stop-riverline.ps1
 ```
 
-只有已启动外部 PostgreSQL/Redis 时才显式 opt-in：`./scripts/run-local.ps1 -UseExternalServices`。脚本会检查 8000/3000 端口、等待 `/health` 和网页 ready，并输出子进程 PID 与 `.data/local-logs/` 日志位置；若端口已被其他本地服务使用，可明确指定一对替代端口，例如 `./scripts/run-local.ps1 -ApiPort 8100 -WebPort 3100`。
+启动器会检查 8000/3000 端口、等待 `/health` 和网页 ready，并把 PID、进程启动时间、端口与日志位置写入被 Git 忽略的 `.data/local-runtime.json`；重复启动会复用现有实例，停止器只结束身份匹配的 Riverline 进程树。无需自动打开浏览器时加 `-NoOpen`；端口冲突时可指定 `-ApiPort 8100 -WebPort 3100`。只有已启动外部 PostgreSQL/Redis 时才给启动器加 `-UseExternalServices`。`run-local.ps1` 保留为底层启动实现，不建议日常直接调用。
 
 ## Docker 部署（API + 独立 worker + PostgreSQL + Redis）
 

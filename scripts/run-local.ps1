@@ -6,7 +6,8 @@ param(
     [ValidateRange(1, 65535)]
     [int]$ApiPort = 8000,
     [ValidateRange(1, 65535)]
-    [int]$WebPort = 3000
+    [int]$WebPort = 3000,
+    [string]$RuntimeStatePath
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,9 @@ $apiUrl = "http://127.0.0.1:$ApiPort"
 $webUrl = "http://127.0.0.1:$WebPort"
 $frontendDirectory = Join-Path $projectRoot "frontend"
 $logDirectory = Join-Path $projectRoot ".data\local-logs"
+if ([string]::IsNullOrWhiteSpace($RuntimeStatePath)) {
+    $RuntimeStatePath = Join-Path $projectRoot ".data\local-runtime.json"
+}
 $runId = Get-Date -Format "yyyyMMdd-HHmmss"
 $apiLog = Join-Path $logDirectory "api-$runId.log"
 $apiErrorLog = Join-Path $logDirectory "api-$runId.err.log"
@@ -103,6 +107,51 @@ function Stop-StartedProcesses {
     }
 }
 
+function Write-RuntimeState(
+    [System.Diagnostics.Process]$ApiProcess,
+    [System.Diagnostics.Process]$WebProcess,
+    [string]$Mode
+) {
+    $stateDirectory = Split-Path -Parent $RuntimeStatePath
+    New-Item -ItemType Directory -Path $stateDirectory -Force | Out-Null
+    $temporaryPath = "$RuntimeStatePath.tmp-$PID"
+    $ApiProcess.Refresh()
+    $WebProcess.Refresh()
+    $state = [ordered]@{
+        schemaVersion = 1
+        projectRoot = $projectRoot
+        startedAtUtc = [DateTime]::UtcNow.ToString("o")
+        mode = $Mode
+        api = [ordered]@{
+            pid = $ApiProcess.Id
+            processName = $ApiProcess.ProcessName
+            startedAtUtc = $ApiProcess.StartTime.ToUniversalTime().ToString("o")
+            startedAtUtcTicks = $ApiProcess.StartTime.ToUniversalTime().Ticks
+            port = $ApiPort
+            url = "$apiUrl/health"
+            log = $apiLog
+            errorLog = $apiErrorLog
+        }
+        web = [ordered]@{
+            pid = $WebProcess.Id
+            processName = $WebProcess.ProcessName
+            startedAtUtc = $WebProcess.StartTime.ToUniversalTime().ToString("o")
+            startedAtUtcTicks = $WebProcess.StartTime.ToUniversalTime().Ticks
+            port = $WebPort
+            url = $webUrl
+            log = $webLog
+            errorLog = $webErrorLog
+        }
+    }
+    try {
+        $state | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temporaryPath -Encoding utf8
+        Move-Item -LiteralPath $temporaryPath -Destination $RuntimeStatePath -Force
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force }
+    }
+}
+
 if (-not (Get-Command py -ErrorAction SilentlyContinue)) { throw "Python launcher 'py' was not found. Install Python 3.13 and retry." }
 if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw "npm.cmd was not found. Install the repository's declared Node.js version and retry." }
 if ($ApiPort -eq $WebPort) { throw "ApiPort and WebPort must differ." }
@@ -112,6 +161,7 @@ Clear-StaleNextDevelopmentLock $frontendDirectory
 
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 $childEnvironment = @{ NEXT_PUBLIC_API_BASE_URL = $apiUrl; POKER_COACH_CORS_ORIGINS = $webUrl }
+$mode = if ($UseExternalServices) { "external DB/Redis opt-in (environment/.env is inherited)" } else { "default local SQLite + no Redis (external .env values are masked only for these child processes)" }
 if (-not $UseExternalServices) {
     # Empty process variables take precedence over .env without changing that file.
     $childEnvironment["POKER_COACH_DATABASE_URL"] = ""
@@ -133,16 +183,18 @@ try {
         -RedirectStandardOutput $webLog -RedirectStandardError $webErrorLog
     $startedProcesses.Add($webProcess)
     Wait-ForHttpReady $webUrl "Frontend" $webProcess
+    Write-RuntimeState -ApiProcess $apiProcess -WebProcess $webProcess -Mode $mode
 }
 catch {
     Stop-StartedProcesses
     throw "Local startup failed: $($_.Exception.Message)"
 }
 
-$mode = if ($UseExternalServices) { "external DB/Redis opt-in (environment/.env is inherited)" } else { "default local SQLite + no Redis (external .env values are masked only for these child processes)" }
 Write-Output "Riverline local experience is ready."
 Write-Output "Mode: $mode"
 Write-Output "API: $apiUrl/health (PID $($apiProcess.Id))"
 Write-Output "Web: $webUrl (PID $($webProcess.Id))"
 Write-Output "Logs: $logDirectory"
-Write-Output "Stop the listed child PIDs when finished. This script did not modify .env."
+Write-Output "Runtime state: $RuntimeStatePath"
+Write-Output "Stop: pwsh -NoProfile -File .\scripts\stop-riverline.ps1"
+Write-Output "This script did not modify .env."

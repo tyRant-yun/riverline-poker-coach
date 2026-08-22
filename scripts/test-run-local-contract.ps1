@@ -9,6 +9,7 @@ function Require-Text([string]$Needle) {
 Require-Text '[switch]$UseExternalServices'
 Require-Text '[int]$ApiPort = 8000'
 Require-Text '[int]$WebPort = 3000'
+Require-Text '[string]$RuntimeStatePath'
 Require-Text 'POKER_COACH_DATABASE_URL"] = ""'
 Require-Text 'POKER_COACH_REDIS_URL"] = ""'
 Require-Text 'POKER_COACH_CORS_ORIGINS = $webUrl'
@@ -18,5 +19,8 @@ Require-Text 'exited before becoming ready'
 Require-Text 'Next.js development lock is already held'
 Require-Text 'Get-ChildProcessIds'
 Require-Text "Stop-StartedProcesses"
+Require-Text "Write-RuntimeState"
+Require-Text 'startedAtUtc'
+Require-Text 'processName'
 Require-Text "-WindowStyle Hidden"
 Write-Output "run-local.ps1 contract passed"
