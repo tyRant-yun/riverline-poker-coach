@@ -74,11 +74,21 @@ Worker handoff 的 `completed` 不自动等于 ledger 的 `accepted` 或 `merged
 | R8-04 Solver Sizing Calibration | `/root/r8_04_solver_sizing` | `completed` | `merged` | `codex/r8-04-solver-sizing` | `3d2081b` | `ec1bb0b7fabdf4695acbe5b9f2b2f735b643612c` | [R8-04 handoff](handoffs/R8-04.md) | 35 focused tests; API/reconciliation 11 passed; compileall; p95 35.877ms | R8-05 | Integrated `69c4e16..b67e543`; uncertainty covers sampling, not heuristic-model error |
 | R8-05 Product Evaluation | `/root/r8_05_product_eval` | `completed` | `merged` | `codex/r8-05-product-eval` | `671caa6` | `d68b250aebc6b372ce9639af16153eacfd941e0a` | [R8-05 handoff](handoffs/R8-05.md) | backend 19; UI 20; focused Playwright 3; build PASS; reduced-motion 11 PASS | final release gate | Integrated `9a69c12..f5a578e`; controlled two-hand and 5-second evidence deferred to release gate |
 | R8 Decision UX Productization | `/root` | `completed` | `merged` | `codex/r8-decision-ux` | `72696f5b764406869d58fff4e3b1b0170189a4c5` | `7ccbc2d` | [R8 plan](../plans/r8-decision-cockpit-and-range-explorer.md) | Standards hard findings 0; Spec P0/P1 0 after narrow repairs | R8-RELEASE | R8-01..05 integrated; final full gate and real user journey remain |
+| R9-PLAN Theory Engine Plan | `/root/r9_master_plan` | `completed` | `merged` | `codex/r9-theory-engine` | `1dac59f` | `f5484d9288b62cb492a3ef2882265f914ac722dd` | [R9 plan handoff](handoffs/R9-PLAN.md) | documentation diff-check PASS | R9-00/R9-01 | Training-grade A/B/C evidence plan; no full 6-max GTO claim |
+| R9-00 Theory Benchmark | `/root/r9_00_benchmark` | `in_progress` | `in_progress` | `codex/r9-00-benchmark` | `837095e` | — | — | canonical red/green oracle and metric gates pending | R9-02/R9-04 | Backend-only harness; no production recommendation wiring |
+| R9-01 Range Visual Semantics | `/root/r9_01_range_visual` | `in_progress` | `in_progress` | `codex/r9-01-range-visual` | `837095e` | — | — | contrast/semantic/multi-viewport focused gates pending | R9-06 | Frontend-only; preserve honest independent-marginal wording |
+| R9-02 Preflop Artifact + Mixed Bot | planned | `planned` | `planned` | `codex/r9-02-policy-bot` | — | — | — | waits for R9-00 | R9-03/R9-05 | Riverline-owned B-grade artifact; no external unlicensed strategy data |
+| R9-03 Same-source Range | planned | `planned` | `planned` | `codex/r9-03-policy-range` | — | — | — | waits for R9-02 | R9-06 | Same policy fingerprint; independent marginal remains explicit |
+| R9-04 Bounded Solver L2 | planned | `planned` | `planned` | `codex/r9-04-solver-l2` | — | — | — | waits for R9-00/R9-02 schema | R9-05/R9-06 | First-party HU river then bounded turn; multiway unsupported |
+| R9-05 Theory Explainer | planned | `planned` | `planned` | `codex/r9-05-theory-explainer` | — | — | — | waits for R9-02 and R9-04 contract | R9-06 | Formula is explanation, not competing policy truth |
+| R9-06 Product Integration | planned | `planned` | `planned` | `codex/r9-06-product-integration` | — | — | — | waits for R9-01/02/03/05 | R9-07 | Continuous-table training journey and honest downgrade |
+| R9-07 Release Gate | planned | `planned` | `planned` | `codex/r9-07-release` | — | — | — | waits for R9-06 | final audit/release | One final full gate after implementation batch |
+| R9 Theory Engine | `/root` | `in_progress` | `in_progress` | `codex/r9-theory-engine` | `1dac59f` | — | [R9 plan](../plans/r9-theory-engine.md) | plan committed; implementation pending | R9-00/R9-01 | Default: B-grade owned preflop artifact, first-party L2, frequency-deviation scoring |
 | R8-RELEASE Source MVP Release Gate | `/root/r8_release_gate` | `completed` | `merged` | `codex/r8-release` | `7ccbc2d` | `593294b` | [R8-RELEASE handoff](handoffs/R8-RELEASE.md) | Backend 621 passed/10 live-PG skipped；frontend 174 tests/tsc/build/Playwright 7/7；npm audit 0；独立窄审 PASS（无 P0/P1）；GitHub CI run `32389468721` 全绿（含 live PostgreSQL/Redis、Node 24.15.0 clean install） | main 合并 | PR #6 `codex/r8-release`→main；`source_release_ready=PASS`；binary/container 发布继续禁止（SBOM FAIL） |
 
 ## 下一入口
 
-`R8 发布完成`：R8-RELEASE 已验收（独立窄审无 P0/P1 + GitHub CI run `32389468721` 全绿），PR #6 已合并 main；`source_release_ready=PASS`。后续为产品迭代（用户反馈驱动的 R9 计划）；binary/container 发布保持禁止，直到 SBOM bundled verdict 独立转为 PASS。
+`R9-00 + R9-01`：从 `837095e` 并行建立 theory benchmark/oracle red gate 与 Range 高对比度证据语义；文件所有权分离。R9-02/04 不得绕过 benchmark 先声明策略质量。
 
 ## MVP 执行策略
 
