@@ -19,6 +19,7 @@ from poker_coach.analysis.cards import RANK_VALUE, deck
 from poker_coach.domain.models import Card, DomainModel, SeatPosition, Street, positions_for_table
 
 from .belief import PolicySource, RangeBeliefCombo, RangeBeliefSnapshot, RangeUpdateMetadata, combo_key, snapshot_id_for
+from .policy_artifact import default_policy_artifact_range_adapter
 
 
 _VERSION = "heuristic_seed_v2"
@@ -90,6 +91,9 @@ class SeatPriorProvenanceV1(DomainModel):
     trust_level: str
     confidence: Decimal = Field(ge=0, le=1)
     source_description: str
+    evidence_grade: str = "C"
+    coverage_status: str = "fallback"
+    policy_fingerprint: str | None = None
 
 
 class SeatPriorResultV1(DomainModel):
@@ -122,11 +126,42 @@ class SeatPriorProvider:
                 seat_id=seat_id, position=position, available=False, coverage=coverage,
                 unavailable_reason=unavailable,
             )
+        artifact = default_policy_artifact_range_adapter()
+        if artifact.coverage_reason_for_query(query) is None:
+            return SeatPriorResultV1(
+                seat_id=seat_id,
+                position=position,
+                available=True,
+                coverage=SeatPriorCoverageV1(
+                    table_size=6,
+                    effective_stack_bucket="100bb",
+                    ante_signature="ante:0",
+                    rake_signature="rake_bps:0",
+                    street=Street.PREFLOP,
+                    node="preflop/policy-artifact-root",
+                    independent_marginal_only=True,
+                ),
+                snapshot=_artifact_snapshot(
+                    artifact.fingerprint, artifact.version, seat_id, query.visible_blockers
+                ),
+                provenance=SeatPriorProvenanceV1(
+                    provider="riverline.policy_artifact_range",
+                    version=artifact.version,
+                    artifact_fingerprint=artifact.fingerprint.removeprefix("sha256:"),
+                    policy_fingerprint=artifact.fingerprint,
+                    trust_level="policy_artifact",
+                    confidence=Decimal("0.70"),
+                    evidence_grade="B",
+                    coverage_status="covered",
+                    source_description="Verified R9-02 first-party B-grade PolicyArtifact root prior; independent marginal only, not a joint or player-truth distribution.",
+                ),
+            )
         snapshot = _snapshot(seat_id, position, query.visible_blockers)
         return SeatPriorResultV1(
             seat_id=seat_id, position=position, available=True, coverage=coverage, snapshot=snapshot,
             provenance=SeatPriorProvenanceV1(provider=_PROVIDER, version=_VERSION,
                 artifact_fingerprint=_FINGERPRINT, trust_level="heuristic", confidence=Decimal("0.25"),
+                evidence_grade="C", coverage_status="fallback",
                 source_description="First-party position/stack independent-marginal heuristic seed; not solver, GTO, or verified strategy data."),
         )
 
@@ -221,3 +256,49 @@ def _normalized_probabilities(weights: dict[str, Decimal]) -> dict[str, Decimal]
     probabilities = {combo: weights[combo] / total for combo in combos[:-1]}
     probabilities[combos[-1]] = Decimal("1") - sum(probabilities.values(), Decimal("0"))
     return probabilities
+
+
+@lru_cache(maxsize=64)
+def _artifact_snapshot(
+    fingerprint: str, version: str, seat_id: int, visible_blockers: tuple[Card, ...]
+) -> RangeBeliefSnapshot:
+    """Uniform deal prior explicitly rooted in the verified artifact universe.
+
+    The artifact owns the 169/1326 universe; before a public action every
+    legal concrete holding has the same deal probability.  Action reach is
+    subsequently multiplied by that very artifact's combo likelihood.
+    """
+    combos = tuple(combo_key(cards) for cards in combinations(deck(visible_blockers), 2))
+    weights = {combo: Decimal("1") for combo in combos}
+    probabilities = _normalized_probabilities(weights)
+    return RangeBeliefSnapshot.model_construct(
+        snapshot_id=snapshot_id_for(seat_id, Street.PREFLOP, 0),
+        seat_id=seat_id,
+        street=Street.PREFLOP,
+        after_sequence=0,
+        source=PolicySource.PREFLOP_POLICY,
+        confidence="policy_artifact_b",
+        prior_mass=Decimal(len(combos)),
+        retained_mass=Decimal(len(combos)),
+        combos={
+            combo: RangeBeliefCombo.model_construct(
+                combo=combo, reach=weights[combo], probability=probabilities[combo]
+            )
+            for combo in combos
+        },
+        update=RangeUpdateMetadata(
+            action_type="prior",
+            action_label="unopened",
+            node="preflop/policy-artifact-root",
+            policy_source=PolicySource.PREFLOP_POLICY,
+            policy_version=version,
+            assumptions=(
+                "R9-02 verified first-party preflop PolicyArtifact",
+                "evidence_grade:B",
+                "coverage_status:covered",
+                f"policy_fingerprint:{fingerprint}",
+                f"policy_version:{version}",
+                "independent_marginal_only:true",
+            ),
+        ),
+    )

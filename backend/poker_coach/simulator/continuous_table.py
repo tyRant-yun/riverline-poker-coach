@@ -20,9 +20,12 @@ from poker_coach.persistence.session_store import (
     SQLiteGameSessionStore,
     StoredGameSession,
 )
+from poker_coach.ranges.belief import cards_from_key
 from poker_coach.ranges.event_beliefs import PublicEventBeliefConsumer
+from poker_coach.theory import L2RecommendationInput, PreflopPolicyContext, TheoryDecisionIdentityV1, TheoryExplainer
+from poker_coach.theory.l2_solver import L2Budget, L2Cache, L2Result, L2RiverInput, RangeCombo, RiverBetTree, solve_hu_river
 
-from .bot_providers import BLUEPRINT_PROFILE_IDS, build_bot_provider
+from .bot_providers import BOT_PROFILE_IDS, build_bot_provider
 from .bot_runtime import BotRuntime
 from .auto_review import AutomaticReviewProjectionService
 from .contracts import ActionTakenPayloadV1, HandCompletedPayloadV1, HoleCardsRecordedPayloadV1
@@ -80,6 +83,7 @@ class ContinuousTableService:
         self._review_store = SQLiteReviewProjectionStore(self.path)
         self._review_service = AutomaticReviewProjectionService(event_store, self._review_store)
         self._fast_solver = FastSolver()
+        self._l2_cache = L2Cache(max_entries=16)
         self._lock = RLock()
         self._connection = sqlite3.connect(self.path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
@@ -107,10 +111,20 @@ class ContinuousTableService:
                 provider_version TEXT NOT NULL,
                 degraded INTEGER NOT NULL,
                 fallback_reason TEXT,
+                evidence_grade TEXT NOT NULL DEFAULT 'C',
+                coverage_status TEXT NOT NULL DEFAULT 'fallback',
                 PRIMARY KEY (hand_id, action_sequence)
             );
             """
         )
+        # Existing local MVP databases predate the explicit evidence fields.
+        # These additive columns preserve their history while allowing current
+        # projections to distinguish B artifact play from a C fallback.
+        columns = {row["name"] for row in self._connection.execute("PRAGMA table_info(continuous_table_bot_decisions)")}
+        if "evidence_grade" not in columns:
+            self._connection.execute("ALTER TABLE continuous_table_bot_decisions ADD COLUMN evidence_grade TEXT NOT NULL DEFAULT 'C'")
+        if "coverage_status" not in columns:
+            self._connection.execute("ALTER TABLE continuous_table_bot_decisions ADD COLUMN coverage_status TEXT NOT NULL DEFAULT 'fallback'")
         self._connection.commit()
 
     @classmethod
@@ -136,8 +150,8 @@ class ContinuousTableService:
         )
         hero_seat = _seat(request.get("heroSeat", 0), "heroSeat")
         profile = request.get("botProfile", "balanced")
-        if profile not in BLUEPRINT_PROFILE_IDS:
-            raise ContinuousTableError("invalid_bot_profile", "botProfile must be cautious, balanced, or aggressive")
+        if profile not in BOT_PROFILE_IDS:
+            raise ContinuousTableError("invalid_bot_profile", "botProfile is not a supported profile")
         session_id = request.get("sessionId") or f"table-{uuid4().hex}"
         if not isinstance(session_id, str):
             raise ContinuousTableError("invalid_payload", "sessionId must be a string")
@@ -232,6 +246,63 @@ class ContinuousTableService:
                 )
         return FormulaAdvisorFactory().create().evaluate(
             observation, decision_fingerprint=fingerprint
+        ).to_dict()
+
+    def theory_recommendation(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
+        """Return one current, source-prioritized theory truth plus L0 explanation.
+
+        A supported live HU river may use a public-range L2 projection only when
+        the current Hero observation carries its authorized own cards.  This
+        read-only method shares the normal stale hand/fingerprint gate, so it
+        cannot populate a cache across hands.
+        """
+
+        hand_id = request.get("handId")
+        fingerprint = request.get("decisionFingerprint")
+        if not isinstance(hand_id, str) or not isinstance(fingerprint, str):
+            raise ContinuousTableError(
+                "invalid_theory_recommendation_request",
+                "handId and decisionFingerprint are required strings",
+            )
+        explainer = TheoryExplainer()
+        with self._lock:
+            stored = self._recover(session_id)
+            metadata = self._metadata(session_id)
+            current = self._projection(stored, metadata)
+            if current["handId"] != hand_id:
+                raise ContinuousTableError("stale_decision", "theory request is not for the current hand", conflict=True)
+            if current["fingerprint"] != fingerprint:
+                raise ContinuousTableError("stale_decision", "theory request does not match the current decision", conflict=True)
+            hero = int(metadata["hero_seat"])
+            events = tuple(item.event for item in self.event_store.read(hand_id))
+            state = replay_hand(events).state
+            identity = TheoryDecisionIdentityV1(
+                fingerprint=fingerprint, hand_id=hand_id, sequence=events[-1].sequence,
+                street=state.street, observer_seat=hero,
+            )
+            if not state.hand_in_progress or self._actor(events) != hero:
+                return explainer.unavailable(
+                    decision=identity, reason="not_current_hero_decision"
+                ).to_dict()
+            try:
+                observation = build_observation(
+                    events, observer_seat=hero, after_sequence=events[-1].sequence
+                )
+            except Exception:
+                return explainer.unavailable(
+                    decision=identity, reason="hero_observation_unavailable"
+                ).to_dict()
+        l2 = _live_hu_river_l2(
+            events=events, observation=observation, decision_fingerprint=fingerprint,
+            cache=self._l2_cache,
+        )
+        # The continuous table is intentionally fixed at its authoritative
+        # 100-chip BB/no-rake configuration.  The artifact rechecks stack,
+        # position and public prefix before it can claim B coverage.
+        return explainer.recommend(
+            observation, decision_fingerprint=fingerprint,
+            preflop_context=PreflopPolicyContext(big_blind=100),
+            l2=l2,
         ).to_dict()
 
     def solver(self, session_id: str, request: dict[str, object]) -> dict[str, object]:
@@ -526,7 +597,7 @@ class ContinuousTableService:
             for event in events if isinstance(event.payload, ActionTakenPayloadV1)
         ]
         bot_rows = self._connection.execute(
-            "SELECT action_sequence, actor_seat, profile_id, provider, provider_version, degraded, fallback_reason "
+            "SELECT action_sequence, actor_seat, profile_id, provider, provider_version, degraded, fallback_reason, evidence_grade, coverage_status "
             "FROM continuous_table_bot_decisions WHERE hand_id = ? ORDER BY action_sequence", (hand_id,),
         ).fetchall() if hand_id else ()
         revision = stored.revision * 1_000_000 + (0 if state is None else state.applied_sequence)
@@ -554,7 +625,7 @@ class ContinuousTableService:
             "heroLegalActions": [item.to_dict() for item in legal], "actionHistory": actions,
             "handComplete": bool(state is not None and not state.hand_in_progress),
             "result": None if state is None or state.hand_in_progress else {"winnerSeats": list(state.winner_seats), "payouts": state.payouts},
-            "botDecisionProvenance": [{"sequence": row["action_sequence"], "actorSeat": row["actor_seat"], "profileId": row["profile_id"], "provider": row["provider"], "providerVersion": row["provider_version"], "degraded": bool(row["degraded"]), "fallbackReason": row["fallback_reason"]} for row in bot_rows],
+            "botDecisionProvenance": [{"sequence": row["action_sequence"], "actorSeat": row["actor_seat"], "profileId": row["profile_id"], "provider": row["provider"], "providerVersion": row["provider_version"], "degraded": bool(row["degraded"]), "fallbackReason": row["fallback_reason"], "evidenceGrade": row["evidence_grade"], "coverageStatus": row["coverage_status"]} for row in bot_rows],
         }
         safe["fingerprint"] = hashlib.sha256(json.dumps(safe, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         return safe
@@ -604,8 +675,8 @@ class ContinuousTableService:
 
     def _record_bot_decision(self, hand_id, sequence, actor, profile, decision) -> None:
         self._connection.execute(
-            "INSERT OR REPLACE INTO continuous_table_bot_decisions VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (hand_id, sequence, actor, profile, decision.provider, decision.provider_version, int(decision.degraded), decision.fallback_reason),
+            "INSERT OR REPLACE INTO continuous_table_bot_decisions (hand_id, action_sequence, actor_seat, profile_id, provider, provider_version, degraded, fallback_reason, evidence_grade, coverage_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (hand_id, sequence, actor, profile, decision.provider, decision.provider_version, int(decision.degraded), decision.fallback_reason, str(decision.metadata.get("evidenceGrade", "C")), str(decision.metadata.get("coverageStatus", "fallback"))),
         )
         self._connection.commit()
 
@@ -641,6 +712,89 @@ def _advisor_projection_fallback(
         "limitations": ["L0 fallback uses only current public facts, Hero visibility, and legal actions."],
         "decision": {"fingerprint": fingerprint, "handId": hand_id, "sequence": sequence, "street": street},
     }
+
+
+def _live_hu_river_l2(*, events, observation, decision_fingerprint: str, cache: L2Cache) -> L2RecommendationInput | None:
+    """Build a bounded L2 input from public-event posteriors only.
+
+    This adapter deliberately never reads recorded opponent holes, terminal
+    reveals, or future events.  Both seats receive the current public range
+    snapshot after the Hero-visible blockers have been removed.  A small,
+    deterministic top-support projection keeps a cache miss within the live
+    decision budget; its exact support is part of the range fingerprint.
+    """
+
+    street = observation.street.value if hasattr(observation.street, "value") else str(observation.street)
+    if street != "river" or len(observation.active_seats) != 2 or len(observation.board) != 5:
+        return None
+    # This is the only private value permitted across the solver boundary. It
+    # is represented as the solver's exact Hero infoset, never injected into
+    # the public Range Belief snapshot or its externally visible projection.
+    hero_hole_cards = tuple(observation.own_hole_cards)
+    if len(hero_hole_cards) != 2:
+        return None
+    legal = {item.action.value: item for item in observation.legal_actions}
+    bet = legal.get("bet")
+    if set(legal) != {"check", "bet"} or bet is None or bet.min_amount is None or bet.max_amount != bet.min_amount or bet.amount_semantics.value != "by":
+        return None
+    players = (observation.observer_seat, next(seat for seat in observation.active_seats if seat != observation.observer_seat))
+    stacks = dict(observation.stacks)
+    hero_stack, opponent_stack = (stacks[seat] for seat in players)
+    # The bounded tree models bet -> fold|call, with no raise branch.  A live
+    # B-grade claim is therefore valid only for a verified heads-up river jam
+    # that the opponent can cover; any non-jam sizing is typed fallback.
+    if bet.min_amount <= 0 or bet.min_amount != hero_stack or bet.min_amount > opponent_stack:
+        return None
+    try:
+        beliefs = PublicEventBeliefConsumer().beliefs_at(
+            _public_stream(events), observer_visible_cards=observation.own_hole_cards,
+        )
+        projected: list[tuple[int, tuple[RangeCombo, ...]]] = []
+        material: list[object] = []
+        for seat in players:
+            if seat == observation.observer_seat:
+                # Exact private Hero holding is internal solver state only.
+                projected.append((seat, (RangeCombo(cards=hero_hole_cards, weight=1.0),)))
+                material.append((seat, "private_exact_hero"))
+                continue
+            result = beliefs.get(seat)
+            snapshot = None if result is None else result.current
+            if snapshot is None:
+                return None
+            # Range snapshots are already public-event conditioned and contain
+            # Hero-visible blockers. Never substitute recorded holes here.
+            ranked = sorted(snapshot.combos.items(), key=lambda item: (-item[1].probability, item[0]))[:16]
+            combos = tuple(
+                RangeCombo(cards=cards_from_key(key), weight=float(combo.probability))
+                for key, combo in ranked
+                if float(combo.probability) > 0 and not (set(cards_from_key(key)) & set(hero_hole_cards))
+            )
+            if not combos:
+                return None
+            projected.append((seat, combos))
+            material.append((seat, snapshot.snapshot_id, [(combo.cards, combo.weight) for combo in combos], result.provenance.policy_fingerprint if result.provenance else None))
+    except Exception:
+        return None
+    tree_material = {"legal": [(name, item.min_amount, item.max_amount) for name, item in sorted(legal.items())], "bet": bet.min_amount}
+    tree_fingerprint = "sha256:" + hashlib.sha256(json.dumps(tree_material, sort_keys=True).encode()).hexdigest()
+    range_fingerprint = "sha256:" + hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
+    source = L2RiverInput(
+        game_fingerprint=decision_fingerprint,
+        tree_fingerprint=tree_fingerprint,
+        range_fingerprint=range_fingerprint,
+        solver_version="riverline-l2-cfr/v1",
+        players=players,
+        acting_seat=players[0], pot=observation.pot,
+        stacks=tuple((seat, stacks[seat]) for seat in players), board=tuple(observation.board),
+        ranges=tuple(projected), tree=RiverBetTree(bet_amount=bet.min_amount),
+        seed=int(hashlib.sha256(decision_fingerprint.encode()).hexdigest()[:12], 16),
+        budget=L2Budget(iterations=8, soft_timeout_ms=250, hard_timeout_ms=400),
+        hero_hole_cards=hero_hole_cards,
+    )
+    result = solve_hu_river(source, cache=cache)
+    if not isinstance(result, L2Result):
+        return None
+    return L2RecommendationInput(result=result, decision_fingerprint=decision_fingerprint, utility_fingerprint="chips-v1")
 
 
 def _not_ready_reconciliation(identity: ReconciliationIdentityV1):

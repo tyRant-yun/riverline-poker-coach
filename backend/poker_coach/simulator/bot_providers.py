@@ -7,8 +7,19 @@ set; the authoritative runtime still validates every returned decision.
 
 from __future__ import annotations
 
+import hashlib
+
+from poker_coach.theory.policy_artifact import (
+    PolicyArtifact,
+    PreflopPolicyContext,
+    default_preflop_artifact,
+    policy_miss_reason,
+)
+
 from .bot_runtime import FixedPolicyProvider
 from .contracts import (
+    BotAttemptStatusV1,
+    BotAttemptV1,
     BotDecisionV1,
     LegalActionV1,
     ObservationV1,
@@ -17,7 +28,8 @@ from .contracts import (
 
 
 BLUEPRINT_PROFILE_IDS = ("cautious", "balanced", "aggressive")
-BOT_PROFILE_IDS = ("fixed", *BLUEPRINT_PROFILE_IDS)
+THEORY_PROFILE_IDS = ("theory",)
+BOT_PROFILE_IDS = ("fixed", *BLUEPRINT_PROFILE_IDS, *THEORY_PROFILE_IDS)
 
 
 class LightweightBlueprintProvider:
@@ -61,11 +73,172 @@ class LightweightBlueprintProvider:
         )
 
 
+class PolicyArtifactBot:
+    """Seeded B-grade preflop policy consumer with an honest C-grade fallback.
+
+    The artifact only sees its actor's two private cards and public observation
+    fields.  A non-covered context, unsupported tree, or non-legal sizing is
+    deliberately handled by the existing balanced C-grade provider.
+    """
+
+    name = "policy-artifact-bot"
+
+    def __init__(
+        self,
+        artifact: PolicyArtifact | None = None,
+        *,
+        context: PreflopPolicyContext | None = None,
+        fallback: LightweightBlueprintProvider | None = None,
+    ):
+        self.artifact = artifact or default_preflop_artifact()
+        self.context = context or PreflopPolicyContext()
+        self.fallback = fallback or LightweightBlueprintProvider("balanced")
+        self.version = self.artifact.version
+
+    async def decide(
+        self,
+        observation: ObservationV1,
+        legal_actions: tuple[LegalActionV1, ...],
+        time_budget_ms: int,
+        rng_seed: int,
+    ) -> BotDecisionV1:
+        del time_budget_ms
+        match = self.artifact.match(observation, self.context)
+        if match is None:
+            return await self._fallback(
+                observation, legal_actions, rng_seed, policy_miss_reason(observation, self.context, self.artifact)
+            )
+        legal_by_action = {item.action: item for item in legal_actions}
+        if not _node_is_legal(match.frequencies, match.raise_to, legal_by_action):
+            return await self._fallback(observation, legal_actions, rng_seed, "legal_sizing_miss")
+        selected = _sample_action(match.frequencies, rng_seed, match.node_id, match.hand_class)
+        legal = legal_by_action.get(_POLICY_ACTIONS[selected])
+        if legal is None:
+            return await self._fallback(observation, legal_actions, rng_seed, "selected_action_not_legal")
+        amount = match.raise_to if selected == "raise_to" else (legal.min_amount if selected == "call" else None)
+        if not legal.accepts(action=legal.action, amount=amount):
+            return await self._fallback(observation, legal_actions, rng_seed, "selected_amount_not_legal")
+        return BotDecisionV1(
+            action=legal.action,
+            amount=amount,
+            amount_semantics=legal.amount_semantics,
+            provider=self.name,
+            provider_version=self.version,
+            latency_ms=0,
+            metadata=self._metadata(
+                coverage_status="covered",
+                node_id=match.node_id,
+                hand_class=match.hand_class,
+                degrade_reason=None,
+            ),
+        )
+
+    async def _fallback(
+        self,
+        observation: ObservationV1,
+        legal_actions: tuple[LegalActionV1, ...],
+        rng_seed: int,
+        reason: str,
+    ) -> BotDecisionV1:
+        fallback = await self.fallback.decide(observation, legal_actions, 1, rng_seed)
+        return BotDecisionV1(
+            action=fallback.action,
+            amount=fallback.amount,
+            amount_semantics=fallback.amount_semantics,
+            provider=self.name,
+            provider_version=self.version,
+            latency_ms=0,
+            degraded=True,
+            fallback_reason=reason,
+            attempts=(BotAttemptV1(
+                provider=self.name,
+                provider_version=self.version,
+                status=BotAttemptStatusV1.POLICY_FALLBACK,
+                latency_ms=0,
+                error_code="artifact_coverage_fallback",
+                error_message=reason,
+            ),),
+            metadata=self._metadata(
+                coverage_status="fallback",
+                node_id=None,
+                hand_class=None,
+                degrade_reason=reason,
+            ) | {"fallbackProvider": fallback.provider, "fallbackProviderVersion": fallback.provider_version},
+        )
+
+    def _metadata(
+        self,
+        *,
+        coverage_status: str,
+        node_id: str | None,
+        hand_class: str | None,
+        degrade_reason: str | None,
+    ) -> dict[str, str | None]:
+        is_fallback = coverage_status != "covered"
+        return {
+            "kind": "policy-artifact",
+            "sourceKind": str(self.artifact.source["sourceKind"]),
+            "evidenceGrade": "C" if is_fallback else str(self.artifact.source["evidenceGrade"]),
+            "sourceLicense": str(self.artifact.source["license"]),
+            "coverageStatus": coverage_status,
+            "policyVersion": self.artifact.version,
+            "policyFingerprint": self.artifact.fingerprint,
+            "artifactDigest": self.artifact.digest,
+            "nodeId": node_id,
+            "handClass": hand_class,
+            "degradeReason": degrade_reason,
+            "degraded": is_fallback,
+        }
+
+
 def build_bot_provider(profile_id: str):
     """Create an in-process provider by stable MVP profile identifier."""
     if profile_id == "fixed":
         return FixedPolicyProvider()
+    if profile_id == "theory":
+        return PolicyArtifactBot()
     return LightweightBlueprintProvider(profile_id)
+
+
+_POLICY_ACTIONS = {
+    "fold": SimulatorActionV1.FOLD,
+    "call": SimulatorActionV1.CALL,
+    "raise_to": SimulatorActionV1.RAISE,
+}
+
+
+def _node_is_legal(
+    frequencies: dict[str, float] | object,
+    raise_to: int | None,
+    legal_by_action: dict[SimulatorActionV1, LegalActionV1],
+) -> bool:
+    if not isinstance(frequencies, dict):
+        frequencies = dict(frequencies)  # type: ignore[arg-type]
+    for action, frequency in frequencies.items():
+        if frequency <= 0:
+            continue
+        legal = legal_by_action.get(_POLICY_ACTIONS[action])
+        if legal is None:
+            return False
+        amount = raise_to if action == "raise_to" else (legal.min_amount if action == "call" else None)
+        if not legal.accepts(action=legal.action, amount=amount):
+            return False
+    return True
+
+
+def _sample_action(frequencies: object, rng_seed: int, node_id: str, hand_class: str) -> str:
+    table = dict(frequencies)  # type: ignore[arg-type]
+    draw = int.from_bytes(
+        hashlib.sha256(f"{rng_seed}:{node_id}:{hand_class}".encode("utf-8")).digest()[:8],
+        "big",
+    ) / 2**64
+    cumulative = 0.0
+    for action in sorted(table):
+        cumulative += float(table[action])
+        if draw < cumulative:
+            return action
+    # Loader validates normalization; this guard avoids an illegal implicit action.
+    return sorted(table)[-1]
 
 
 _PROFILE_DESCRIPTIONS = {
