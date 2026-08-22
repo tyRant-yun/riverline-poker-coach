@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 
 import pytest
 
-from poker_coach.theory.benchmark import _canonical_digest, FixtureError, evaluate_fixture, fixture_directory, load_corpus, load_fixture, run_benchmark, run_provider_release_gate, run_provider_smoke
+from poker_coach.theory.benchmark import _canonical_digest, _latency_metrics, _measure_provider_samples, FixtureError, evaluate_fixture, fixture_directory, load_corpus, load_fixture, production_provider_registry, run_benchmark, run_provider_release_gate, run_provider_smoke
 
 
 def _result_by_id():
@@ -117,7 +118,7 @@ def test_release_gate_runs_every_declared_production_provider_spot_without_fixtu
     """The release gate must use live providers, not the fixture mutant corpus."""
     fixture = load_fixture(fixture_directory() / "green-6max-preflop-b.json")
     fixture.payload["candidate"]["actionFrequencies"] = {"fold": 1.0}
-    monkeypatch.setattr("poker_coach.theory.benchmark.load_fixture", lambda _path: fixture)
+    monkeypatch.setattr("poker_coach.theory.benchmark.load_corpus", lambda _path=None: (fixture,))
 
     report = run_provider_release_gate()
 
@@ -135,8 +136,16 @@ def test_release_gate_runs_every_declared_production_provider_spot_without_fixtu
         "provider-preflop-vs-rfi-sb",
         "provider-preflop-vs-rfi-bb",
         "provider-l2-hu-river-root",
+        "provider-formula-c-fallback",
+        "provider-typed-unsupported-multiway",
     }
     assert all(result.gate_passed for result in report.fixtures)
+    assert {entry.category for entry in production_provider_registry()} == {
+        "policy_artifact", "l2_bounded_solver", "formula", "typed_unsupported"
+    }
+    for result in report.fixtures:
+        assert next(metric for metric in result.metrics if metric.name == "latency_p50").value is not None
+        assert next(metric for metric in result.metrics if metric.name == "latency_p95").value is not None
 
 
 def test_cli_default_runs_provider_backed_release_gate_not_fixture_corpus():
@@ -161,3 +170,40 @@ def test_unsupported_with_policy_fields_is_red_not_honest_fallback(tmp_path):
     path = tmp_path / "unsupported-with-policy.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     assert evaluate_fixture(load_fixture(path)).gate_passed is False
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("selectedAction", "fold"), ("sizings", {"bet": 100}), ("range", {"AA": 1.0}),
+        ("actionFrequencies", {"fold": 1.0}), ("actionEvs", {"fold": 0.0}),
+        ("evDefinition", "chips"), ("sameOracleEvLoss", {"chips": None}),
+    ],
+)
+def test_c_and_unsupported_reject_every_strategy_or_value_field(tmp_path, field, value):
+    payload = json.loads((fixture_directory() / "green-c-fallback.json").read_text(encoding="utf-8"))
+    payload["candidate"][field] = value
+    payload["provenance"]["digest"] = _canonical_digest(payload)
+    path = tmp_path / f"c-with-{field}.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert evaluate_fixture(load_fixture(path)).gate_passed is False
+
+
+def test_approximately_300ms_provider_fails_p95_latency_gate():
+    def slow_provider():
+        time.sleep(0.30)
+        return {"provider": "slow"}
+
+    samples, _ = _measure_provider_samples(slow_provider, sample_count=3)
+    metrics = _latency_metrics(samples)
+
+    assert min(samples) >= 250
+    assert next(metric for metric in metrics if metric.name == "latency_p95").status == "fail"
+
+
+def test_missing_production_provider_category_fails_release_gate():
+    registry = tuple(entry for entry in production_provider_registry() if entry.category != "formula")
+    report = run_provider_release_gate(registry)
+    assert report.gate_passed is False
+    failure = next(item for item in report.fixtures if item.fixture_id == "provider-registry-completeness")
+    assert "formula" in next(metric.detail for metric in failure.metrics if metric.name == "provider_registry")
